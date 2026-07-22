@@ -1,5 +1,6 @@
 <title>Agentklar &mdash; What it is &amp; how to use it</title>
 <meta name="description" content="Agentklar in plain terms: a local command-line tool that gives every coding task a lifecycle your AI agent can't skip. See exactly what you type for each step." />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='2' y='2' width='28' height='28' rx='7' fill='%232A55D8'/%3E%3Cpath d='M9 16.5l4.5 4.4L23 11' fill='none' stroke='white' stroke-width='3.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
 <style>
   :root {
     --bg:#FBFCFD; --ink:#141922; --muted:#586372; --faint:#93A0AE;
@@ -26,7 +27,7 @@
 
   header { border-bottom: 1px solid var(--line); position: sticky; top: 0; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(8px); z-index: 20; }
   .bar { max-width: 1080px; margin: 0 auto; padding: .9rem var(--gutter); display: flex; align-items: baseline; gap: .8rem; }
-  .brand { font-family: var(--mono); font-weight: 700; letter-spacing: -.01em; color: var(--ink); text-decoration: none; }
+  .brand { font-family: var(--mono); font-weight: 700; letter-spacing: -.01em; color: var(--ink); text-decoration: none; display: inline-flex; align-items: center; gap: .42rem; }
   .brand .dot { color: var(--accent); }
   .by { font-family: var(--mono); font-size: .7rem; color: var(--faint); text-decoration: none; }
   .by:hover { color: var(--accent-ink); }
@@ -143,7 +144,7 @@
 
 <header>
   <div class="bar">
-    <a class="brand" href="index.html">agentklar<span class="dot">.</span></a>
+    <a class="brand" href="index.html"><svg viewBox="0 0 32 32" width="18" height="18" aria-hidden="true" style="color:var(--accent);flex:none"><rect x="3.5" y="3.5" width="25" height="25" rx="7" fill="none" stroke="currentColor" stroke-width="2.4"/><path d="M9.5 16.4l4.2 4.2L22.6 11" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/></svg>agentklar<span class="dot">.</span></a>
     <a class="by" href="https://kaltstart.co">by kaltstart.co</a>
     <nav>
       <a href="#flow" class="hide-sm">The flow</a>

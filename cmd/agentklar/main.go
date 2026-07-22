@@ -44,6 +44,7 @@ Flags for 'task new':
 
 func main() {
 	if len(os.Args) < 2 {
+		printBanner(os.Stdout)
 		fmt.Print(usage)
 		os.Exit(1)
 	}
@@ -124,6 +125,7 @@ func run(args []string) error {
 }
 
 func cmdInit() error {
+	printBanner(os.Stdout)
 	dir, err := workspaceDir()
 	if err != nil {
 		return err
