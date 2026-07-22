@@ -3,7 +3,7 @@
 <style>
   :root {
     --bg:#FBFCFD; --ink:#141922; --muted:#586372; --faint:#93A0AE;
-    --line:#E6EAEF; --line-2:#D6DCE3; --code:#F3F6F9;
+    --line:#E6EAEF; --line-2:#D6DCE3; --code:#0F141B; --code-ink:#D7E0EA;
     --accent:#2A55D8; --accent-ink:#1E45B4; --attested:#1E845A; --blocked:#C03A2B;
     --sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
@@ -12,12 +12,12 @@
   @media (prefers-color-scheme: dark) {
     :root {
       --bg:#0F1318; --ink:#E7ECF2; --muted:#96A2AF; --faint:#5D6976;
-      --line:#212831; --line-2:#2C343E; --code:#161C23;
+      --line:#212831; --line-2:#2C343E; --code:#090C10; --code-ink:#D7E0EA;
       --accent:#6E97F8; --accent-ink:#87A9FB; --attested:#46B583; --blocked:#E05B4C;
     }
   }
-  :root[data-theme="light"] { --bg:#FBFCFD; --ink:#141922; --muted:#586372; --faint:#93A0AE; --line:#E6EAEF; --line-2:#D6DCE3; --code:#F3F6F9; --accent:#2A55D8; --accent-ink:#1E45B4; --attested:#1E845A; --blocked:#C03A2B; }
-  :root[data-theme="dark"] { --bg:#0F1318; --ink:#E7ECF2; --muted:#96A2AF; --faint:#5D6976; --line:#212831; --line-2:#2C343E; --code:#161C23; --accent:#6E97F8; --accent-ink:#87A9FB; --attested:#46B583; --blocked:#E05B4C; }
+  :root[data-theme="light"] { --bg:#FBFCFD; --ink:#141922; --muted:#586372; --faint:#93A0AE; --line:#E6EAEF; --line-2:#D6DCE3; --code:#0F141B; --code-ink:#D7E0EA; --accent:#2A55D8; --accent-ink:#1E45B4; --attested:#1E845A; --blocked:#C03A2B; }
+  :root[data-theme="dark"] { --bg:#0F1318; --ink:#E7ECF2; --muted:#96A2AF; --faint:#5D6976; --line:#212831; --line-2:#2C343E; --code:#090C10; --code-ink:#D7E0EA; --accent:#6E97F8; --accent-ink:#87A9FB; --attested:#46B583; --blocked:#E05B4C; }
 
   * { box-sizing: border-box; }
   html { scroll-behavior: smooth; }
@@ -87,8 +87,8 @@
 
   /* code */
   .code { position: relative; background: var(--code); border: 1px solid var(--line); border-radius: 9px; margin-top: 1.4rem; }
-  pre { margin: 0; padding: .95rem 1.05rem; overflow-x: auto; font-family: var(--mono); font-size: .84rem; line-height: 1.7; color: var(--ink); }
-  pre .c { color: var(--faint); } pre .f { color: var(--accent-ink); }
+  pre { margin: 0; padding: .95rem 1.05rem; overflow-x: auto; font-family: var(--mono); font-size: .84rem; line-height: 1.7; color: var(--code-ink); }
+  pre .c { color: #6d7a8c; } pre .f { color: var(--accent-ink); }
 
   .cmds { margin-top: 1.4rem; display: flex; flex-direction: column; gap: 0; }
   .cmds .cmd { display: grid; grid-template-columns: 150px 1fr; gap: 1rem; padding: .7rem 0; border-top: 1px solid var(--line); }
