@@ -1,0 +1,16 @@
+# Agentklar quality recipes — only declared commands ever run.
+# Delete anything this project does not actually have.
+
+[[recipe]]
+name = "build"
+level = "L0"
+command = "go"
+args = ["build", "./..."]
+timeout_seconds = 120
+
+[[recipe]]
+name = "unit"
+level = "L1"
+command = "go"
+args = ["test", "./..."]
+timeout_seconds = 300

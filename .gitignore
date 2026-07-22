@@ -1,0 +1,8 @@
+.DS_Store
+/agentklar
+/dist/
+.superpowers/
+.playwright-mcp/
+*.png
+*.log
+!docs/**/*.png
