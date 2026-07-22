@@ -37,6 +37,7 @@ Usage:
   agentklar reject <id> <reason>        Reject a task awaiting human approval
   agentklar mcp                         Run the agent-facing MCP server on stdio
   agentklar doctor                      Report workspace health
+  agentklar version                     Print the version, commit, and build date
 
 Flags for 'task new':
   --lane quick|standard|major  --criteria "a;b;c"  --verify "how"  --target codex|gemini|any
