@@ -1,123 +1,141 @@
-<title>Agentklar &mdash; Features</title>
-<meta name="description" content="What Agentklar does: the task workflow, evidence you can trust, quality gates, and a community library built on tools you already use." />
+<title>Agentklar &mdash; What it is &amp; how to use it</title>
+<meta name="description" content="Agentklar in plain terms: a local command-line tool that gives every coding task a lifecycle your AI agent can't skip. See exactly what you type for each step." />
 <style>
   :root {
     --bg:#FBFCFD; --ink:#141922; --muted:#586372; --faint:#93A0AE;
     --line:#E6EAEF; --line-2:#D6DCE3; --code:#0F141B; --code-ink:#D7E0EA;
     --accent:#2A55D8; --accent-ink:#1E45B4; --attested:#1E845A; --blocked:#C03A2B;
+    --sfx:#F4F7FA;
     --sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
-    --maxw: 760px; --gutter: clamp(1.25rem, 5vw, 2rem);
+    --maxw: 820px; --gutter: clamp(1.25rem, 5vw, 2rem);
   }
   @media (prefers-color-scheme: dark) {
-    :root {
-      --bg:#0F1318; --ink:#E7ECF2; --muted:#96A2AF; --faint:#5D6976;
-      --line:#212831; --line-2:#2C343E; --code:#090C10; --code-ink:#D7E0EA;
-      --accent:#6E97F8; --accent-ink:#87A9FB; --attested:#46B583; --blocked:#E05B4C;
-    }
+    :root { --bg:#0F1318; --ink:#E7ECF2; --muted:#96A2AF; --faint:#5D6976; --line:#212831; --line-2:#2C343E; --code:#090C10; --code-ink:#D7E0EA; --accent:#6E97F8; --accent-ink:#87A9FB; --attested:#46B583; --blocked:#E05B4C; --sfx:#161C23; }
   }
-  :root[data-theme="light"] { --bg:#FBFCFD; --ink:#141922; --muted:#586372; --faint:#93A0AE; --line:#E6EAEF; --line-2:#D6DCE3; --code:#0F141B; --code-ink:#D7E0EA; --accent:#2A55D8; --accent-ink:#1E45B4; --attested:#1E845A; --blocked:#C03A2B; }
-  :root[data-theme="dark"] { --bg:#0F1318; --ink:#E7ECF2; --muted:#96A2AF; --faint:#5D6976; --line:#212831; --line-2:#2C343E; --code:#090C10; --code-ink:#D7E0EA; --accent:#6E97F8; --accent-ink:#87A9FB; --attested:#46B583; --blocked:#E05B4C; }
+  :root[data-theme="light"] { --bg:#FBFCFD; --ink:#141922; --muted:#586372; --faint:#93A0AE; --line:#E6EAEF; --line-2:#D6DCE3; --code:#0F141B; --code-ink:#D7E0EA; --accent:#2A55D8; --accent-ink:#1E45B4; --attested:#1E845A; --blocked:#C03A2B; --sfx:#F4F7FA; }
+  :root[data-theme="dark"] { --bg:#0F1318; --ink:#E7ECF2; --muted:#96A2AF; --faint:#5D6976; --line:#212831; --line-2:#2C343E; --code:#090C10; --code-ink:#D7E0EA; --accent:#6E97F8; --accent-ink:#87A9FB; --attested:#46B583; --blocked:#E05B4C; --sfx:#161C23; }
 
   * { box-sizing: border-box; }
   html { scroll-behavior: smooth; }
   @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
   body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--sans); font-size: 17px; line-height: 1.65; -webkit-font-smoothing: antialiased; }
   .wrap { max-width: var(--maxw); margin: 0 auto; padding-inline: var(--gutter); }
+  .wrap.wide { max-width: 1080px; }
   a { color: var(--accent-ink); text-underline-offset: 3px; text-decoration-thickness: 1px; }
 
-  header { border-bottom: 1px solid var(--line); }
-  .bar { max-width: var(--maxw); margin: 0 auto; padding: 1rem var(--gutter); display: flex; align-items: center; gap: 1.25rem; }
+  header { border-bottom: 1px solid var(--line); position: sticky; top: 0; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(8px); z-index: 20; }
+  .bar { max-width: 1080px; margin: 0 auto; padding: .9rem var(--gutter); display: flex; align-items: baseline; gap: .8rem; }
   .brand { font-family: var(--mono); font-weight: 700; letter-spacing: -.01em; color: var(--ink); text-decoration: none; }
   .brand .dot { color: var(--accent); }
-  .brand small { font-family: var(--mono); font-weight: 500; font-size: .7rem; color: var(--faint); margin-left: .5rem; }
-  nav { margin-left: auto; display: flex; gap: 1.25rem; align-items: center; }
-  nav a { font-size: .92rem; color: var(--muted); text-decoration: none; }
+  .by { font-family: var(--mono); font-size: .7rem; color: var(--faint); text-decoration: none; }
+  .by:hover { color: var(--accent-ink); }
+  nav { margin-left: auto; display: flex; gap: 1.1rem; align-items: center; }
+  nav a { font-size: .9rem; color: var(--muted); text-decoration: none; }
   nav a:hover { color: var(--ink); }
   .theme-btn { font-family: var(--mono); font-size: .72rem; letter-spacing: .08em; text-transform: uppercase; background: none; color: var(--muted); border: 1px solid var(--line-2); border-radius: 6px; padding: .3rem .6rem; cursor: pointer; }
   .theme-btn:hover { color: var(--ink); border-color: var(--accent); }
+  @media (max-width: 640px) { nav a.hide-sm { display: none; } }
 
   .eyebrow { font-family: var(--mono); font-size: .72rem; letter-spacing: .16em; text-transform: uppercase; color: var(--accent-ink); font-weight: 600; margin: 0; }
-  .page-hero { padding: clamp(2.5rem,7vw,4rem) 0 clamp(1.5rem,4vw,2.5rem); }
-  h1 { font-size: clamp(2rem, 5.5vw, 2.9rem); line-height: 1.06; letter-spacing: -.03em; font-weight: 800; margin: .9rem 0 0; text-wrap: balance; }
-  .page-hero p { color: var(--muted); font-size: 1.1rem; margin: 1rem 0 0; max-width: 52ch; }
 
-  section { border-top: 1px solid var(--line); padding: clamp(2.6rem, 6vw, 3.6rem) 0; }
-  h2 { font-size: clamp(1.4rem, 3.6vw, 1.85rem); letter-spacing: -.02em; font-weight: 750; margin: .5rem 0 0; }
-  .lead { color: var(--muted); margin: .7rem 0 0; max-width: 56ch; }
+  .page-hero { padding: clamp(2.4rem,6vw,3.6rem) 0 clamp(1.4rem,3vw,2rem); }
+  h1 { font-size: clamp(2rem, 5vw, 2.9rem); line-height: 1.07; letter-spacing: -.03em; font-weight: 800; margin: .9rem 0 0; text-wrap: balance; }
+  .page-hero .say { color: var(--ink); font-size: 1.2rem; margin: 1.1rem 0 0; max-width: 46ch; }
+  .page-hero .say b { color: var(--accent-ink); }
 
-  /* pipeline &mdash; the one retained visual */
-  .pipe { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; margin-top: 1.5rem; font-family: var(--mono); font-size: .78rem; }
-  .pipe .s { padding: .4rem .6rem; border-radius: 6px; border: 1px solid var(--line-2); color: var(--muted); }
-  .pipe .s.gate { border-color: var(--accent); color: var(--accent-ink); }
-  .pipe .s.you { border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
-  .pipe .s.done { border-color: var(--attested); color: var(--attested); }
-  .pipe .a { color: var(--faint); }
-  .pnote { margin-top: 1rem; font-family: var(--mono); font-size: .76rem; color: var(--faint); }
-  .pnote b.g { color: var(--accent-ink); font-weight: 600; } .pnote b.d { color: var(--attested); font-weight: 600; }
+  section { border-top: 1px solid var(--line); padding: clamp(2.6rem, 6vw, 4rem) 0; }
+  h2 { font-size: clamp(1.5rem, 3.6vw, 2rem); letter-spacing: -.02em; font-weight: 750; margin: .5rem 0 0; }
+  .lead { color: var(--muted); margin: .7rem 0 0; max-width: 62ch; }
+  h3.sub { font-size: 1.05rem; margin: 2rem 0 0; letter-spacing: -.01em; }
 
-  /* simple definition rows &mdash; no boxes */
-  .defs { margin-top: 1.5rem; display: flex; flex-direction: column; gap: 0; }
-  .defs .d { display: grid; grid-template-columns: 190px 1fr; gap: 1rem; padding: 1rem 0; border-top: 1px solid var(--line); }
-  .defs .d:first-child { border-top: none; }
-  @media (max-width: 620px) { .defs .d { grid-template-columns: 1fr; gap: .25rem; } }
-  .defs .k { font-family: var(--mono); font-size: .82rem; font-weight: 600; }
-  .defs .k.trust { color: var(--attested); } .defs .k.warn { color: var(--accent-ink); } .defs .k.plain { color: var(--muted); }
-  .defs .v { color: var(--muted); font-size: .96rem; }
-  .defs .v b { color: var(--ink); font-weight: 600; }
+  /* plain "what it is" three points */
+  .plain { margin-top: 1.6rem; display: grid; grid-template-columns: repeat(3,1fr); gap: 1.3rem; }
+  @media (max-width: 720px) { .plain { grid-template-columns: 1fr; } }
+  .plain .p { }
+  .plain .p .n { font-family: var(--mono); font-size: .72rem; color: var(--faint); }
+  .plain .p h4 { font-size: 1.02rem; margin: .3rem 0 .35rem; }
+  .plain .p p { color: var(--muted); font-size: .95rem; margin: 0; }
 
-  /* levels inline */
-  .levels { margin-top: 1.4rem; display: flex; flex-direction: column; gap: .1rem; }
-  .levels .l { display: grid; grid-template-columns: 60px 130px 1fr; gap: 1rem; padding: .7rem 0; border-top: 1px solid var(--line); font-size: .95rem; }
-  .levels .l:first-child { border-top: none; }
-  @media (max-width: 620px) { .levels .l { grid-template-columns: 48px 1fr; } .levels .l .desc { grid-column: 1 / -1; color: var(--muted); font-size: .88rem; } }
-  .levels .lk { font-family: var(--mono); font-weight: 700; color: var(--accent-ink); }
-  .levels .lt { font-weight: 600; }
-  .levels .desc { color: var(--muted); }
+  /* kanban board */
+  .boardwrap { margin-top: 1.8rem; }
+  .board { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(148px, 1fr); gap: .55rem; overflow-x: auto; padding-bottom: .6rem; }
+  .col { background: var(--sfx); border: 1px solid var(--line); border-radius: 9px; display: flex; flex-direction: column; }
+  .col-h { padding: .5rem .6rem; font-family: var(--mono); font-size: .64rem; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; gap: .4rem; }
+  .col.gate .col-h { color: var(--accent-ink); } .col.human .col-h { color: var(--accent-ink); } .col.done .col-h { color: var(--attested); }
+  .col-h .cnt { color: var(--faint); }
+  .col-b { padding: .45rem; display: flex; flex-direction: column; gap: .45rem; min-height: 2.5rem; }
+  .tk { background: var(--bg); border: 1px solid var(--line-2); border-radius: 7px; padding: .5rem .55rem; }
+  .col.human .tk { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent); }
+  .tk .id { font-family: var(--mono); font-size: .62rem; color: var(--faint); }
+  .tk .ti { font-size: .76rem; line-height: 1.25; margin: .18rem 0 .35rem; }
+  .tk .labs { display: flex; flex-wrap: wrap; gap: .22rem; }
+  .lab { font-family: var(--mono); font-size: .56rem; padding: .08rem .3rem; border-radius: 3px; border: 1px solid var(--line-2); color: var(--muted); white-space: nowrap; }
+  .lab.q { color: var(--accent-ink); border-color: color-mix(in srgb, var(--accent) 40%, var(--line-2)); }
+  .lab.a { color: var(--muted); }
+  .lab.e { color: var(--attested); border-color: color-mix(in srgb, var(--attested) 40%, var(--line-2)); }
+  .board-note { font-family: var(--mono); font-size: .72rem; color: var(--faint); margin-top: .7rem; }
+  .board-note b.g { color: var(--accent-ink); } .board-note b.d { color: var(--attested); }
 
-  /* capability groups &mdash; plain lists */
-  .groups { margin-top: 1.5rem; display: grid; grid-template-columns: 1fr 1fr; gap: 1.6rem 2.5rem; }
-  @media (max-width: 620px) { .groups { grid-template-columns: 1fr; } }
-  .group h3 { font-size: .82rem; font-family: var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--accent-ink); font-weight: 600; margin: 0 0 .7rem; }
-  .group ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .45rem; }
-  .group li { font-size: .95rem; padding-left: 1.1rem; position: relative; }
-  .group li::before { content: "\203A"; position: absolute; left: 0; color: var(--accent); font-family: var(--mono); }
-  .group li b { font-weight: 600; }
-  .group li span { color: var(--muted); }
+  /* command demo blocks */
+  .steps { counter-reset: step; margin-top: 1.4rem; display: flex; flex-direction: column; gap: 1.5rem; }
+  .demo { }
+  .demo .cap { display: flex; align-items: baseline; gap: .6rem; margin-bottom: .55rem; }
+  .demo .cap .num { font-family: var(--mono); font-size: .74rem; font-weight: 700; color: var(--accent-ink); }
+  .demo .cap .t { font-weight: 650; font-size: 1rem; }
+  .demo .cap .who { margin-left: auto; font-family: var(--mono); font-size: .68rem; color: var(--faint); border: 1px solid var(--line-2); border-radius: 999px; padding: .12rem .5rem; }
+  .demo .cap .who.you { color: var(--accent-ink); border-color: color-mix(in srgb, var(--accent) 40%, var(--line-2)); }
+  .demo .cap .who.agent { color: var(--muted); }
+  .block { position: relative; background: var(--code); border: 1px solid var(--line-2); border-radius: 9px; padding: .9rem 1.05rem; overflow-x: auto; font-family: var(--mono); font-size: .82rem; line-height: 1.75; color: var(--code-ink); }
+  .block .cp { position: absolute; top: .5rem; right: .5rem; font-family: var(--mono); font-size: .62rem; letter-spacing: .05em; text-transform: uppercase; background: rgba(255,255,255,.06); border: 1px solid #333c49; border-radius: 5px; color: #8a97a8; padding: .18rem .45rem; cursor: pointer; }
+  .block .cp:hover { border-color: var(--accent); color: var(--accent-ink); }
+  .block .cp.done { border-color: var(--attested); color: var(--attested); }
+  .ln2 { white-space: pre-wrap; }
+  .p { color: #5f6b7c; } .fl { color: var(--accent-ink); } .ok { color: var(--attested); } .no { color: var(--blocked); } .c { color: #6d7a8c; } .di { color: #8a97a8; }
 
-  /* code */
-  .code { position: relative; background: var(--code); border: 1px solid var(--line); border-radius: 9px; margin-top: 1.4rem; }
-  pre { margin: 0; padding: .95rem 1.05rem; overflow-x: auto; font-family: var(--mono); font-size: .84rem; line-height: 1.7; color: var(--code-ink); }
-  pre .c { color: #6d7a8c; } pre .f { color: var(--accent-ink); }
+  /* command reference */
+  .ref { margin-top: 1.4rem; }
+  .grp { margin-top: 1.5rem; }
+  .grp h3 { font-family: var(--mono); font-size: .72rem; letter-spacing: .1em; text-transform: uppercase; color: var(--accent-ink); font-weight: 600; margin: 0 0 .3rem; }
+  .rrow { display: grid; grid-template-columns: minmax(0, 1.15fr) 1fr; gap: 1rem; padding: .62rem 0; border-top: 1px solid var(--line); align-items: baseline; }
+  @media (max-width: 640px) { .rrow { grid-template-columns: 1fr; gap: .2rem; } }
+  .rrow code { font-family: var(--mono); font-size: .82rem; color: var(--accent-ink); font-weight: 600; white-space: pre-wrap; }
+  .rrow .d { color: var(--muted); font-size: .92rem; }
 
-  .cmds { margin-top: 1.4rem; display: flex; flex-direction: column; gap: 0; }
-  .cmds .cmd { display: grid; grid-template-columns: 150px 1fr; gap: 1rem; padding: .7rem 0; border-top: 1px solid var(--line); }
-  .cmds .cmd:first-child { border-top: none; }
-  @media (max-width: 620px) { .cmds .cmd { grid-template-columns: 1fr; gap: .2rem; } }
-  .cmds code { font-family: var(--mono); font-size: .82rem; color: var(--accent-ink); font-weight: 600; }
-  .cmds .cd { color: var(--muted); font-size: .92rem; }
-  .reuse { margin-top: 1.3rem; color: var(--muted); font-size: .95rem; }
-  .reuse b { color: var(--ink); font-weight: 600; }
-  .note { margin-top: 1.3rem; color: var(--faint); font-size: .9rem; }
-  .note .mono { font-family: var(--mono); }
+  /* integrations */
+  .map { margin-top: 1.6rem; display: flex; flex-direction: column; align-items: center; gap: .5rem; }
+  .node { border: 1px solid var(--line-2); border-radius: 9px; padding: .6rem .9rem; background: var(--surface, var(--bg)); font-family: var(--mono); font-size: .8rem; text-align: center; }
+  .node.core { border-color: var(--accent); color: var(--accent-ink); font-weight: 700; box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent); }
+  .node .s { display: block; font-size: .64rem; color: var(--faint); font-weight: 400; margin-top: .1rem; }
+  .maparrow { color: var(--faint); font-family: var(--mono); font-size: .8rem; }
+  .maprow { display: flex; flex-wrap: wrap; gap: .55rem; justify-content: center; }
+  .node.tool { font-size: .74rem; color: var(--muted); }
+  .node.soon { border-style: dashed; color: var(--faint); }
+  .wirenote { margin-top: 1.4rem; }
 
+  /* roadmap */
   .cols { margin-top: 1.4rem; display: grid; grid-template-columns: 1fr 1fr; gap: 1.6rem 2.5rem; }
   @media (max-width: 620px) { .cols { grid-template-columns: 1fr; } }
-  .cols h3 { font-size: .78rem; font-family: var(--mono); letter-spacing: .1em; text-transform: uppercase; margin: 0 0 .7rem; }
+  .cols h3 { font-size: .74rem; font-family: var(--mono); letter-spacing: .1em; text-transform: uppercase; margin: 0 0 .7rem; }
   .cols.ships h3 { color: var(--attested); } .cols.soon h3 { color: var(--faint); }
   .cols ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .45rem; }
   .cols li { font-size: .94rem; padding-left: 1.3rem; position: relative; }
   .ships li::before { content: "\2713"; position: absolute; left: 0; color: var(--attested); font-family: var(--mono); font-size: .82rem; }
   .soon li { color: var(--muted); } .soon li::before { content: "\25CB"; position: absolute; left: 0; color: var(--faint); font-family: var(--mono); font-size: .82rem; }
 
-  .cta-row { margin-top: 1.6rem; }
-  .btn { font-family: var(--mono); font-size: .9rem; font-weight: 600; padding: .7rem 1.15rem; border-radius: 7px; text-decoration: none; display: inline-flex; align-items: center; gap: .45rem; background: var(--accent); color: #fff; }
-  .btn:hover { filter: brightness(1.07); }
+  .cta-row { margin-top: 1.6rem; display: flex; gap: .7rem; flex-wrap: wrap; }
+  .btn { font-family: var(--mono); font-size: .9rem; font-weight: 600; padding: .7rem 1.15rem; border-radius: 7px; text-decoration: none; display: inline-flex; align-items: center; gap: .45rem; border: 1px solid transparent; }
+  .btn.primary { background: var(--accent); color: #fff; }
+  .btn.primary:hover { filter: brightness(1.07); }
+  .btn.ghost { color: var(--ink); border-color: var(--line-2); }
+  .btn.ghost:hover { border-color: var(--accent); color: var(--accent-ink); }
 
   footer { border-top: 1px solid var(--line); padding: 2rem 0 3rem; }
-  .foot { display: flex; flex-wrap: wrap; gap: .8rem 1.4rem; align-items: center; }
+  .foot { display: flex; flex-wrap: wrap; gap: .8rem 1.4rem; align-items: baseline; }
+  .foot .brand small { font-family: var(--mono); font-weight: 500; font-size: .7rem; color: var(--faint); margin-left: .5rem; }
   .foot nav { margin-left: auto; }
   .foot-tag { color: var(--faint); font-size: .78rem; font-family: var(--mono); margin: 1.3rem 0 0; }
+  .foot-tag a { color: var(--muted); text-decoration: none; }
 
   ::selection { background: color-mix(in srgb, var(--accent) 22%, transparent); }
   :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
@@ -126,9 +144,11 @@
 <header>
   <div class="bar">
     <a class="brand" href="index.html">agentklar<span class="dot">.</span></a>
+    <a class="by" href="https://kaltstart.co">by kaltstart.co</a>
     <nav>
-      <a href="index.html">Home</a>
-      <a href="#community">Community</a>
+      <a href="#flow" class="hide-sm">The flow</a>
+      <a href="#reference">Commands</a>
+      <a href="index.html#start">Install</a>
       <button class="theme-btn" id="theme" aria-label="Toggle theme">Theme</button>
     </nav>
   </div>
@@ -137,155 +157,224 @@
 <main>
   <section class="page-hero" style="border-top:none">
     <div class="wrap">
-      <p class="eyebrow">Features</p>
-      <h1>What Agentklar does.</h1>
-      <p>It makes AI-assisted coding reliable: it tracks the work, runs your real checks, keeps the proof, and only lets a human sign off. Here&apos;s everything, in the order a task moves through it.</p>
+      <p class="eyebrow">What it is &amp; how to use it</p>
+      <h1>Agentklar, in plain terms.</h1>
+      <p class="say">It's a <b>local command-line tool</b> that gives every coding task a lifecycle your AI agent has to follow &mdash; <b>you</b> define what &ldquo;done&rdquo; means, the agent does the work and proves it with your tests, and <b>only you</b> approve.</p>
     </div>
   </section>
 
-  <section>
+  <section id="what">
     <div class="wrap">
-      <p class="eyebrow">The workflow</p>
-      <h2>Every task walks the same path.</h2>
-      <p class="lead">State lives in a local database, not in chat &mdash; so any session picks up where the last left off.</p>
-      <div class="pipe">
-        <span class="s">draft</span><span class="a">&rarr;</span>
-        <span class="s">ready</span><span class="a">&rarr;</span>
-        <span class="s">in&nbsp;progress</span><span class="a">&rarr;</span>
-        <span class="s gate">review</span><span class="a">&rarr;</span>
-        <span class="s gate">auto&nbsp;qa</span><span class="a">&rarr;</span>
-        <span class="s you">you&nbsp;approve</span><span class="a">&rarr;</span>
-        <span class="s done">done</span>
-      </div>
-      <p class="pnote"><b class="g">review + qa</b> are automatic gates &middot; <b class="g">you approve</b> is human-only &middot; <b class="d">done</b> is final</p>
-    </div>
-  </section>
-
-  <section>
-    <div class="wrap">
-      <p class="eyebrow">Evidence</p>
-      <h2>Only proof Agentklar ran itself counts.</h2>
-      <div class="defs">
-        <div class="d"><span class="k trust">Machine-attested</span><span class="v"><b>Agentklar ran it.</b> Command, exit code, timestamps, and a hash of the log. The only evidence that satisfies a required check.</span></div>
-        <div class="d"><span class="k warn">Agent-reported</span><span class="v"><b>A model claimed it.</b> Kept as support, marked untrusted until reproduced or accepted.</span></div>
-        <div class="d"><span class="k plain">Human-observed</span><span class="v"><b>You checked it.</b> A manual observation, attributed to your account.</span></div>
-      </div>
-    </div>
-  </section>
-
-  <section>
-    <div class="wrap">
-      <p class="eyebrow">Verification levels</p>
-      <h2>Your commands, grouped.</h2>
-      <p class="lead">Agentklar runs the checks your project already declares. It never bundles a test framework or invents a command.</p>
-      <div class="levels">
-        <div class="l"><span class="lk">L0</span><span class="lt">Inspect</span><span class="desc">format, lint, types</span></div>
-        <div class="l"><span class="lk">L1</span><span class="lt">Unit</span><span class="desc">focused unit &amp; component tests</span></div>
-        <div class="l"><span class="lk">L2</span><span class="lt">Integration</span><span class="desc">service, database, migration</span></div>
-        <div class="l"><span class="lk">L3</span><span class="lt">System</span><span class="desc">end-to-end, UI, performance</span></div>
-      </div>
-    </div>
-  </section>
-
-  <section id="catalog">
-    <div class="wrap">
-      <p class="eyebrow">Capabilities</p>
-      <h2>What you get.</h2>
-      <div class="groups">
-        <div class="group">
-          <h3>Track &amp; coordinate</h3>
-          <ul>
-            <li><b>Definition of Ready</b> <span>&mdash; no criteria, no claim</span></li>
-            <li><b>Atomic claims</b> with leases &amp; fencing</li>
-            <li><b>Risk lanes</b> <span>&mdash; quick, standard, major</span></li>
-            <li><b>Append-only</b> evidence timeline</li>
-          </ul>
+      <p class="eyebrow">The idea</p>
+      <h2>Think of it as an issue tracker + a test gate + an approval step &mdash; all local, that your agent drives but can&apos;t shortcut.</h2>
+      <div class="plain">
+        <div class="p">
+          <span class="n">01</span>
+          <h4>You run one binary</h4>
+          <p>No servers to babysit, no Docker, no sudo. Point your agent (Codex, Claude Code, OpenCode) at it and keep your own model.</p>
         </div>
-        <div class="group">
-          <h3>Trust the result</h3>
-          <ul>
-            <li><b>Machine-attested</b> checks</li>
-            <li><b>Human-only Done</b> <span>&mdash; no agent approval</span></li>
-            <li><b>Nonce-bound</b> approval from your account</li>
-            <li><b>Stale-commit</b> protection</li>
-          </ul>
+        <div class="p">
+          <span class="n">02</span>
+          <h4>Every task has a lifecycle</h4>
+          <p>Draft &rarr; Ready &rarr; In Progress &rarr; checks &rarr; your approval &rarr; Done. The agent moves cards forward, but can&apos;t skip the checks or approve itself.</p>
         </div>
-        <div class="group">
-          <h3>Keep quality up</h3>
-          <ul>
-            <li><b>Slop Guard</b> <span>&mdash; placeholders, silenced errors</span></li>
-            <li><b>Your recipes</b>, sandboxed</li>
-            <li><b>Changed-path</b> scoping</li>
-            <li><b>Quick lane</b> <span>&mdash; one pass, no extra model calls</span></li>
-          </ul>
-        </div>
-        <div class="group">
-          <h3>Bring your own agent</h3>
-          <ul>
-            <li><b>One MCP surface</b> <span>&mdash; Codex, Claude, OpenCode</span></li>
-            <li><b>Your model</b>, your machine</li>
-            <li><b>Independent review</b> <span>&mdash; prefer another provider</span></li>
-            <li><b>Read-only</b> reviewers</li>
-          </ul>
+        <div class="p">
+          <span class="n">03</span>
+          <h4>Nothing is &ldquo;done&rdquo; on trust</h4>
+          <p>Agentklar runs your actual test commands and keeps the receipts. Only a human, from their own account, marks a task finished.</p>
         </div>
       </div>
+
+      <div class="boardwrap">
+        <p class="eyebrow" style="margin-bottom:.6rem">The board Agentklar sets up for you (on Vikunja)</p>
+        <div class="board" role="img" aria-label="A Kanban board with columns Draft, Ready, In Progress, Completion Review, Auto QA, Changes Requested, User Approval, Done, and sample task cards.">
+          <div class="col"><div class="col-h"><span>Draft</span><span class="cnt">1</span></div><div class="col-b">
+            <div class="tk"><div class="id">AK-150</div><div class="ti">Rate-limit the login endpoint</div><div class="labs"><span class="lab q">risk:standard</span></div></div>
+          </div></div>
+          <div class="col"><div class="col-h"><span>Ready</span><span class="cnt">1</span></div><div class="col-b">
+            <div class="tk"><div class="id">AK-149</div><div class="ti">Fix empty-input parser crash</div><div class="labs"><span class="lab q">risk:quick</span><span class="lab a">agent:impl</span></div></div>
+          </div></div>
+          <div class="col"><div class="col-h"><span>In Progress</span><span class="cnt">1</span></div><div class="col-b">
+            <div class="tk"><div class="id">AK-142</div><div class="ti">Add pagination to /orders</div><div class="labs"><span class="lab q">risk:standard</span><span class="lab e">evidence</span></div></div>
+          </div></div>
+          <div class="col gate"><div class="col-h"><span>Review</span><span class="cnt">1</span></div><div class="col-b">
+            <div class="tk"><div class="id">AK-138</div><div class="ti">Refactor auth middleware</div><div class="labs"><span class="lab q">risk:standard</span></div></div>
+          </div></div>
+          <div class="col gate"><div class="col-h"><span>Auto QA</span><span class="cnt">1</span></div><div class="col-b">
+            <div class="tk"><div class="id">AK-141</div><div class="ti">Cache product lookups</div><div class="labs"><span class="lab q">risk:standard</span></div></div>
+          </div></div>
+          <div class="col"><div class="col-h"><span>Changes</span><span class="cnt">1</span></div><div class="col-b">
+            <div class="tk"><div class="id">AK-137</div><div class="ti">Migrate sessions table</div><div class="labs"><span class="lab q">risk:major</span></div></div>
+          </div></div>
+          <div class="col human"><div class="col-h"><span>Your approval</span><span class="cnt">1</span></div><div class="col-b">
+            <div class="tk"><div class="id">AK-140</div><div class="ti">Dark-mode toggle</div><div class="labs"><span class="lab q">risk:quick</span><span class="lab e">passed</span></div></div>
+          </div></div>
+          <div class="col done"><div class="col-h"><span>Done</span><span class="cnt">1</span></div><div class="col-b">
+            <div class="tk"><div class="id">AK-135</div><div class="ti">Bump Go to 1.25</div><div class="labs"><span class="lab q">risk:quick</span></div></div>
+          </div></div>
+        </div>
+        <p class="board-note">Cards move left to right. <b class="g">Review + Auto QA</b> are automatic gates &middot; <b class="g">Your approval</b> is the only human-only step &middot; <b class="d">Done</b> is final. Scroll the board sideways &rarr;</p>
+      </div>
     </div>
   </section>
 
-  <section id="community">
+  <section id="flow">
     <div class="wrap">
-      <p class="eyebrow">Community library</p>
-      <h2>Build a feature. Publish it with <span style="font-family:var(--mono)">git push</span>.</h2>
-      <p class="lead">No marketplace, ever. A community feature is just a git repo with a manifest &mdash; installed and pinned by package tooling you already know. Four kinds: review lenses, quality recipes, project skills, agent configs.</p>
+      <p class="eyebrow">The whole flow</p>
+      <h2>Every step is one command. Here&apos;s exactly what you type.</h2>
+      <p class="lead">This is the entire loop, start to finish. Copy any block and run it.</p>
 
-      <div class="cmds">
-        <div class="cmd"><code>pack init</code><span class="cd">scaffold from a reviewed template</span></div>
-        <div class="cmd"><code>pack validate</code><span class="cd">check the manifest, format, and permissions</span></div>
-        <div class="cmd"><code>pack test</code><span class="cd">run against fixtures &mdash; catch defects, spare clean code</span></div>
-        <div class="cmd"><code>pack publish</code><span class="cd">tag in git, optionally PR the community index</span></div>
+      <div class="steps">
+        <div class="demo">
+          <div class="cap"><span class="num">1</span><span class="t">Set up your project (once)</span><span class="who you">you</span></div>
+          <div class="block"><button class="cp" data-copy="agentklar init">Copy</button>
+<span class="ln2"><span class="p">$</span> agentklar init
+<span class="di">proposed .agentklar/quality.toml &mdash; the commands Agentklar will run</span>
+<span class="ok">workspace ready</span> <span class="di">&middot; repository: ~/code/shop</span></span></div>
+        </div>
+
+        <div class="demo">
+          <div class="cap"><span class="num">2</span><span class="t">Describe the task &amp; what &ldquo;done&rdquo; means</span><span class="who you">you</span></div>
+          <div class="block"><button class="cp" data-copy='agentklar task new AK-142 Add pagination to /orders \
+  --criteria "returns 20 per page;?page= works;tests pass" \
+  --verify "go test ./..."'>Copy</button>
+<span class="ln2"><span class="p">$</span> agentklar task new AK-142 Add pagination to /orders \
+  <span class="fl">--criteria</span> "returns 20 per page;?page= works;tests pass" \
+  <span class="fl">--verify</span> "go test ./..."
+<span class="ok">created AK-142</span> <span class="di">[standard] in Draft with 3 criteria (board #142)</span></span></div>
+        </div>
+
+        <div class="demo">
+          <div class="cap"><span class="num">3</span><span class="t">Mark it ready</span><span class="who you">you</span></div>
+          <div class="block"><button class="cp" data-copy="agentklar task ready AK-142">Copy</button>
+<span class="ln2"><span class="p">$</span> agentklar task ready AK-142
+<span class="ok">AK-142 is Ready</span>   <span class="c"># a task with no criteria can't become ready</span></span></div>
+        </div>
+
+        <div class="demo">
+          <div class="cap"><span class="num">4</span><span class="t">Your agent claims it and does the work</span><span class="who agent">agent</span></div>
+          <div class="block"><button class="cp" data-copy="agentklar mcp">Copy</button>
+<span class="ln2"><span class="c"># point your agent's MCP client at:  agentklar mcp</span>
+<span class="c"># it claims the task, writes code, and submits &mdash; over MCP</span>
+<span class="p">&rarr;</span> claim_task AK-142        <span class="ok">ok &middot; fencing #7</span>
+<span class="p">&rarr;</span> submit_for_review        <span class="ok">ok &middot; head 9c1f2a</span></span></div>
+        </div>
+
+        <div class="demo">
+          <div class="cap"><span class="num">5</span><span class="t">Run the gate &mdash; your checks, kept as proof</span><span class="who you">you</span></div>
+          <div class="block"><button class="cp" data-copy="agentklar gate AK-142">Copy</button>
+<span class="ln2"><span class="p">$</span> agentklar gate AK-142
+<span class="di">&#9656; go build ./...   ok</span>
+<span class="di">&#9656; go test ./...    ok</span>
+<span class="ok">&#10003; completion review + auto QA passed</span>
+<span class="di">evidence stored: 2 machine-attested &middot; state &rarr; user_approval</span></span></div>
+        </div>
+
+        <div class="demo">
+          <div class="cap"><span class="num">6</span><span class="t">You approve &mdash; the agent can&apos;t</span><span class="who you">you</span></div>
+          <div class="block"><button class="cp" data-copy="agentklar approve AK-142">Copy</button>
+<span class="ln2"><span class="p">&rarr;</span> <span class="di">(agent tries)</span> approve_task     <span class="no">&#10007; not agent-callable</span>
+<span class="p">$</span> agentklar approve AK-142      <span class="c"># you, from your own account</span>
+<span class="ok">&#10003; AK-142 done &middot; signed off by you</span></span></div>
+        </div>
       </div>
+    </div>
+  </section>
 
-      <div class="code">
-<pre><span class="c"># install &mdash; resolves, pins, shows cost before enabling</span>
-agentklar pack add github.com/example/django-review
-agentklar pack enable django-review <span class="f">--project</span></pre>
+  <section id="reference">
+    <div class="wrap">
+      <p class="eyebrow">Command reference</p>
+      <h2>Every command, and what it does.</h2>
+      <p class="lead">The full surface. Run <code style="font-family:var(--mono);color:var(--accent-ink)">agentklar &lt;command&gt; --help</code> for flags.</p>
+
+      <div class="ref">
+        <div class="grp">
+          <h3>Set up</h3>
+          <div class="rrow"><code>agentklar init</code><span class="d">Create a workspace for the current repo and propose the checks to run.</span></div>
+          <div class="rrow"><code>agentklar doctor</code><span class="d">Show health: declared checks, missing commands, task counts.</span></div>
+          <div class="rrow"><code>agentklar tracker connect --url --svc-user --human</code><span class="d">Connect a live Vikunja board; approvals happen as a comment from your account.</span></div>
+        </div>
+        <div class="grp">
+          <h3>Shape work</h3>
+          <div class="rrow"><code>agentklar task new &lt;id&gt; &lt;title&gt; --criteria --verify --lane</code><span class="d">Create a task with acceptance criteria and how to verify it.</span></div>
+          <div class="rrow"><code>agentklar task ready &lt;id&gt;</code><span class="d">Move a task to Ready (blocked until it has criteria + a verify method).</span></div>
+          <div class="rrow"><code>agentklar task list</code><span class="d">List every task with its lane and current state.</span></div>
+          <div class="rrow"><code>agentklar task show &lt;id&gt;</code><span class="d">Show one task with its acceptance criteria and evidence.</span></div>
+        </div>
+        <div class="grp">
+          <h3>Run &amp; connect the agent</h3>
+          <div class="rrow"><code>agentklar mcp</code><span class="d">Start the agent-facing server. Point Codex / Claude Code / OpenCode at this.</span></div>
+          <div class="rrow"><code>agentklar gate &lt;id&gt;</code><span class="d">Run the checks for the submitted commit and store machine-attested evidence.</span></div>
+          <div class="rrow"><code>agentklar reconcile</code><span class="d">Pull board comments and apply a valid human approval to finish a task.</span></div>
+        </div>
+        <div class="grp">
+          <h3>Finish (human-only)</h3>
+          <div class="rrow"><code>agentklar approve &lt;id&gt;</code><span class="d">Approve a task that passed the gate. No agent can call this.</span></div>
+          <div class="rrow"><code>agentklar reject &lt;id&gt; &lt;reason&gt;</code><span class="d">Send it back to Changes Requested with a reason.</span></div>
+        </div>
       </div>
+    </div>
+  </section>
 
-      <p class="reuse">Nothing new to run. It reuses <b>git</b>, <b>APM</b>, the <b>Agent Skills</b> format, <b>GitHub PRs</b>, and a curated index repo &mdash; enabled explicitly, cost shown first, pinned and hashed.</p>
-      <p class="note">Full design in <span class="mono">docs/&hellip;/2026-07-21-agentklar-community-library-plan.md</span>.</p>
+  <section id="integrations">
+    <div class="wrap wide">
+      <p class="eyebrow">What plugs in</p>
+      <h2>Agentklar is the hub. You bring the pieces.</h2>
+      <p class="lead">It doesn&apos;t replace your tools &mdash; it wires the ones you already use into one workflow.</p>
+      <div class="map">
+        <div class="maprow">
+          <div class="node">Codex</div><div class="node">Claude Code</div><div class="node">OpenCode</div>
+        </div>
+        <div class="maparrow">&darr;&nbsp; MCP &nbsp;(<span style="font-family:var(--mono);font-size:.7rem">agentklar mcp</span>)</div>
+        <div class="node core">Agentklar<span class="s">the control plane on your machine</span></div>
+        <div class="maparrow">&darr;</div>
+        <div class="maprow">
+          <div class="node tool">Vikunja board<span class="s">agentklar tracker connect</span></div>
+          <div class="node tool">Your test commands<span class="s">.agentklar/quality.toml</span></div>
+          <div class="node tool">Git worktrees<span class="s">isolation per task</span></div>
+        </div>
+        <div class="maprow" style="margin-top:.5rem">
+          <div class="node soon">Review providers<span class="s">roadmap</span></div>
+          <div class="node soon">mdBook docs<span class="s">roadmap</span></div>
+          <div class="node soon">Community packs<span class="s">roadmap</span></div>
+        </div>
+      </div>
     </div>
   </section>
 
   <section id="status">
     <div class="wrap">
       <p class="eyebrow">Honest status</p>
-      <h2>What runs today.</h2>
-      <p class="lead">A Phase 0/1 slice: the workflow is real and tested against a live tracker. The rest is on the roadmap.</p>
+      <h2>What works today.</h2>
+      <p class="lead">An early slice. The core loop is real and tested end to end &mdash; including a live board with human approval. The rest is on the roadmap.</p>
       <div class="cols">
         <div class="ships">
-          <h3>Verified &amp; tested</h3>
+          <h3>Working now</h3>
           <ul>
-            <li>Atomic claims, leases, fencing</li>
-            <li>Definition of Ready</li>
-            <li>Quick-lane gate + Slop Guard</li>
+            <li>Tasks, lifecycle &amp; the Kanban board</li>
+            <li>Definition of Ready enforcement</li>
+            <li>The gate: your checks + Slop Guard</li>
             <li>Machine-attested evidence</li>
-            <li>Human-only Done</li>
-            <li>Live Vikunja + nonce approval</li>
+            <li>Human-only approval (CLI + Vikunja)</li>
+            <li>Agent connection over MCP</li>
           </ul>
         </div>
         <div class="soon">
           <h3>On the roadmap</h3>
           <ul>
+            <li>Cross-provider independent review</li>
+            <li>Context index &amp; focused work packets</li>
+            <li>Onboarding for existing repos</li>
+            <li>Docs catalogue (mdBook)</li>
+            <li>Community pack library</li>
             <li>Signed release &amp; installer</li>
-            <li>Cross-provider reviewers</li>
-            <li>Context index &amp; work packets</li>
-            <li>Established-project onboarding</li>
-            <li>Docs catalogue</li>
-            <li>Community library</li>
           </ul>
         </div>
       </div>
-      <div class="cta-row"><a class="btn" href="index.html#start">Get started &rarr;</a></div>
+      <div class="cta-row">
+        <a class="btn primary" href="index.html#start">Get started &rarr;</a>
+        <a class="btn ghost" href="https://github.com/kaltstart-co/agentklar">View on GitHub</a>
+      </div>
     </div>
   </section>
 </main>
@@ -295,11 +384,11 @@ agentklar pack enable django-review <span class="f">--project</span></pre>
     <a class="brand" href="index.html">agentklar<span class="dot">.</span><small>by Kaltstart</small></a>
     <nav>
       <a href="index.html">Home</a>
-      <a href="#community">Community</a>
+      <a href="#reference">Commands</a>
       <a href="https://github.com/kaltstart-co/agentklar">GitHub</a>
     </nav>
   </div>
-  <div class="wrap"><p class="foot-tag">A Kaltstart project &middot; <a href="https://kaltstart.co" style="color:var(--muted);text-decoration:none">kaltstart.co</a> &middot; your model, your machine</p></div>
+  <div class="wrap"><p class="foot-tag">A Kaltstart project &middot; <a href="https://kaltstart.co">kaltstart.co</a> &middot; your model, your machine</p></div>
 </footer>
 
 <script>
@@ -307,5 +396,13 @@ agentklar pack enable django-review <span class="f">--project</span></pre>
     var root = document.documentElement, btn = document.getElementById('theme');
     function cur() { return root.getAttribute('data-theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'); }
     btn.addEventListener('click', function () { var n = cur() === 'dark' ? 'light' : 'dark'; root.setAttribute('data-theme', n); btn.textContent = n === 'dark' ? 'Light' : 'Dark'; });
+    document.querySelectorAll('.cp').forEach(function (b) {
+      b.addEventListener('click', function () {
+        navigator.clipboard.writeText(b.getAttribute('data-copy')).then(function () {
+          var o = b.textContent; b.textContent = 'Copied'; b.classList.add('done');
+          setTimeout(function () { b.textContent = o; b.classList.remove('done'); }, 1500);
+        });
+      });
+    });
   })();
 </script>
