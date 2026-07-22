@@ -42,11 +42,23 @@ Flags for 'task new':
   --lane quick|standard|major  --criteria "a;b;c"  --verify "how"  --target codex|gemini|any
 `
 
+// Build metadata, stamped at release time via -ldflags "-X main.version=...".
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+)
+
 func main() {
 	if len(os.Args) < 2 {
 		printBanner(os.Stdout)
 		fmt.Print(usage)
 		os.Exit(1)
+	}
+	switch os.Args[1] {
+	case "version", "--version", "-v":
+		fmt.Printf("agentklar %s (commit %s, built %s)\n", version, commit, date)
+		return
 	}
 	if err := run(os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)

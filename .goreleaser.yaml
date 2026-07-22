@@ -1,0 +1,52 @@
+version: 2
+
+project_name: agentklar
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: agentklar
+    main: ./cmd/agentklar
+    binary: agentklar
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{ .Version }}
+      - -X main.commit={{ .ShortCommit }}
+      - -X main.date={{ .CommitDate }}
+
+archives:
+  - id: agentklar
+    formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - "^docs:"
+      - "^chore:"
+      - "^test:"
+      - "Merge pull request"
+
+release:
+  draft: false
+  prerelease: auto
+  name_template: "v{{ .Version }}"
+  footer: |
+    ---
+    Website: https://agentklar.kaltstart.co · a Kaltstart project.
