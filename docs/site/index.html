@@ -1,48 +1,38 @@
 <title>Agentklar &mdash; Agents that know what done means</title>
-<meta name="description" content="Keep your coding agent. Add durable tracking, real evidence, and a Done only a human can give. A single local Go binary." />
+<meta name="description" content="Vibe-code fast and ship code that's actually done. Durable tracking, real evidence, and a Done only a human can give. A Kaltstart project." />
 <style>
   :root {
     --bg:#FBFCFD; --ink:#141922; --muted:#586372; --faint:#93A0AE;
-    --line:#E6EAEF; --line-2:#D6DCE3; --code:#F3F6F9;
+    --line:#E6EAEF; --line-2:#D6DCE3; --code:#0F141B; --code-ink:#D7E0EA;
     --accent:#2A55D8; --accent-ink:#1E45B4;
-    --attested:#1E845A; --blocked:#C03A2B;
+    --attested:#38B27E; --blocked:#E0574A;
     --sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
-    --maxw: 760px; --gutter: clamp(1.25rem, 5vw, 2rem);
+    --maxw: 780px; --gutter: clamp(1.25rem, 5vw, 2rem);
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg:#0F1318; --ink:#E7ECF2; --muted:#96A2AF; --faint:#5D6976;
-      --line:#212831; --line-2:#2C343E; --code:#161C23;
+      --bg:#0E1217; --ink:#E7ECF2; --muted:#96A2AF; --faint:#5C6874;
+      --line:#212831; --line-2:#2E3742; --code:#090C10; --code-ink:#D7E0EA;
       --accent:#6E97F8; --accent-ink:#87A9FB; --attested:#46B583; --blocked:#E05B4C;
     }
   }
-  :root[data-theme="light"] {
-    --bg:#FBFCFD; --ink:#141922; --muted:#586372; --faint:#93A0AE;
-    --line:#E6EAEF; --line-2:#D6DCE3; --code:#F3F6F9;
-    --accent:#2A55D8; --accent-ink:#1E45B4; --attested:#1E845A; --blocked:#C03A2B;
-  }
-  :root[data-theme="dark"] {
-    --bg:#0F1318; --ink:#E7ECF2; --muted:#96A2AF; --faint:#5D6976;
-    --line:#212831; --line-2:#2C343E; --code:#161C23;
-    --accent:#6E97F8; --accent-ink:#87A9FB; --attested:#46B583; --blocked:#E05B4C;
-  }
+  :root[data-theme="light"] { --bg:#FBFCFD; --ink:#141922; --muted:#586372; --faint:#93A0AE; --line:#E6EAEF; --line-2:#D6DCE3; --code:#0F141B; --code-ink:#D7E0EA; --accent:#2A55D8; --accent-ink:#1E45B4; --attested:#38B27E; --blocked:#E0574A; }
+  :root[data-theme="dark"] { --bg:#0E1217; --ink:#E7ECF2; --muted:#96A2AF; --faint:#5C6874; --line:#212831; --line-2:#2E3742; --code:#090C10; --code-ink:#D7E0EA; --accent:#6E97F8; --accent-ink:#87A9FB; --attested:#46B583; --blocked:#E05B4C; }
 
   * { box-sizing: border-box; }
   html { scroll-behavior: smooth; }
   @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
-  body {
-    margin: 0; background: var(--bg); color: var(--ink); font-family: var(--sans);
-    font-size: 17px; line-height: 1.65; -webkit-font-smoothing: antialiased;
-  }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--sans); font-size: 17px; line-height: 1.65; -webkit-font-smoothing: antialiased; }
   .wrap { max-width: var(--maxw); margin: 0 auto; padding-inline: var(--gutter); }
   a { color: var(--accent-ink); text-underline-offset: 3px; text-decoration-thickness: 1px; }
 
-  /* top bar */
   header { border-bottom: 1px solid var(--line); }
-  .bar { max-width: var(--maxw); margin: 0 auto; padding: 1rem var(--gutter); display: flex; align-items: center; gap: 1.25rem; }
+  .bar { max-width: var(--maxw); margin: 0 auto; padding: 1rem var(--gutter); display: flex; align-items: baseline; gap: .8rem; }
   .brand { font-family: var(--mono); font-weight: 700; letter-spacing: -.01em; color: var(--ink); text-decoration: none; }
   .brand .dot { color: var(--accent); }
+  .by { font-family: var(--mono); font-size: .7rem; color: var(--faint); text-decoration: none; letter-spacing: .02em; }
+  .by:hover { color: var(--accent-ink); }
   nav { margin-left: auto; display: flex; gap: 1.25rem; align-items: center; }
   nav a { font-size: .92rem; color: var(--muted); text-decoration: none; }
   nav a:hover { color: var(--ink); }
@@ -52,58 +42,89 @@
   .eyebrow { font-family: var(--mono); font-size: .72rem; letter-spacing: .16em; text-transform: uppercase; color: var(--accent-ink); font-weight: 600; margin: 0; }
 
   /* hero */
-  .hero { padding: clamp(3rem, 9vw, 5.5rem) 0 clamp(2rem, 5vw, 3rem); }
-  h1 { font-size: clamp(2.3rem, 6.5vw, 3.4rem); line-height: 1.05; letter-spacing: -.03em; font-weight: 800; margin: 1rem 0 0; text-wrap: balance; }
+  .hero { padding: clamp(2.6rem, 7vw, 4.5rem) 0 clamp(2rem, 5vw, 3rem); }
+  h1 { font-size: clamp(2.2rem, 6vw, 3.3rem); line-height: 1.05; letter-spacing: -.03em; font-weight: 800; margin: 1rem 0 0; text-wrap: balance; }
   h1 .clear { color: var(--accent); }
-  .sub { color: var(--muted); font-size: 1.16rem; margin: 1.15rem 0 0; max-width: 42ch; }
-  .cta { display: flex; flex-wrap: wrap; gap: .7rem; margin-top: 1.9rem; }
+  .sub { color: var(--muted); font-size: 1.13rem; margin: 1.1rem 0 0; max-width: 44ch; }
+  .cta { display: flex; flex-wrap: wrap; gap: .7rem; margin-top: 1.6rem; }
   .btn { font-family: var(--mono); font-size: .9rem; font-weight: 600; padding: .7rem 1.15rem; border-radius: 7px; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; gap: .45rem; border: 1px solid transparent; }
   .btn.primary { background: var(--accent); color: #fff; }
   .btn.primary:hover { filter: brightness(1.07); }
   .btn.ghost { color: var(--ink); border-color: var(--line-2); }
   .btn.ghost:hover { border-color: var(--accent); color: var(--accent-ink); }
 
+  /* terminal playground */
+  .try-label { font-family: var(--mono); font-size: .74rem; letter-spacing: .04em; color: var(--faint); margin: 2.2rem 0 .6rem; display: flex; align-items: center; gap: .5rem; }
+  .try-label b { color: var(--accent-ink); font-weight: 600; }
+  .term { border: 1px solid var(--line-2); border-radius: 12px; background: var(--code); overflow: hidden; box-shadow: 0 18px 40px -20px rgba(9,12,16,.5); }
+  .term-bar { display: flex; align-items: center; gap: .5rem; padding: .6rem .85rem; border-bottom: 1px solid rgba(255,255,255,.07); background: rgba(255,255,255,.03); }
+  .term-bar i { width: 10px; height: 10px; border-radius: 50%; background: #39414d; display: inline-block; }
+  .term-bar .lbl { margin-left: .4rem; font-family: var(--mono); font-size: .7rem; letter-spacing: .08em; text-transform: uppercase; color: #6a7688; }
+  .term-bar .tag { margin-left: auto; font-family: var(--mono); font-size: .68rem; color: #6a7688; }
+  .term-bar .tag.done { color: var(--attested); }
+  .term-body { padding: 1rem 1.15rem; font-family: var(--mono); font-size: .82rem; line-height: 1.8; color: var(--code-ink); min-height: 15.5rem; max-height: 15.5rem; overflow-y: auto; }
+  .ln { white-space: pre-wrap; }
+  .ln.in { animation: fade .18s ease both; }
+  @keyframes fade { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) { .ln.in { animation: none; } }
+  .ln .pr { color: #5f6b7c; }
+  .ln .pr.you { color: var(--accent-ink); }
+  .ln .cmd { color: var(--code-ink); }
+  .ln.ok { color: var(--attested); }
+  .ln.no { color: var(--blocked); }
+  .ln.dim { color: #6d7a8c; }
+  .ln.hint { color: #6d7a8c; }
+  .cursor { display: inline-block; width: 8px; background: var(--accent); animation: blink 1.1s steps(1) infinite; color: transparent; margin-left: 1px; }
+  @keyframes blink { 50% { opacity: 0; } }
+  @media (prefers-reduced-motion: reduce) { .cursor { animation: none; } }
+
+  .term-actions { display: flex; flex-wrap: wrap; gap: .5rem; padding: .8rem 1.05rem; border-top: 1px solid rgba(255,255,255,.07); background: rgba(255,255,255,.02); }
+  .cmd-btn { font-family: var(--mono); font-size: .78rem; padding: .4rem .8rem; border: 1px solid #333c49; border-radius: 6px; background: transparent; color: #8a97a8; cursor: pointer; transition: border-color .15s, color .15s; }
+  .cmd-btn:hover:not(:disabled) { color: var(--code-ink); }
+  .cmd-btn.next { border-color: var(--accent); color: var(--accent-ink); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent); }
+  .cmd-btn.ran { color: var(--attested); border-color: color-mix(in srgb, var(--attested) 45%, #333c49); }
+  .cmd-btn:disabled { cursor: not-allowed; opacity: .55; }
+  .cmd-btn.human { border-color: var(--attested); color: var(--attested); font-weight: 700; box-shadow: 0 0 0 3px color-mix(in srgb, var(--attested) 18%, transparent); }
+  .cmd-btn.replay { margin-left: auto; border-style: dashed; }
+  .hidden { display: none !important; }
+
   /* top features */
+  section { border-top: 1px solid var(--line); padding: clamp(3rem, 7vw, 4.5rem) 0; }
+  h2 { font-size: clamp(1.5rem, 4vw, 2rem); letter-spacing: -.02em; font-weight: 750; margin: .5rem 0 0; }
   .feat { margin-top: 1.6rem; display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem 2.5rem; }
   @media (max-width: 620px) { .feat { grid-template-columns: 1fr; } }
   .feat .f h3 { font-size: 1.06rem; margin: 0 0 .4rem; letter-spacing: -.01em; }
   .feat .f p { color: var(--muted); margin: 0; font-size: .96rem; }
   .feat .f strong { color: var(--ink); font-weight: 650; }
   .see { margin-top: 2rem; }
-  .exchange { font-family: var(--mono); font-size: .82rem; line-height: 1.85; margin-top: .8rem; color: var(--muted); max-width: 22rem; }
-  .exchange .row { display: flex; gap: .6rem; }
-  .exchange .m { color: var(--ink); }
-  .exchange .ok { color: var(--attested); margin-left: auto; }
-  .exchange .no { color: var(--blocked); margin-left: auto; }
 
   /* get started */
-  section { border-top: 1px solid var(--line); padding: clamp(3rem, 7vw, 4.5rem) 0; }
-  h2 { font-size: clamp(1.5rem, 4vw, 2rem); letter-spacing: -.02em; font-weight: 750; margin: .5rem 0 0; }
   .lead { color: var(--muted); margin: .7rem 0 0; }
   .req { display: flex; flex-wrap: wrap; gap: .5rem; margin: 1.4rem 0 2rem; }
   .req span { font-family: var(--mono); font-size: .76rem; color: var(--muted); }
   .req span::after { content: "\00B7"; margin-left: .5rem; color: var(--faint); }
   .req span:last-child::after { content: ""; }
   .req b { color: var(--ink); font-weight: 600; }
-
   .step { margin-top: 1.6rem; }
   .step-h { display: flex; align-items: baseline; gap: .7rem; margin-bottom: .55rem; }
   .step-h .n { font-family: var(--mono); font-size: .78rem; font-weight: 700; color: var(--accent-ink); }
   .step-h .t { font-weight: 600; font-size: 1rem; }
   .step-h .d { color: var(--faint); font-size: .88rem; margin-left: auto; font-family: var(--mono); }
-  .code { position: relative; background: var(--code); border: 1px solid var(--line); border-radius: 9px; }
-  .code button.copy { position: absolute; top: .5rem; right: .5rem; font-family: var(--mono); font-size: .66rem; letter-spacing: .05em; text-transform: uppercase; background: var(--bg); border: 1px solid var(--line-2); border-radius: 5px; color: var(--muted); padding: .22rem .5rem; cursor: pointer; }
-  .code button.copy:hover { border-color: var(--accent); color: var(--accent-ink); }
-  .code button.copy.done { border-color: var(--attested); color: var(--attested); }
-  pre { margin: 0; padding: .95rem 1.05rem; overflow-x: auto; font-family: var(--mono); font-size: .84rem; line-height: 1.7; color: var(--ink); }
-  pre .c { color: var(--faint); } pre .f { color: var(--accent-ink); }
+  .cb { position: relative; background: var(--code); border: 1px solid var(--line-2); border-radius: 9px; }
+  .cb button.copy { position: absolute; top: .5rem; right: .5rem; font-family: var(--mono); font-size: .66rem; letter-spacing: .05em; text-transform: uppercase; background: rgba(255,255,255,.06); border: 1px solid #333c49; border-radius: 5px; color: #8a97a8; padding: .22rem .5rem; cursor: pointer; }
+  .cb button.copy:hover { border-color: var(--accent); color: var(--accent-ink); }
+  .cb button.copy.done { border-color: var(--attested); color: var(--attested); }
+  pre { margin: 0; padding: .95rem 1.05rem; overflow-x: auto; font-family: var(--mono); font-size: .84rem; line-height: 1.7; color: var(--code-ink); }
+  pre .c { color: #6d7a8c; } pre .f { color: var(--accent-ink); }
   .more { margin-top: 2.2rem; color: var(--muted); font-size: .96rem; }
 
   footer { border-top: 1px solid var(--line); padding: 2rem 0 3rem; }
-  .foot { display: flex; flex-wrap: wrap; gap: .8rem 1.4rem; align-items: center; }
+  .foot { display: flex; flex-wrap: wrap; gap: .8rem 1.4rem; align-items: baseline; }
   .foot .brand small { font-family: var(--mono); font-weight: 500; font-size: .7rem; color: var(--faint); margin-left: .5rem; }
   .foot nav { margin-left: auto; }
   .foot-tag { color: var(--faint); font-size: .78rem; font-family: var(--mono); margin: 1.3rem 0 0; }
+  .foot-tag a { color: var(--muted); text-decoration: none; }
+  .foot-tag a:hover { color: var(--accent-ink); }
 
   ::selection { background: color-mix(in srgb, var(--accent) 22%, transparent); }
   :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
@@ -112,6 +133,7 @@
 <header>
   <div class="bar">
     <a class="brand" href="index.html">agentklar<span class="dot">.</span></a>
+    <a class="by" href="https://kaltstart.co">by kaltstart.co</a>
     <nav>
       <a href="https://claude.ai/code/artifact/6b5a6033-df97-4f54-85af-78ff6fa2898e">Features</a>
       <a href="#start">Install</a>
@@ -123,12 +145,30 @@
 <main>
   <section class="hero" style="border-top:none">
     <div class="wrap">
-      <p class="eyebrow">Local-first &middot; your agent, your machine</p>
+      <p class="eyebrow">Local-first &middot; a Kaltstart project</p>
       <h1>Vibe-code fast. Ship code that&apos;s actually <span class="clear">done</span>.</h1>
-      <p class="sub">AI agents love to say &ldquo;done&rdquo; when they&apos;re not. Agentklar tracks the work, runs your real checks, keeps the proof, and lets only you sign off &mdash; so you can move fast without shipping slop.</p>
+      <p class="sub">AI agents love to say &ldquo;done&rdquo; when they&apos;re not. Agentklar tracks the work, runs your real checks, keeps the proof &mdash; and lets only you sign off.</p>
       <div class="cta">
         <a href="#start" class="btn primary">Get started</a>
         <a href="https://claude.ai/code/artifact/6b5a6033-df97-4f54-85af-78ff6fa2898e" class="btn ghost">See all features &rarr;</a>
+      </div>
+
+      <p class="try-label"><b>Try it</b> &mdash; run the task, then finish what the agent can&apos;t.</p>
+      <div class="term" role="group" aria-label="Interactive demo: drive a task through Agentklar">
+        <div class="term-bar">
+          <i></i><i></i><i></i>
+          <span class="lbl">agentklar</span>
+          <span class="tag" id="termTag">task AK-142</span>
+        </div>
+        <div class="term-body" id="termBody" aria-live="polite"></div>
+        <div class="term-actions" id="termActions">
+          <button class="cmd-btn" data-cmd="claim">claim</button>
+          <button class="cmd-btn" data-cmd="submit">submit</button>
+          <button class="cmd-btn" data-cmd="gate">gate</button>
+          <button class="cmd-btn" data-cmd="approve">approve</button>
+          <button class="cmd-btn human hidden" id="humanBtn">&#10003; Approve &mdash; you</button>
+          <button class="cmd-btn replay hidden" id="replayBtn">replay</button>
+        </div>
       </div>
     </div>
   </section>
@@ -145,10 +185,6 @@
         <div class="f">
           <h3>Only you call it done</h3>
           <p>The agent can claim, submit, and pass QA. It <strong>cannot approve its own work</strong> &mdash; that&apos;s your call, from your own account.</p>
-          <div class="exchange" role="img" aria-label="An agent passes QA, then is refused when it tries to approve its own work.">
-            <div class="row"><span>&rarr;</span><span class="m">record_qa</span><span class="ok">pass</span></div>
-            <div class="row"><span>&rarr;</span><span class="m">approve_task</span><span class="no">refused</span></div>
-          </div>
         </div>
         <div class="f">
           <h3>Bring your own agent</h3>
@@ -172,7 +208,7 @@
 
       <div class="step">
         <div class="step-h"><span class="n">1</span><span class="t">Build</span></div>
-        <div class="code"><button class="copy" data-copy="git clone https://github.com/kaltstart-co/agentklar
+        <div class="cb"><button class="copy" data-copy="git clone https://github.com/kaltstart-co/agentklar
 cd agentklar && go build -o agentklar ./cmd/agentklar">Copy</button>
 <pre>git clone https://github.com/kaltstart-co/agentklar
 cd agentklar &amp;&amp; go build -o agentklar ./cmd/agentklar</pre></div>
@@ -180,7 +216,7 @@ cd agentklar &amp;&amp; go build -o agentklar ./cmd/agentklar</pre></div>
 
       <div class="step">
         <div class="step-h"><span class="n">2</span><span class="t">Create a task</span><span class="d">you set the goal</span></div>
-        <div class="code"><button class="copy" data-copy='./agentklar init
+        <div class="cb"><button class="copy" data-copy='./agentklar init
 ./agentklar task new AK-1 Fix the parser \
   --criteria "handles empty input;tests pass" --verify "go test ./..."
 ./agentklar task ready AK-1'>Copy</button>
@@ -192,14 +228,14 @@ cd agentklar &amp;&amp; go build -o agentklar ./cmd/agentklar</pre></div>
 
       <div class="step">
         <div class="step-h"><span class="n">3</span><span class="t">Let your agent work</span><span class="d">point its MCP at agentklar mcp</span></div>
-        <div class="code"><button class="copy" data-copy='echo &apos;{"jsonrpc":"2.0","id":1,"method":"claim_task","params":{"task_id":"AK-1","expected_state":"ready","holder":"claude-code"}}&apos; | ./agentklar mcp'>Copy</button>
+        <div class="cb"><button class="copy" data-copy='echo &apos;{"jsonrpc":"2.0","id":1,"method":"claim_task","params":{"task_id":"AK-1","expected_state":"ready","holder":"claude-code"}}&apos; | ./agentklar mcp'>Copy</button>
 <pre><span class="c"># the agent claims, writes code, and submits &mdash; over MCP</span>
 echo '{"jsonrpc":"2.0",...,"method":"claim_task",...}' | ./agentklar mcp</pre></div>
       </div>
 
       <div class="step">
         <div class="step-h"><span class="n">4</span><span class="t">Gate, then approve</span><span class="d">only you finish it</span></div>
-        <div class="code"><button class="copy" data-copy="./agentklar gate AK-1
+        <div class="cb"><button class="copy" data-copy="./agentklar gate AK-1
 ./agentklar approve AK-1">Copy</button>
 <pre>./agentklar gate AK-1        <span class="c"># runs your checks, keeps the proof</span>
 ./agentklar approve AK-1     <span class="c"># your call &mdash; the agent can't make it</span></pre></div>
@@ -216,16 +252,18 @@ echo '{"jsonrpc":"2.0",...,"method":"claim_task",...}' | ./agentklar mcp</pre></
     <nav>
       <a href="https://claude.ai/code/artifact/6b5a6033-df97-4f54-85af-78ff6fa2898e">Features</a>
       <a href="#start">Install</a>
+      <a href="https://github.com/kaltstart-co/agentklar">GitHub</a>
     </nav>
   </div>
-  <div class="wrap"><p class="foot-tag">Agents that know what done means &middot; your model, your machine</p></div>
+  <div class="wrap"><p class="foot-tag">A Kaltstart project &middot; <a href="https://kaltstart.co">kaltstart.co</a> &middot; your model, your machine</p></div>
 </footer>
 
 <script>
   (function () {
-    var root = document.documentElement, btn = document.getElementById('theme');
+    var root = document.documentElement, tbtn = document.getElementById('theme');
     function cur() { return root.getAttribute('data-theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'); }
-    btn.addEventListener('click', function () { var n = cur() === 'dark' ? 'light' : 'dark'; root.setAttribute('data-theme', n); btn.textContent = n === 'dark' ? 'Light' : 'Dark'; });
+    tbtn.addEventListener('click', function () { var n = cur() === 'dark' ? 'light' : 'dark'; root.setAttribute('data-theme', n); tbtn.textContent = n === 'dark' ? 'Light' : 'Dark'; });
+
     document.querySelectorAll('.copy').forEach(function (b) {
       b.addEventListener('click', function () {
         navigator.clipboard.writeText(b.getAttribute('data-copy')).then(function () {
@@ -234,5 +272,84 @@ echo '{"jsonrpc":"2.0",...,"method":"claim_task",...}' | ./agentklar mcp</pre></
         });
       });
     });
+
+    // --- terminal playground ---
+    var body = document.getElementById('termBody');
+    var actions = document.getElementById('termActions');
+    var tag = document.getElementById('termTag');
+    var humanBtn = document.getElementById('humanBtn');
+    var replayBtn = document.getElementById('replayBtn');
+    var CK = '\u2713', CX = '\u2717', ARR = '\u2192', TRI = '\u25B8', DOT = '\u00B7', DASH = '\u2014';
+
+    var steps = {
+      claim:   { cmd: 'agentklar claim AK-142', out: [['ok', CK + ' claimed ' + DOT + ' fencing #7 ' + DOT + ' worktree: primary']], next: 'submit' },
+      submit:  { cmd: 'agentklar submit --head 9c1f2a', out: [['ok', CK + ' submitted for review ' + DOT + ' 9c1f2a']], next: 'gate' },
+      gate:    { cmd: 'agentklar gate AK-142', out: [['dim', TRI + ' go build ./...   ok'], ['dim', TRI + ' go test ./...    ok'], ['ok', CK + ' completion review + auto QA passed'], ['dim', ARR + ' state: user_approval']], next: 'approve' },
+      approve: { cmd: 'agentklar approve AK-142', out: [['no', CX + ' approval is not agent-callable ' + DASH], ['no', '  a human must approve through a trusted channel']], next: 'human' }
+    };
+    var order = ['claim', 'submit', 'gate', 'approve'];
+    var current;
+
+    function el(cls, html) { var d = document.createElement('div'); d.className = 'ln in ' + (cls || ''); d.innerHTML = html; return d; }
+    function esc(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+    function appendCmd(text, you) {
+      body.appendChild(el('', '<span class="pr' + (you ? ' you' : '') + '">' + (you ? '(you)' : '$') + '</span> <span class="cmd">' + esc(text) + '</span>'));
+      scroll();
+    }
+    function appendLine(cls, text) { body.appendChild(el(cls, esc(text))); scroll(); }
+    function scroll() { body.scrollTop = body.scrollHeight; }
+
+    function renderActions() {
+      order.forEach(function (name) {
+        var btn = actions.querySelector('[data-cmd="' + name + '"]');
+        var ran = order.indexOf(name) < order.indexOf(current);
+        btn.disabled = name !== current;
+        btn.classList.toggle('next', name === current);
+        btn.classList.toggle('ran', ran);
+      });
+    }
+
+    function run(name) {
+      var s = steps[name];
+      appendCmd(s.cmd);
+      s.out.forEach(function (l) { appendLine(l[0], l[1]); });
+      current = s.next;
+      if (current === 'human') {
+        order.forEach(function (n) { actions.querySelector('[data-cmd="' + n + '"]').disabled = true; actions.querySelector('[data-cmd="' + n + '"]').classList.remove('next'); actions.querySelector('[data-cmd="' + n + '"]').classList.add('ran'); });
+        appendLine('hint', '  ' + DASH + ' the agent is stuck here. only a human can finish it.');
+        humanBtn.classList.remove('hidden');
+        humanBtn.focus();
+      } else {
+        renderActions();
+      }
+    }
+
+    function humanApprove() {
+      appendCmd('approve AK-142', true);
+      appendLine('ok', CK + ' done ' + DOT + ' signed off by you');
+      humanBtn.classList.add('hidden');
+      replayBtn.classList.remove('hidden');
+      tag.textContent = 'AK-142 ' + DOT + ' done';
+      tag.classList.add('done');
+    }
+
+    function reset() {
+      body.innerHTML = '';
+      body.appendChild(el('hint', '# drive one task through Agentklar &mdash; start with <span style="color:var(--accent-ink)">claim</span>'));
+      body.appendChild(el('', '<span class="pr">$</span> <span class="cursor">.</span>'));
+      current = 'claim';
+      tag.textContent = 'task AK-142';
+      tag.classList.remove('done');
+      humanBtn.classList.add('hidden');
+      replayBtn.classList.add('hidden');
+      renderActions();
+    }
+
+    order.forEach(function (name) {
+      actions.querySelector('[data-cmd="' + name + '"]').addEventListener('click', function () { if (current === name) run(name); });
+    });
+    humanBtn.addEventListener('click', humanApprove);
+    replayBtn.addEventListener('click', reset);
+    reset();
   })();
 </script>
