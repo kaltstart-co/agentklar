@@ -1,0 +1,310 @@
+<title>Agentklar &mdash; Features</title>
+<meta name="description" content="What Agentklar does: the task workflow, evidence you can trust, quality gates, and a community library built on tools you already use." />
+<style>
+  :root {
+    --bg:#FBFCFD; --ink:#141922; --muted:#586372; --faint:#93A0AE;
+    --line:#E6EAEF; --line-2:#D6DCE3; --code:#F3F6F9;
+    --accent:#2A55D8; --accent-ink:#1E45B4; --attested:#1E845A; --blocked:#C03A2B;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    --maxw: 760px; --gutter: clamp(1.25rem, 5vw, 2rem);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg:#0F1318; --ink:#E7ECF2; --muted:#96A2AF; --faint:#5D6976;
+      --line:#212831; --line-2:#2C343E; --code:#161C23;
+      --accent:#6E97F8; --accent-ink:#87A9FB; --attested:#46B583; --blocked:#E05B4C;
+    }
+  }
+  :root[data-theme="light"] { --bg:#FBFCFD; --ink:#141922; --muted:#586372; --faint:#93A0AE; --line:#E6EAEF; --line-2:#D6DCE3; --code:#F3F6F9; --accent:#2A55D8; --accent-ink:#1E45B4; --attested:#1E845A; --blocked:#C03A2B; }
+  :root[data-theme="dark"] { --bg:#0F1318; --ink:#E7ECF2; --muted:#96A2AF; --faint:#5D6976; --line:#212831; --line-2:#2C343E; --code:#161C23; --accent:#6E97F8; --accent-ink:#87A9FB; --attested:#46B583; --blocked:#E05B4C; }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--sans); font-size: 17px; line-height: 1.65; -webkit-font-smoothing: antialiased; }
+  .wrap { max-width: var(--maxw); margin: 0 auto; padding-inline: var(--gutter); }
+  a { color: var(--accent-ink); text-underline-offset: 3px; text-decoration-thickness: 1px; }
+
+  header { border-bottom: 1px solid var(--line); }
+  .bar { max-width: var(--maxw); margin: 0 auto; padding: 1rem var(--gutter); display: flex; align-items: center; gap: 1.25rem; }
+  .brand { font-family: var(--mono); font-weight: 700; letter-spacing: -.01em; color: var(--ink); text-decoration: none; }
+  .brand .dot { color: var(--accent); }
+  .brand small { font-family: var(--mono); font-weight: 500; font-size: .7rem; color: var(--faint); margin-left: .5rem; }
+  nav { margin-left: auto; display: flex; gap: 1.25rem; align-items: center; }
+  nav a { font-size: .92rem; color: var(--muted); text-decoration: none; }
+  nav a:hover { color: var(--ink); }
+  .theme-btn { font-family: var(--mono); font-size: .72rem; letter-spacing: .08em; text-transform: uppercase; background: none; color: var(--muted); border: 1px solid var(--line-2); border-radius: 6px; padding: .3rem .6rem; cursor: pointer; }
+  .theme-btn:hover { color: var(--ink); border-color: var(--accent); }
+
+  .eyebrow { font-family: var(--mono); font-size: .72rem; letter-spacing: .16em; text-transform: uppercase; color: var(--accent-ink); font-weight: 600; margin: 0; }
+  .page-hero { padding: clamp(2.5rem,7vw,4rem) 0 clamp(1.5rem,4vw,2.5rem); }
+  h1 { font-size: clamp(2rem, 5.5vw, 2.9rem); line-height: 1.06; letter-spacing: -.03em; font-weight: 800; margin: .9rem 0 0; text-wrap: balance; }
+  .page-hero p { color: var(--muted); font-size: 1.1rem; margin: 1rem 0 0; max-width: 52ch; }
+
+  section { border-top: 1px solid var(--line); padding: clamp(2.6rem, 6vw, 3.6rem) 0; }
+  h2 { font-size: clamp(1.4rem, 3.6vw, 1.85rem); letter-spacing: -.02em; font-weight: 750; margin: .5rem 0 0; }
+  .lead { color: var(--muted); margin: .7rem 0 0; max-width: 56ch; }
+
+  /* pipeline &mdash; the one retained visual */
+  .pipe { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; margin-top: 1.5rem; font-family: var(--mono); font-size: .78rem; }
+  .pipe .s { padding: .4rem .6rem; border-radius: 6px; border: 1px solid var(--line-2); color: var(--muted); }
+  .pipe .s.gate { border-color: var(--accent); color: var(--accent-ink); }
+  .pipe .s.you { border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+  .pipe .s.done { border-color: var(--attested); color: var(--attested); }
+  .pipe .a { color: var(--faint); }
+  .pnote { margin-top: 1rem; font-family: var(--mono); font-size: .76rem; color: var(--faint); }
+  .pnote b.g { color: var(--accent-ink); font-weight: 600; } .pnote b.d { color: var(--attested); font-weight: 600; }
+
+  /* simple definition rows &mdash; no boxes */
+  .defs { margin-top: 1.5rem; display: flex; flex-direction: column; gap: 0; }
+  .defs .d { display: grid; grid-template-columns: 190px 1fr; gap: 1rem; padding: 1rem 0; border-top: 1px solid var(--line); }
+  .defs .d:first-child { border-top: none; }
+  @media (max-width: 620px) { .defs .d { grid-template-columns: 1fr; gap: .25rem; } }
+  .defs .k { font-family: var(--mono); font-size: .82rem; font-weight: 600; }
+  .defs .k.trust { color: var(--attested); } .defs .k.warn { color: var(--accent-ink); } .defs .k.plain { color: var(--muted); }
+  .defs .v { color: var(--muted); font-size: .96rem; }
+  .defs .v b { color: var(--ink); font-weight: 600; }
+
+  /* levels inline */
+  .levels { margin-top: 1.4rem; display: flex; flex-direction: column; gap: .1rem; }
+  .levels .l { display: grid; grid-template-columns: 60px 130px 1fr; gap: 1rem; padding: .7rem 0; border-top: 1px solid var(--line); font-size: .95rem; }
+  .levels .l:first-child { border-top: none; }
+  @media (max-width: 620px) { .levels .l { grid-template-columns: 48px 1fr; } .levels .l .desc { grid-column: 1 / -1; color: var(--muted); font-size: .88rem; } }
+  .levels .lk { font-family: var(--mono); font-weight: 700; color: var(--accent-ink); }
+  .levels .lt { font-weight: 600; }
+  .levels .desc { color: var(--muted); }
+
+  /* capability groups &mdash; plain lists */
+  .groups { margin-top: 1.5rem; display: grid; grid-template-columns: 1fr 1fr; gap: 1.6rem 2.5rem; }
+  @media (max-width: 620px) { .groups { grid-template-columns: 1fr; } }
+  .group h3 { font-size: .82rem; font-family: var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--accent-ink); font-weight: 600; margin: 0 0 .7rem; }
+  .group ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .45rem; }
+  .group li { font-size: .95rem; padding-left: 1.1rem; position: relative; }
+  .group li::before { content: "\203A"; position: absolute; left: 0; color: var(--accent); font-family: var(--mono); }
+  .group li b { font-weight: 600; }
+  .group li span { color: var(--muted); }
+
+  /* code */
+  .code { position: relative; background: var(--code); border: 1px solid var(--line); border-radius: 9px; margin-top: 1.4rem; }
+  pre { margin: 0; padding: .95rem 1.05rem; overflow-x: auto; font-family: var(--mono); font-size: .84rem; line-height: 1.7; color: var(--ink); }
+  pre .c { color: var(--faint); } pre .f { color: var(--accent-ink); }
+
+  .cmds { margin-top: 1.4rem; display: flex; flex-direction: column; gap: 0; }
+  .cmds .cmd { display: grid; grid-template-columns: 150px 1fr; gap: 1rem; padding: .7rem 0; border-top: 1px solid var(--line); }
+  .cmds .cmd:first-child { border-top: none; }
+  @media (max-width: 620px) { .cmds .cmd { grid-template-columns: 1fr; gap: .2rem; } }
+  .cmds code { font-family: var(--mono); font-size: .82rem; color: var(--accent-ink); font-weight: 600; }
+  .cmds .cd { color: var(--muted); font-size: .92rem; }
+  .reuse { margin-top: 1.3rem; color: var(--muted); font-size: .95rem; }
+  .reuse b { color: var(--ink); font-weight: 600; }
+  .note { margin-top: 1.3rem; color: var(--faint); font-size: .9rem; }
+  .note .mono { font-family: var(--mono); }
+
+  .cols { margin-top: 1.4rem; display: grid; grid-template-columns: 1fr 1fr; gap: 1.6rem 2.5rem; }
+  @media (max-width: 620px) { .cols { grid-template-columns: 1fr; } }
+  .cols h3 { font-size: .78rem; font-family: var(--mono); letter-spacing: .1em; text-transform: uppercase; margin: 0 0 .7rem; }
+  .cols.ships h3 { color: var(--attested); } .cols.soon h3 { color: var(--faint); }
+  .cols ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .45rem; }
+  .cols li { font-size: .94rem; padding-left: 1.3rem; position: relative; }
+  .ships li::before { content: "\2713"; position: absolute; left: 0; color: var(--attested); font-family: var(--mono); font-size: .82rem; }
+  .soon li { color: var(--muted); } .soon li::before { content: "\25CB"; position: absolute; left: 0; color: var(--faint); font-family: var(--mono); font-size: .82rem; }
+
+  .cta-row { margin-top: 1.6rem; }
+  .btn { font-family: var(--mono); font-size: .9rem; font-weight: 600; padding: .7rem 1.15rem; border-radius: 7px; text-decoration: none; display: inline-flex; align-items: center; gap: .45rem; background: var(--accent); color: #fff; }
+  .btn:hover { filter: brightness(1.07); }
+
+  footer { border-top: 1px solid var(--line); padding: 2rem 0 3rem; }
+  .foot { display: flex; flex-wrap: wrap; gap: .8rem 1.4rem; align-items: center; }
+  .foot nav { margin-left: auto; }
+  .foot-tag { color: var(--faint); font-size: .78rem; font-family: var(--mono); margin: 1.3rem 0 0; }
+
+  ::selection { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+</style>
+
+<header>
+  <div class="bar">
+    <a class="brand" href="https://claude.ai/code/artifact/fc395aaa-7f48-4b12-b489-356c3e5c0e7a">agentklar<span class="dot">.</span></a>
+    <nav>
+      <a href="https://claude.ai/code/artifact/fc395aaa-7f48-4b12-b489-356c3e5c0e7a">Home</a>
+      <a href="#community">Community</a>
+      <button class="theme-btn" id="theme" aria-label="Toggle theme">Theme</button>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <section class="page-hero" style="border-top:none">
+    <div class="wrap">
+      <p class="eyebrow">Features</p>
+      <h1>What Agentklar does.</h1>
+      <p>It makes AI-assisted coding reliable: it tracks the work, runs your real checks, keeps the proof, and only lets a human sign off. Here&apos;s everything, in the order a task moves through it.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <p class="eyebrow">The workflow</p>
+      <h2>Every task walks the same path.</h2>
+      <p class="lead">State lives in a local database, not in chat &mdash; so any session picks up where the last left off.</p>
+      <div class="pipe">
+        <span class="s">draft</span><span class="a">&rarr;</span>
+        <span class="s">ready</span><span class="a">&rarr;</span>
+        <span class="s">in&nbsp;progress</span><span class="a">&rarr;</span>
+        <span class="s gate">review</span><span class="a">&rarr;</span>
+        <span class="s gate">auto&nbsp;qa</span><span class="a">&rarr;</span>
+        <span class="s you">you&nbsp;approve</span><span class="a">&rarr;</span>
+        <span class="s done">done</span>
+      </div>
+      <p class="pnote"><b class="g">review + qa</b> are automatic gates &middot; <b class="g">you approve</b> is human-only &middot; <b class="d">done</b> is final</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <p class="eyebrow">Evidence</p>
+      <h2>Only proof Agentklar ran itself counts.</h2>
+      <div class="defs">
+        <div class="d"><span class="k trust">Machine-attested</span><span class="v"><b>Agentklar ran it.</b> Command, exit code, timestamps, and a hash of the log. The only evidence that satisfies a required check.</span></div>
+        <div class="d"><span class="k warn">Agent-reported</span><span class="v"><b>A model claimed it.</b> Kept as support, marked untrusted until reproduced or accepted.</span></div>
+        <div class="d"><span class="k plain">Human-observed</span><span class="v"><b>You checked it.</b> A manual observation, attributed to your account.</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <p class="eyebrow">Verification levels</p>
+      <h2>Your commands, grouped.</h2>
+      <p class="lead">Agentklar runs the checks your project already declares. It never bundles a test framework or invents a command.</p>
+      <div class="levels">
+        <div class="l"><span class="lk">L0</span><span class="lt">Inspect</span><span class="desc">format, lint, types</span></div>
+        <div class="l"><span class="lk">L1</span><span class="lt">Unit</span><span class="desc">focused unit &amp; component tests</span></div>
+        <div class="l"><span class="lk">L2</span><span class="lt">Integration</span><span class="desc">service, database, migration</span></div>
+        <div class="l"><span class="lk">L3</span><span class="lt">System</span><span class="desc">end-to-end, UI, performance</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="catalog">
+    <div class="wrap">
+      <p class="eyebrow">Capabilities</p>
+      <h2>What you get.</h2>
+      <div class="groups">
+        <div class="group">
+          <h3>Track &amp; coordinate</h3>
+          <ul>
+            <li><b>Definition of Ready</b> <span>&mdash; no criteria, no claim</span></li>
+            <li><b>Atomic claims</b> with leases &amp; fencing</li>
+            <li><b>Risk lanes</b> <span>&mdash; quick, standard, major</span></li>
+            <li><b>Append-only</b> evidence timeline</li>
+          </ul>
+        </div>
+        <div class="group">
+          <h3>Trust the result</h3>
+          <ul>
+            <li><b>Machine-attested</b> checks</li>
+            <li><b>Human-only Done</b> <span>&mdash; no agent approval</span></li>
+            <li><b>Nonce-bound</b> approval from your account</li>
+            <li><b>Stale-commit</b> protection</li>
+          </ul>
+        </div>
+        <div class="group">
+          <h3>Keep quality up</h3>
+          <ul>
+            <li><b>Slop Guard</b> <span>&mdash; placeholders, silenced errors</span></li>
+            <li><b>Your recipes</b>, sandboxed</li>
+            <li><b>Changed-path</b> scoping</li>
+            <li><b>Quick lane</b> <span>&mdash; one pass, no extra model calls</span></li>
+          </ul>
+        </div>
+        <div class="group">
+          <h3>Bring your own agent</h3>
+          <ul>
+            <li><b>One MCP surface</b> <span>&mdash; Codex, Claude, OpenCode</span></li>
+            <li><b>Your model</b>, your machine</li>
+            <li><b>Independent review</b> <span>&mdash; prefer another provider</span></li>
+            <li><b>Read-only</b> reviewers</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="community">
+    <div class="wrap">
+      <p class="eyebrow">Community library</p>
+      <h2>Build a feature. Publish it with <span style="font-family:var(--mono)">git push</span>.</h2>
+      <p class="lead">No marketplace, ever. A community feature is just a git repo with a manifest &mdash; installed and pinned by package tooling you already know. Four kinds: review lenses, quality recipes, project skills, agent configs.</p>
+
+      <div class="cmds">
+        <div class="cmd"><code>pack init</code><span class="cd">scaffold from a reviewed template</span></div>
+        <div class="cmd"><code>pack validate</code><span class="cd">check the manifest, format, and permissions</span></div>
+        <div class="cmd"><code>pack test</code><span class="cd">run against fixtures &mdash; catch defects, spare clean code</span></div>
+        <div class="cmd"><code>pack publish</code><span class="cd">tag in git, optionally PR the community index</span></div>
+      </div>
+
+      <div class="code">
+<pre><span class="c"># install &mdash; resolves, pins, shows cost before enabling</span>
+agentklar pack add github.com/example/django-review
+agentklar pack enable django-review <span class="f">--project</span></pre>
+      </div>
+
+      <p class="reuse">Nothing new to run. It reuses <b>git</b>, <b>APM</b>, the <b>Agent Skills</b> format, <b>GitHub PRs</b>, and a curated index repo &mdash; enabled explicitly, cost shown first, pinned and hashed.</p>
+      <p class="note">Full design in <span class="mono">docs/&hellip;/2026-07-21-agentklar-community-library-plan.md</span>.</p>
+    </div>
+  </section>
+
+  <section id="status">
+    <div class="wrap">
+      <p class="eyebrow">Honest status</p>
+      <h2>What runs today.</h2>
+      <p class="lead">A Phase 0/1 slice: the workflow is real and tested against a live tracker. The rest is on the roadmap.</p>
+      <div class="cols">
+        <div class="ships">
+          <h3>Verified &amp; tested</h3>
+          <ul>
+            <li>Atomic claims, leases, fencing</li>
+            <li>Definition of Ready</li>
+            <li>Quick-lane gate + Slop Guard</li>
+            <li>Machine-attested evidence</li>
+            <li>Human-only Done</li>
+            <li>Live Vikunja + nonce approval</li>
+          </ul>
+        </div>
+        <div class="soon">
+          <h3>On the roadmap</h3>
+          <ul>
+            <li>Signed release &amp; installer</li>
+            <li>Cross-provider reviewers</li>
+            <li>Context index &amp; work packets</li>
+            <li>Established-project onboarding</li>
+            <li>Docs catalogue</li>
+            <li>Community library</li>
+          </ul>
+        </div>
+      </div>
+      <div class="cta-row"><a class="btn" href="https://claude.ai/code/artifact/fc395aaa-7f48-4b12-b489-356c3e5c0e7a#start">Get started &rarr;</a></div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap foot">
+    <a class="brand" href="https://claude.ai/code/artifact/fc395aaa-7f48-4b12-b489-356c3e5c0e7a">agentklar<span class="dot">.</span><small>by Kaltstart</small></a>
+    <nav>
+      <a href="https://claude.ai/code/artifact/fc395aaa-7f48-4b12-b489-356c3e5c0e7a">Home</a>
+      <a href="#community">Community</a>
+    </nav>
+  </div>
+  <div class="wrap"><p class="foot-tag">Agents that know what done means &middot; your model, your machine</p></div>
+</footer>
+
+<script>
+  (function () {
+    var root = document.documentElement, btn = document.getElementById('theme');
+    function cur() { return root.getAttribute('data-theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'); }
+    btn.addEventListener('click', function () { var n = cur() === 'dark' ? 'light' : 'dark'; root.setAttribute('data-theme', n); btn.textContent = n === 'dark' ? 'Light' : 'Dark'; });
+  })();
+</script>

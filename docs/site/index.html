@@ -1,0 +1,238 @@
+<title>Agentklar &mdash; Agents that know what done means</title>
+<meta name="description" content="Keep your coding agent. Add durable tracking, real evidence, and a Done only a human can give. A single local Go binary." />
+<style>
+  :root {
+    --bg:#FBFCFD; --ink:#141922; --muted:#586372; --faint:#93A0AE;
+    --line:#E6EAEF; --line-2:#D6DCE3; --code:#F3F6F9;
+    --accent:#2A55D8; --accent-ink:#1E45B4;
+    --attested:#1E845A; --blocked:#C03A2B;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    --maxw: 760px; --gutter: clamp(1.25rem, 5vw, 2rem);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg:#0F1318; --ink:#E7ECF2; --muted:#96A2AF; --faint:#5D6976;
+      --line:#212831; --line-2:#2C343E; --code:#161C23;
+      --accent:#6E97F8; --accent-ink:#87A9FB; --attested:#46B583; --blocked:#E05B4C;
+    }
+  }
+  :root[data-theme="light"] {
+    --bg:#FBFCFD; --ink:#141922; --muted:#586372; --faint:#93A0AE;
+    --line:#E6EAEF; --line-2:#D6DCE3; --code:#F3F6F9;
+    --accent:#2A55D8; --accent-ink:#1E45B4; --attested:#1E845A; --blocked:#C03A2B;
+  }
+  :root[data-theme="dark"] {
+    --bg:#0F1318; --ink:#E7ECF2; --muted:#96A2AF; --faint:#5D6976;
+    --line:#212831; --line-2:#2C343E; --code:#161C23;
+    --accent:#6E97F8; --accent-ink:#87A9FB; --attested:#46B583; --blocked:#E05B4C;
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink); font-family: var(--sans);
+    font-size: 17px; line-height: 1.65; -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: var(--maxw); margin: 0 auto; padding-inline: var(--gutter); }
+  a { color: var(--accent-ink); text-underline-offset: 3px; text-decoration-thickness: 1px; }
+
+  /* top bar */
+  header { border-bottom: 1px solid var(--line); }
+  .bar { max-width: var(--maxw); margin: 0 auto; padding: 1rem var(--gutter); display: flex; align-items: center; gap: 1.25rem; }
+  .brand { font-family: var(--mono); font-weight: 700; letter-spacing: -.01em; color: var(--ink); text-decoration: none; }
+  .brand .dot { color: var(--accent); }
+  nav { margin-left: auto; display: flex; gap: 1.25rem; align-items: center; }
+  nav a { font-size: .92rem; color: var(--muted); text-decoration: none; }
+  nav a:hover { color: var(--ink); }
+  .theme-btn { font-family: var(--mono); font-size: .72rem; letter-spacing: .08em; text-transform: uppercase; background: none; color: var(--muted); border: 1px solid var(--line-2); border-radius: 6px; padding: .3rem .6rem; cursor: pointer; }
+  .theme-btn:hover { color: var(--ink); border-color: var(--accent); }
+
+  .eyebrow { font-family: var(--mono); font-size: .72rem; letter-spacing: .16em; text-transform: uppercase; color: var(--accent-ink); font-weight: 600; margin: 0; }
+
+  /* hero */
+  .hero { padding: clamp(3rem, 9vw, 5.5rem) 0 clamp(2rem, 5vw, 3rem); }
+  h1 { font-size: clamp(2.3rem, 6.5vw, 3.4rem); line-height: 1.05; letter-spacing: -.03em; font-weight: 800; margin: 1rem 0 0; text-wrap: balance; }
+  h1 .clear { color: var(--accent); }
+  .sub { color: var(--muted); font-size: 1.16rem; margin: 1.15rem 0 0; max-width: 42ch; }
+  .cta { display: flex; flex-wrap: wrap; gap: .7rem; margin-top: 1.9rem; }
+  .btn { font-family: var(--mono); font-size: .9rem; font-weight: 600; padding: .7rem 1.15rem; border-radius: 7px; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; gap: .45rem; border: 1px solid transparent; }
+  .btn.primary { background: var(--accent); color: #fff; }
+  .btn.primary:hover { filter: brightness(1.07); }
+  .btn.ghost { color: var(--ink); border-color: var(--line-2); }
+  .btn.ghost:hover { border-color: var(--accent); color: var(--accent-ink); }
+
+  /* top features */
+  .feat { margin-top: 1.6rem; display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem 2.5rem; }
+  @media (max-width: 620px) { .feat { grid-template-columns: 1fr; } }
+  .feat .f h3 { font-size: 1.06rem; margin: 0 0 .4rem; letter-spacing: -.01em; }
+  .feat .f p { color: var(--muted); margin: 0; font-size: .96rem; }
+  .feat .f strong { color: var(--ink); font-weight: 650; }
+  .see { margin-top: 2rem; }
+  .exchange { font-family: var(--mono); font-size: .82rem; line-height: 1.85; margin-top: .8rem; color: var(--muted); max-width: 22rem; }
+  .exchange .row { display: flex; gap: .6rem; }
+  .exchange .m { color: var(--ink); }
+  .exchange .ok { color: var(--attested); margin-left: auto; }
+  .exchange .no { color: var(--blocked); margin-left: auto; }
+
+  /* get started */
+  section { border-top: 1px solid var(--line); padding: clamp(3rem, 7vw, 4.5rem) 0; }
+  h2 { font-size: clamp(1.5rem, 4vw, 2rem); letter-spacing: -.02em; font-weight: 750; margin: .5rem 0 0; }
+  .lead { color: var(--muted); margin: .7rem 0 0; }
+  .req { display: flex; flex-wrap: wrap; gap: .5rem; margin: 1.4rem 0 2rem; }
+  .req span { font-family: var(--mono); font-size: .76rem; color: var(--muted); }
+  .req span::after { content: "\00B7"; margin-left: .5rem; color: var(--faint); }
+  .req span:last-child::after { content: ""; }
+  .req b { color: var(--ink); font-weight: 600; }
+
+  .step { margin-top: 1.6rem; }
+  .step-h { display: flex; align-items: baseline; gap: .7rem; margin-bottom: .55rem; }
+  .step-h .n { font-family: var(--mono); font-size: .78rem; font-weight: 700; color: var(--accent-ink); }
+  .step-h .t { font-weight: 600; font-size: 1rem; }
+  .step-h .d { color: var(--faint); font-size: .88rem; margin-left: auto; font-family: var(--mono); }
+  .code { position: relative; background: var(--code); border: 1px solid var(--line); border-radius: 9px; }
+  .code button.copy { position: absolute; top: .5rem; right: .5rem; font-family: var(--mono); font-size: .66rem; letter-spacing: .05em; text-transform: uppercase; background: var(--bg); border: 1px solid var(--line-2); border-radius: 5px; color: var(--muted); padding: .22rem .5rem; cursor: pointer; }
+  .code button.copy:hover { border-color: var(--accent); color: var(--accent-ink); }
+  .code button.copy.done { border-color: var(--attested); color: var(--attested); }
+  pre { margin: 0; padding: .95rem 1.05rem; overflow-x: auto; font-family: var(--mono); font-size: .84rem; line-height: 1.7; color: var(--ink); }
+  pre .c { color: var(--faint); } pre .f { color: var(--accent-ink); }
+  .more { margin-top: 2.2rem; color: var(--muted); font-size: .96rem; }
+
+  footer { border-top: 1px solid var(--line); padding: 2rem 0 3rem; }
+  .foot { display: flex; flex-wrap: wrap; gap: .8rem 1.4rem; align-items: center; }
+  .foot .brand small { font-family: var(--mono); font-weight: 500; font-size: .7rem; color: var(--faint); margin-left: .5rem; }
+  .foot nav { margin-left: auto; }
+  .foot-tag { color: var(--faint); font-size: .78rem; font-family: var(--mono); margin: 1.3rem 0 0; }
+
+  ::selection { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+</style>
+
+<header>
+  <div class="bar">
+    <a class="brand" href="index.html">agentklar<span class="dot">.</span></a>
+    <nav>
+      <a href="https://claude.ai/code/artifact/6b5a6033-df97-4f54-85af-78ff6fa2898e">Features</a>
+      <a href="#start">Install</a>
+      <button class="theme-btn" id="theme" aria-label="Toggle theme">Theme</button>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <section class="hero" style="border-top:none">
+    <div class="wrap">
+      <p class="eyebrow">Local-first &middot; your agent, your machine</p>
+      <h1>Vibe-code fast. Ship code that&apos;s actually <span class="clear">done</span>.</h1>
+      <p class="sub">AI agents love to say &ldquo;done&rdquo; when they&apos;re not. Agentklar tracks the work, runs your real checks, keeps the proof, and lets only you sign off &mdash; so you can move fast without shipping slop.</p>
+      <div class="cta">
+        <a href="#start" class="btn primary">Get started</a>
+        <a href="https://claude.ai/code/artifact/6b5a6033-df97-4f54-85af-78ff6fa2898e" class="btn ghost">See all features &rarr;</a>
+      </div>
+    </div>
+  </section>
+
+  <section id="why">
+    <div class="wrap">
+      <p class="eyebrow">What you get</p>
+      <h2>Trust what your agent hands you.</h2>
+      <div class="feat">
+        <div class="f">
+          <h3>Proof, not vibes</h3>
+          <p>Agentklar runs your project&apos;s own checks and keeps the evidence &mdash; command, exit code, logs. No more &ldquo;looks done to me.&rdquo;</p>
+        </div>
+        <div class="f">
+          <h3>Only you call it done</h3>
+          <p>The agent can claim, submit, and pass QA. It <strong>cannot approve its own work</strong> &mdash; that&apos;s your call, from your own account.</p>
+          <div class="exchange" role="img" aria-label="An agent passes QA, then is refused when it tries to approve its own work.">
+            <div class="row"><span>&rarr;</span><span class="m">record_qa</span><span class="ok">pass</span></div>
+            <div class="row"><span>&rarr;</span><span class="m">approve_task</span><span class="no">refused</span></div>
+          </div>
+        </div>
+        <div class="f">
+          <h3>Bring your own agent</h3>
+          <p>Codex, Claude Code, OpenCode &mdash; your model, your machine. Agentklar never holds your keys or picks your model.</p>
+        </div>
+        <div class="f">
+          <h3>Never lose the thread</h3>
+          <p>Work lives in a local database, not the chat. Any session &mdash; today or next week &mdash; resumes exactly where the last one stopped.</p>
+        </div>
+      </div>
+      <div class="see"><a href="https://claude.ai/code/artifact/6b5a6033-df97-4f54-85af-78ff6fa2898e" class="btn ghost">See all features &rarr;</a></div>
+    </div>
+  </section>
+
+  <section id="start">
+    <div class="wrap">
+      <p class="eyebrow">Get started</p>
+      <h2>Build it, run one task end to end.</h2>
+      <p class="lead">One Go binary. No installer, no Docker, no sudo. Here is the whole path.</p>
+      <div class="req"><span><b>Go</b> 1.25+</span><span><b>git</b></span><span><b>macOS</b> or <b>Linux</b></span></div>
+
+      <div class="step">
+        <div class="step-h"><span class="n">1</span><span class="t">Build</span></div>
+        <div class="code"><button class="copy" data-copy="git clone https://github.com/kaltstart-co/agentklar
+cd agentklar && go build -o agentklar ./cmd/agentklar">Copy</button>
+<pre>git clone https://github.com/kaltstart-co/agentklar
+cd agentklar &amp;&amp; go build -o agentklar ./cmd/agentklar</pre></div>
+      </div>
+
+      <div class="step">
+        <div class="step-h"><span class="n">2</span><span class="t">Create a task</span><span class="d">you set the goal</span></div>
+        <div class="code"><button class="copy" data-copy='./agentklar init
+./agentklar task new AK-1 Fix the parser \
+  --criteria "handles empty input;tests pass" --verify "go test ./..."
+./agentklar task ready AK-1'>Copy</button>
+<pre>./agentklar init
+./agentklar task new AK-1 Fix the parser \
+  <span class="f">--criteria</span> "handles empty input;tests pass" <span class="f">--verify</span> "go test ./..."
+./agentklar task ready AK-1</pre></div>
+      </div>
+
+      <div class="step">
+        <div class="step-h"><span class="n">3</span><span class="t">Let your agent work</span><span class="d">point its MCP at agentklar mcp</span></div>
+        <div class="code"><button class="copy" data-copy='echo &apos;{"jsonrpc":"2.0","id":1,"method":"claim_task","params":{"task_id":"AK-1","expected_state":"ready","holder":"claude-code"}}&apos; | ./agentklar mcp'>Copy</button>
+<pre><span class="c"># the agent claims, writes code, and submits &mdash; over MCP</span>
+echo '{"jsonrpc":"2.0",...,"method":"claim_task",...}' | ./agentklar mcp</pre></div>
+      </div>
+
+      <div class="step">
+        <div class="step-h"><span class="n">4</span><span class="t">Gate, then approve</span><span class="d">only you finish it</span></div>
+        <div class="code"><button class="copy" data-copy="./agentklar gate AK-1
+./agentklar approve AK-1">Copy</button>
+<pre>./agentklar gate AK-1        <span class="c"># runs your checks, keeps the proof</span>
+./agentklar approve AK-1     <span class="c"># your call &mdash; the agent can't make it</span></pre></div>
+      </div>
+
+      <p class="more">That&apos;s the whole loop. Want the state machine, evidence model, and the community library? <a href="https://claude.ai/code/artifact/6b5a6033-df97-4f54-85af-78ff6fa2898e">See all features &rarr;</a></p>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap foot">
+    <a class="brand" href="index.html">agentklar<span class="dot">.</span><small>by Kaltstart</small></a>
+    <nav>
+      <a href="https://claude.ai/code/artifact/6b5a6033-df97-4f54-85af-78ff6fa2898e">Features</a>
+      <a href="#start">Install</a>
+    </nav>
+  </div>
+  <div class="wrap"><p class="foot-tag">Agents that know what done means &middot; your model, your machine</p></div>
+</footer>
+
+<script>
+  (function () {
+    var root = document.documentElement, btn = document.getElementById('theme');
+    function cur() { return root.getAttribute('data-theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'); }
+    btn.addEventListener('click', function () { var n = cur() === 'dark' ? 'light' : 'dark'; root.setAttribute('data-theme', n); btn.textContent = n === 'dark' ? 'Light' : 'Dark'; });
+    document.querySelectorAll('.copy').forEach(function (b) {
+      b.addEventListener('click', function () {
+        navigator.clipboard.writeText(b.getAttribute('data-copy')).then(function () {
+          var o = b.textContent; b.textContent = 'Copied'; b.classList.add('done');
+          setTimeout(function () { b.textContent = o; b.classList.remove('done'); }, 1500);
+        });
+      });
+    });
+  })();
+</script>
