@@ -2,14 +2,22 @@
 
 **Agents that know what done means.**
 
+[![CI](https://github.com/kaltstart-co/agentklar/actions/workflows/ci.yml/badge.svg)](https://github.com/kaltstart-co/agentklar/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Site](https://img.shields.io/badge/site-agentklar.kaltstart.co-2A55D8.svg)](https://agentklar.kaltstart.co)
+
 A local-first, agent-neutral toolkit that adds durable work tracking, machine-attested
 evidence, and a human-controlled completion boundary to AI-assisted development. You keep
 your own coding agent — Codex, Claude Code, OpenCode, Gemini CLI. Agentklar supplies the
 workflow contracts those agents lack.
 
-> **Status: Phase 0/1 development slice.** Not installable yet. There is no signed release,
-> no installer, and no Vikunja integration wired to a live server. Per the delivery plan,
-> distribution work begins only after the workflow survives a dogfood pilot.
+Website: **[agentklar.kaltstart.co](https://agentklar.kaltstart.co)** · a
+[Kaltstart](https://kaltstart.co) project.
+
+> **Status: Phase 0/1 development slice.** The workflow is real and tested end to end,
+> including a live Vikunja adapter with nonce-bound human approval. There is not yet a
+> signed release or installer — you build from source. Per the delivery plan, distribution
+> work begins after the workflow survives a dogfood pilot.
 
 ## What works today
 
@@ -156,10 +164,27 @@ signed releases, and staged updates.
 See `docs/superpowers/specs/` for the design and `docs/superpowers/plans/` for the phased
 delivery plan.
 
+## Contributing
+
+Contributions are welcome — Agentklar is early, so good PRs have real leverage. Start with
+[CONTRIBUTING.md](CONTRIBUTING.md) for setup, the quality bar, and where help is wanted.
+Please read the [Code of Conduct](CODE_OF_CONDUCT.md), and report security issues privately
+via [SECURITY.md](SECURITY.md) rather than a public issue.
+
+```bash
+go build ./...
+go test ./...
+```
+
+Good first areas: cross-provider reviewer adapters, FTS5 context indexing,
+established-project onboarding, and the [community pack library](docs/superpowers/plans/2026-07-21-agentklar-community-library-plan.md).
+
 ## Design documents
 
 - [Design spec](docs/superpowers/specs/2026-07-15-agentic-sdlc-quality-toolkit-design.md)
 - [Master delivery plan](docs/superpowers/plans/2026-07-17-agentklar-master-delivery-plan.md)
 - [Community library plan](docs/superpowers/plans/2026-07-21-agentklar-community-library-plan.md)
 
-Published by Kaltstart.
+## License
+
+[MIT](LICENSE) © 2026 Kaltstart · [kaltstart.co](https://kaltstart.co)

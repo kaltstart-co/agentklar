@@ -1,0 +1,34 @@
+name: Feature request
+description: Propose a change or new capability
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For anything that touches the workflow, the completion boundary, or a public
+        contract, please describe the approach here first so we can agree before code.
+        Context: docs/superpowers/specs and docs/superpowers/plans.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do that's hard or impossible today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: checkboxes
+    id: boundary
+    attributes:
+      label: Boundary check
+      options:
+        - label: This does not add an agent-callable path to approve, reject, or mark a task done.
+          required: true
