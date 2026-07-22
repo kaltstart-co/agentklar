@@ -133,7 +133,6 @@ type ExecutionTarget string
 const (
 	TargetAny      ExecutionTarget = "any"
 	TargetCodex    ExecutionTarget = "codex"
-	TargetClaude   ExecutionTarget = "claude"
 	TargetGemini   ExecutionTarget = "gemini"
 	TargetOpenCode ExecutionTarget = "opencode"
 )

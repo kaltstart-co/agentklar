@@ -171,7 +171,7 @@
         <div class="p">
           <span class="n">01</span>
           <h4>You run one binary</h4>
-          <p>No servers to babysit, no Docker, no sudo. Point your agent (Codex, Claude Code, OpenCode) at it and keep your own model.</p>
+          <p>No servers to babysit, no Docker, no sudo. Point your agent (Codex, OpenCode, Gemini CLI) at it and keep your own model.</p>
         </div>
         <div class="p">
           <span class="n">02</span>
@@ -303,7 +303,7 @@
         </div>
         <div class="grp">
           <h3>Run &amp; connect the agent</h3>
-          <div class="rrow"><code>agentklar mcp</code><span class="d">Start the agent-facing server. Point Codex / Claude Code / OpenCode at this.</span></div>
+          <div class="rrow"><code>agentklar mcp</code><span class="d">Start the agent-facing server. Point Codex / OpenCode / Gemini CLI at this.</span></div>
           <div class="rrow"><code>agentklar gate &lt;id&gt;</code><span class="d">Run the checks for the submitted commit and store machine-attested evidence.</span></div>
           <div class="rrow"><code>agentklar reconcile</code><span class="d">Pull board comments and apply a valid human approval to finish a task.</span></div>
         </div>
@@ -323,7 +323,7 @@
       <p class="lead">It doesn&apos;t replace your tools &mdash; it wires the ones you already use into one workflow.</p>
       <div class="map">
         <div class="maprow">
-          <div class="node">Codex</div><div class="node">Claude Code</div><div class="node">OpenCode</div>
+          <div class="node">Codex</div><div class="node">Gemini CLI</div><div class="node">OpenCode</div>
         </div>
         <div class="maparrow">&darr;&nbsp; MCP &nbsp;(<span style="font-family:var(--mono);font-size:.7rem">agentklar mcp</span>)</div>
         <div class="node core">Agentklar<span class="s">the control plane on your machine</span></div>

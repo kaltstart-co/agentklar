@@ -14,7 +14,7 @@
 
 - Product name: Agentklar, published by Kaltstart.
 - Platforms: macOS and Linux, native and Docker-capable; Docker is optional.
-- Brain and harness: the developer's existing Codex, Claude, OpenCode, Gemini, Cursor, Copilot, or compatible client.
+- Brain and harness: the developer's existing Codex, OpenCode, Gemini, Cursor, Copilot, or compatible client.
 - UI: native agent UI for prompts and approvals; Vikunja or Plane for the board; mdBook for documentation. Agentklar builds no general web UI.
 - Tracker: Vikunja is the lightweight default; Plane is an optional full profile.
 - Authority: tracker content stays authoritative in Vikunja; `control.sqlite` owns leases, protected transitions, evidence attestations, review snapshots, and pending approvals. Human and Agentklar tracker identities are separate.
@@ -22,7 +22,7 @@
 - Installation: one bootstrap command starts an interactive, idempotent installer. No `sudo` by default.
 - Updates: Propose is the default; stage, validate, activate, and automatically roll back on failure.
 - Isolation: installation contains workspaces; workspaces contain projects; data and credentials never cross workspaces implicitly.
-- Task ownership: human or persistent agent role plus an execution target such as Codex or Claude.
+- Task ownership: human or persistent agent role plus an execution target such as Codex or Gemini.
 - Repository safety: Standard/Major code tasks use dedicated worktrees. Quick `auto` may use the clean primary worktree under an exclusive repository lease. Reviewers use disposable snapshots.
 - Completion: implementation explicitly submits once it believes the change is complete.
 - Review: when model review is required, prefer a different provider and fall back to a fresh isolated same-brain session.
@@ -182,7 +182,7 @@ Passing this pilot means the workflow was not falsified in the small sample; it 
 
 **Plan file:** `docs/superpowers/plans/2026-07-17-agentklar-reviewer-adapters-plan.md`
 
-**Owns:** Codex, Claude Code, Gemini CLI, and OpenCode detection/invocation, archive/sparse review snapshots, policy-controlled clone fallback, adapter-specific restrictions, provider selection, fresh-session isolation, provenance, timeout/cancellation, and optional hosted PR publishing.
+**Owns:** Codex, Gemini CLI, and OpenCode detection/invocation, archive/sparse review snapshots, policy-controlled clone fallback, adapter-specific restrictions, provider selection, fresh-session isolation, provenance, timeout/cancellation, and optional hosted PR publishing.
 
 - [ ] Prefer an installed reviewer whose provider differs from the implementer.
 - [ ] Use a fresh same-brain session when no different provider is available.
@@ -196,7 +196,7 @@ Passing this pilot means the workflow was not falsified in the small sample; it 
 - [ ] Treat malformed reviewer output as review failure, not as approval.
 - [ ] Publish inline hosted-PR findings only when the user enables a Git provider adapter.
 
-**Exit:** The same task can be implemented by Codex and reviewed by Claude, or reviewed safely by a fresh Codex session when Claude is unavailable.
+**Exit:** The same task can be implemented by Codex and reviewed by Gemini, or reviewed safely by a fresh Codex session when Gemini is unavailable.
 
 ### Task 6: Add focused context and established-project onboarding
 
@@ -277,7 +277,7 @@ Agent support is advertised by tested capability, not by name recognition:
 - **Assisted:** generated skills/work packets work, but one or more automatic operations require a local companion or manual invocation.
 - **Configuration-only:** Agentklar can install guidance/configuration, but cannot claim automated workflow integration.
 
-Initial release qualification targets Codex, Claude Code, and OpenCode. Gemini follows in the reviewer-adapter phase. Cursor, Copilot, web-only, and cloud-only surfaces are added only at the capability tier actually demonstrated.
+Initial release qualification targets Codex, OpenCode, and Gemini CLI. Gemini follows in the reviewer-adapter phase. Cursor, Copilot, web-only, and cloud-only surfaces are added only at the capability tier actually demonstrated.
 
 ## 7. Default installation profiles
 

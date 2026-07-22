@@ -39,7 +39,7 @@ Usage:
   agentklar doctor                      Report workspace health
 
 Flags for 'task new':
-  --lane quick|standard|major  --criteria "a;b;c"  --verify "how"  --target codex|claude|any
+  --lane quick|standard|major  --criteria "a;b;c"  --verify "how"  --target codex|gemini|any
 `
 
 func main() {

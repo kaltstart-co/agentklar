@@ -53,7 +53,7 @@ Agentklar is a tool about *not shipping slop*, so we hold its own code to the sa
 
 Good first areas, roughly in roadmap order:
 
-- Cross-provider reviewer adapters (Codex / Claude Code / Gemini / OpenCode) with
+- Cross-provider reviewer adapters (Codex / Gemini / OpenCode) with
   read-only, disposable review snapshots.
 - FTS5 context indexing and bounded work packets.
 - Established-project onboarding (`agentklar init` discovery).

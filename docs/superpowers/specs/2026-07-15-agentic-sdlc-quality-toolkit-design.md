@@ -15,7 +15,7 @@
 
 ## 1. Goal
 
-Build a local-first, agent-neutral toolkit that improves the quality and productivity of AI-assisted software development across sessions and projects. Developers continue using their preferred coding model and harness—Codex, Claude Code, OpenCode, Cursor, Gemini CLI, Copilot, or another compatible client. The toolkit supplies durable work tracking, focused context, evidence-based verification, documentation discipline, reusable methods, and human approval without becoming a replacement IDE or agent runtime.
+Build a local-first, agent-neutral toolkit that improves the quality and productivity of AI-assisted software development across sessions and projects. Developers continue using their preferred coding model and harness—Codex, OpenCode, Cursor, Gemini CLI, Copilot, or another compatible client. The toolkit supplies durable work tracking, focused context, evidence-based verification, documentation discipline, reusable methods, and human approval without becoming a replacement IDE or agent runtime.
 
 The primary outcomes are:
 
@@ -33,7 +33,7 @@ The primary outcomes are:
 The toolkit will not:
 
 - Provide its own coding model, model router, or coding harness.
-- Replace the native UI of Codex, Claude, OpenCode, Cursor, or another agent.
+- Replace the native UI of Codex, OpenCode, Cursor, or another agent.
 - Become a general MCP, cloud SDK, framework-skill, or deployment marketplace.
 - Install Azure, Vercel, Sentry, database, or framework packages by default.
 - Build a custom Kanban board, general-purpose tracker database, documentation renderer, or package manager. The narrow coordination ledger is not a task database.
@@ -278,9 +278,9 @@ agent:documentation
 agent:research
 ```
 
-Roles are not bound to a specific model. Codex may execute `agent:implementation` in one session and Claude Code in another. Tracker adapters map these roles to native assignees where practical and to visible labels where the lightweight backend lacks a suitable native identity.
+Roles are not bound to a specific model. Codex may execute `agent:implementation` in one session and Gemini CLI in another. Tracker adapters map these roles to native assignees where practical and to visible labels where the lightweight backend lacks a suitable native identity.
 
-Each task has one primary assignee, optional collaborators, an execution target, and required review and approval roles. Execution targets identify the harness expected to claim the task, for example `codex`, `claude`, `gemini`, `opencode`, or `any`. Agentklar roles remain stable even when the selected harness or model changes.
+Each task has one primary assignee, optional collaborators, an execution target, and required review and approval roles. Execution targets identify the harness expected to claim the task, for example `codex`, `gemini`, `opencode`, or `any`. Agentklar roles remain stable even when the selected harness or model changes.
 
 Every claim is atomic within `control.sqlite` and carries an expiring lease, heartbeat, lease generation, and fencing token. State-changing calls include the expected task state and fencing token. A stale or duplicate worker cannot update protected workflow state after another worker has acquired a newer lease. Repeated submissions use idempotency keys so retries cannot create duplicate comments, evidence, or reviews.
 
@@ -352,7 +352,7 @@ The default reviewer policy is:
 3. Never pass the implementation conversation to the reviewer.
 4. Mark every review with provider, model when known, harness, prompt-pack version, base commit, head commit, and whether it was cross-provider or same-brain.
 
-Reviewer adapters invoke already-installed and authenticated native clients such as Codex, Claude Code, Gemini CLI, or OpenCode. Agentklar does not embed provider SDKs or become a model router. OpenCode may be enabled as an optional BYOK multi-provider reviewer harness. A hosted PR adapter may publish the same findings to GitHub, GitLab, or another provider, but hosted PR creation and Qodo PR-Agent integration remain optional.
+Reviewer adapters invoke already-installed and authenticated native clients such as Codex, Gemini CLI, or OpenCode. Agentklar does not embed provider SDKs or become a model router. OpenCode may be enabled as an optional BYOK multi-provider reviewer harness. A hosted PR adapter may publish the same findings to GitHub, GitLab, or another provider, but hosted PR creation and Qodo PR-Agent integration remain optional.
 
 Each adapter declares tested client-version ranges and probes capabilities at runtime. Unknown versions, missing sandbox capabilities, malformed structured output, authentication failures, or rate limits fail the review closed and return an actionable diagnostic; they never count as approval.
 
@@ -469,7 +469,7 @@ release_task(task_id, fencing_token)
 
 There is intentionally no agent-callable approval, rejection, or Done method. Human decisions arrive through a trusted tracker actor or protocol-level elicitation response.
 
-A Codex, Claude, Gemini, or OpenCode routine may periodically request matching Ready tasks and atomically claim one. Agentklar does not run an autonomous coding loop or wake paid models itself. When a platform cannot reach the local MCP service, it can still use generated skills and a handoff packet, but automatic claiming is unavailable and must not be advertised as full compatibility.
+A Codex, Gemini, or OpenCode routine may periodically request matching Ready tasks and atomically claim one. Agentklar does not run an autonomous coding loop or wake paid models itself. When a platform cannot reach the local MCP service, it can still use generated skills and a handoff packet, but automatic claiming is unavailable and must not be advertised as full compatibility.
 
 ### 10.12 Existing-project onboarding
 
@@ -627,7 +627,7 @@ Implementation will use the smallest relevant checks at each boundary:
 - Quality tests proving changed-path recipe selection, permission enforcement, machine-attested evidence, cleanup, and L0–L3 aggregation across representative JavaScript/TypeScript, Python, Go, and mixed repositories without embedding language-specific test frameworks.
 - Optional APM-adapter tests for lockfile replay, audit failure, and target compilation.
 - Update tests for staging, health failure, atomic activation, and rollback.
-- End-to-end smoke tests for Codex, Claude Code, OpenCode, Cursor, Gemini CLI, and Copilot configurations where automatable.
+- End-to-end smoke tests for Codex, OpenCode, Cursor, Gemini CLI, and Copilot configurations where automatable.
 - Native and Docker matrix tests on macOS arm64/x64 and Linux arm64/x64.
 
 Tests must retain real commands, exit codes, and artifacts where the product itself promises evidence. Mock-only adapter tests are insufficient; each supported tracker gets a disposable integration environment in CI or a documented release qualification run.
@@ -657,7 +657,7 @@ The system is too broad for one implementation plan. Delivery uses thin end-to-e
 
 ### Phase 0: Contracts and proof harness
 
-Freeze field authority, trusted human approval, the task state machine, tracker reconciliation and echo suppression, evidence provenance, QA execution profiles, reviewer findings, quality-recipe format, repository-isolation rules, compatibility tiers, and local threat boundaries. Build disposable proofs against Vikunja plus one Codex or Claude adapter. Use a development binary and manual configuration; no public installer is released.
+Freeze field authority, trusted human approval, the task state machine, tracker reconciliation and echo suppression, evidence provenance, QA execution profiles, reviewer findings, quality-recipe format, repository-isolation rules, compatibility tiers, and local threat boundaries. Build disposable proofs against Vikunja plus one Codex or OpenCode adapter. Use a development binary and manual configuration; no public installer is released.
 
 ### Phase 1: Dogfood the workflow vertical slice
 
@@ -665,11 +665,11 @@ Implement one local workspace, separate human/service tracker identities, Vikunj
 
 ### Phase 2: Distribution foundation and useful alpha
 
-After the pilot reveals no unresolved workflow or trust-boundary failure and the user explicitly approves continuing, ship the signed native binary and interactive installer for macOS and Linux, production workspace/project registration, one MCP server, health checks, safe configuration backup, and a minimal staged update/rollback path. Support Codex, Claude Code, and OpenCode configuration first. The same flow must work without Docker; Vikunja may run natively or in Docker.
+After the pilot reveals no unresolved workflow or trust-boundary failure and the user explicitly approves continuing, ship the signed native binary and interactive installer for macOS and Linux, production workspace/project registration, one MCP server, health checks, safe configuration backup, and a minimal staged update/rollback path. Support Codex, OpenCode, and Gemini CLI configuration first. The same flow must work without Docker; Vikunja may run natively or in Docker.
 
 ### Phase 3: Independent multi-brain review
 
-Add native reviewer adapters for Codex, Claude Code, Gemini CLI, and OpenCode; cross-provider selection; fresh same-brain fallback; prompt-pack versioning; dynamic reviewer skills; review-loop limits; optional hosted PR comment publishing; and strict stale-commit protection. Agentklar still does not own provider keys or model routing.
+Add native reviewer adapters for Codex, Gemini CLI, and OpenCode; cross-provider selection; fresh same-brain fallback; prompt-pack versioning; dynamic reviewer skills; review-loop limits; optional hosted PR comment publishing; and strict stale-commit protection. Agentklar still does not own provider keys or model routing.
 
 ### Phase 4: Context, established projects, and documentation
 
@@ -690,7 +690,7 @@ Each phase gets its own implementation specification and must ship or demonstrat
 The completed toolkit must demonstrate that:
 
 1. One verified command installs the interactive CLI on supported macOS and Linux architectures without requiring Docker or `sudo`.
-2. The same installation can configure at least Codex, Claude Code, and OpenCode while leaving their native UIs and model choices intact.
+2. The same installation can configure at least Codex, OpenCode, and Gemini CLI while leaving their native UIs and model choices intact.
 3. Two concurrent agent sessions can bind to different workspaces without cross-workspace retrieval.
 4. A new session can resume a ticket from durable state without receiving the earlier raw conversation.
 5. The lightweight profile runs with Vikunja, SQLite, bundled core Review Packs, project-native quality recipes, and no APM, Docker, mdBook daemon, or embedding model.

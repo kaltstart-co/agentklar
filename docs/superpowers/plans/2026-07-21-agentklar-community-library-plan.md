@@ -61,7 +61,7 @@ license     = "MIT"
 homepage    = "https://github.com/example/agentklar-django-review"
 
 [compatibility]
-agents      = ["codex", "claude", "opencode"]   # tested targets
+agents      = ["codex", "gemini", "opencode"]   # tested targets
 scopes      = ["**/models.py", "**/migrations/**"]  # when this pack loads
 
 [cost]

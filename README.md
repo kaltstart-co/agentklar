@@ -8,7 +8,7 @@
 
 A local-first, agent-neutral toolkit that adds durable work tracking, machine-attested
 evidence, and a human-controlled completion boundary to AI-assisted development. You keep
-your own coding agent — Codex, Claude Code, OpenCode, Gemini CLI. Agentklar supplies the
+your own coding agent — Codex, OpenCode, Gemini CLI, and Cursor. Agentklar supplies the
 workflow contracts those agents lack.
 
 Website: **[agentklar.kaltstart.co](https://agentklar.kaltstart.co)** · a
@@ -75,7 +75,7 @@ go build -o agentklar ./cmd/agentklar
 
 # An agent claims and submits over MCP stdio:
 echo '{"jsonrpc":"2.0","id":1,"method":"claim_task",
-       "params":{"task_id":"AK-1","expected_state":"ready","holder":"claude-code"}}' \
+       "params":{"task_id":"AK-1","expected_state":"ready","holder":"codex"}}' \
   | ./agentklar mcp
 
 ./agentklar gate AK-1             # runs recipes, records evidence, advances state

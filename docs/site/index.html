@@ -188,7 +188,7 @@
         </div>
         <div class="f">
           <h3>Bring your own agent</h3>
-          <p>Codex, Claude Code, OpenCode &mdash; your model, your machine. Agentklar never holds your keys or picks your model.</p>
+          <p>Codex, OpenCode, Gemini CLI &mdash; your model, your machine. Agentklar never holds your keys or picks your model.</p>
         </div>
         <div class="f">
           <h3>Never lose the thread</h3>
@@ -228,7 +228,7 @@ cd agentklar &amp;&amp; go build -o agentklar ./cmd/agentklar</pre></div>
 
       <div class="step">
         <div class="step-h"><span class="n">3</span><span class="t">Let your agent work</span><span class="d">point its MCP at agentklar mcp</span></div>
-        <div class="cb"><button class="copy" data-copy='echo &apos;{"jsonrpc":"2.0","id":1,"method":"claim_task","params":{"task_id":"AK-1","expected_state":"ready","holder":"claude-code"}}&apos; | ./agentklar mcp'>Copy</button>
+        <div class="cb"><button class="copy" data-copy='echo &apos;{"jsonrpc":"2.0","id":1,"method":"claim_task","params":{"task_id":"AK-1","expected_state":"ready","holder":"codex"}}&apos; | ./agentklar mcp'>Copy</button>
 <pre><span class="c"># the agent claims, writes code, and submits &mdash; over MCP</span>
 echo '{"jsonrpc":"2.0",...,"method":"claim_task",...}' | ./agentklar mcp</pre></div>
       </div>
