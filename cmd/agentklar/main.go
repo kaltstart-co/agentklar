@@ -36,6 +36,10 @@ Usage:
   agentklar approve <id>                Approve a task awaiting human approval (human channel)
   agentklar reject <id> <reason>        Reject a task awaiting human approval
   agentklar mcp                         Run the agent-facing MCP server on stdio
+  agentklar mcp install [--client]      Print MCP config to connect your agent
+  agentklar tracker connect ...         Connect a Vikunja board (new or existing)
+  agentklar tracker sync                Place every task's card in its state column
+  agentklar reconcile                   Apply human approvals posted on the board
   agentklar doctor                      Report workspace health
   agentklar version                     Print the version, commit, and build date
 
@@ -124,6 +128,9 @@ func run(args []string) error {
 		}
 		return cmdDecide(args[1], false, strings.Join(args[2:], " "))
 	case "mcp":
+		if len(args) > 1 && args[1] == "install" {
+			return cmdMCPInstall(args[2:])
+		}
 		return cmdMCP()
 	case "tracker":
 		return cmdTracker(args[1:])
@@ -241,6 +248,7 @@ func cmdTask(args []string) error {
 				}
 				if tt, terr := cfg.Client().CreateTask(cfg.ProjectID, t.ID+": "+t.Title, desc); terr == nil {
 					t.TrackerID = fmt.Sprintf("%d", tt.ID)
+					placeCard(dir, t.TrackerID, contracts.StateDraft)
 				} else {
 					fmt.Fprintf(os.Stderr, "warning: tracker projection failed: %v\n", terr)
 				}
@@ -359,6 +367,7 @@ func cmdGate(taskID string) error {
 		fmt.Printf("%-5s slop/%s %s:%d %s\n", kind, f.Rule, f.File, f.Line, f.Evidence)
 	}
 	after, _ := eng.GetTask(taskID)
+	placeCard(dir, after.TrackerID, after.State)
 	fmt.Printf("\ngate: passed=%v → state=%s\n", res.Passed, after.State)
 	if after.State == contracts.StateUserApproval {
 		nonce, _, _ := eng.PendingApproval(taskID)
@@ -388,7 +397,7 @@ func cmdGate(taskID string) error {
 // is available here only for the single-user dev slice, and it prints that
 // warning every time so the limitation never becomes invisible.
 func cmdDecide(taskID string, approve bool, reason string) error {
-	eng, _, err := openEngine()
+	eng, dir, err := openEngine()
 	if err != nil {
 		return err
 	}
@@ -407,6 +416,7 @@ func cmdDecide(taskID string, approve bool, reason string) error {
 		eng.AddComment(taskID, string(contracts.ActorHuman), "Change Request", reason)
 	}
 	t, _ := eng.GetTask(taskID)
+	placeCard(dir, t.TrackerID, t.State)
 	fmt.Printf("%s %s → %s\n", taskID, decision, t.State)
 	fmt.Fprintln(os.Stderr,
 		"warning: the dev CLI approval channel is not agent-proof; the shipped product requires "+
