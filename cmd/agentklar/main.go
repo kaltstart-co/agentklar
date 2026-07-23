@@ -276,16 +276,45 @@ func cmdTask(args []string) error {
 		return nil
 
 	case "list":
+		fs := flag.NewFlagSet("task list", flag.ContinueOnError)
+		jsonOutput := fs.Bool("json", false, "output as JSON")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
 		tasks, err := eng.ListAll()
 		if err != nil {
 			return err
 		}
-		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "ID\tLANE\tSTATE\tTITLE")
-		for _, t := range tasks {
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", t.ID, t.Lane, t.State, t.Title)
+		if *jsonOutput {
+			type jsonTask struct {
+				ID    string `json:"id"`
+				Lane  string `json:"lane"`
+				State string `json:"state"`
+				Title string `json:"title"`
+			}
+			out := make([]jsonTask, len(tasks))
+			for i, t := range tasks {
+				out[i] = jsonTask{
+					ID:    t.ID,
+					Lane:  string(t.Lane),
+					State: string(t.State),
+					Title: t.Title,
+				}
+			}
+			b, err := json.Marshal(out)
+			if err != nil {
+				return err
+			}
+			fmt.Println(string(b))
+			return nil
+		} else {
+			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+			fmt.Fprintln(w, "ID\tLANE\tSTATE\tTITLE")
+			for _, t := range tasks {
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", t.ID, t.Lane, t.State, t.Title)
+			}
+			return w.Flush()
 		}
-		return w.Flush()
 
 	case "show":
 		if len(args) < 2 {
