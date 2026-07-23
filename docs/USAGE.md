@@ -125,6 +125,29 @@ agentklar tracker sync
 
 ---
 
+## Menu-bar widget (macOS)
+
+A small menu-bar app shows how many tasks are **awaiting your approval** across all your
+workspaces, lists them (click one to open its tracker card), and carries quick links to
+your boards and the website.
+
+```bash
+scripts/build-bar.sh          # builds dist/Agentklar.app
+open dist/Agentklar.app        # launches the menu-bar widget (✓ N when reviews are waiting)
+```
+
+The title shows `✓` when everything's clear and `✓ N` when N tasks need you. To start it
+automatically, add `Agentklar.app` in **System Settings → General → Login Items**.
+
+**Add your own links** (Jira, docs, anything) — they show up in the menu without a rebuild.
+Create `~/.config/agentklar/links.toml`:
+
+```toml
+[[link]]
+name = "Team Jira"
+url  = "https://your-org.atlassian.net/jira/software/projects/ABC/boards/1"
+```
+
 ## 5. Everyday commands
 
 | Command | What it does |
