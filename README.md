@@ -14,6 +14,9 @@ workflow contracts those agents lack.
 Website: **[agentklar.kaltstart.co](https://agentklar.kaltstart.co)** · a
 [Kaltstart](https://kaltstart.co) project.
 
+**New here?** The full **[Setup & Usage guide](docs/USAGE.md)** takes you from install →
+connect your agent (MCP) → set up a board (new or existing Vikunja) → run a task.
+
 > **Status: Phase 0/1 development slice.** The workflow is real and tested end to end,
 > including a live Vikunja adapter with nonce-bound human approval. There is not yet a
 > signed release or installer — you build from source. Per the delivery plan, distribution
