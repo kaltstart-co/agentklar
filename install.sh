@@ -143,8 +143,8 @@ cat <<EOF
 
 $(color "Next steps")
   agentklar init                       # create a workspace for the current repo
+  agentklar open ui                    # open the native web UI (board/memory/approvals)
   agentklar status                     # one-glance overview
-  agentklar open board                 # open the Vikunja board (if connected)
 
 Website: https://agentklar.kaltstart.co
 EOF
