@@ -90,7 +90,32 @@ func (s *Server) Dispatch(req Request) Response {
 		resp.Result = map[string]interface{}{
 			"protocolVersion": "2025-06-18",
 			"serverInfo":      map[string]string{"name": "agentklar", "version": "0.1.0-dev"},
-			"capabilities":    map[string]interface{}{"tools": map[string]interface{}{}},
+			"capabilities": map[string]interface{}{
+				"tools":   map[string]interface{}{},
+				"prompts": map[string]interface{}{},
+			},
+		}
+
+	case "prompts/list":
+		resp.Result = map[string]interface{}{"prompts": PromptDefs}
+
+	case "prompts/get":
+		var p struct {
+			Name string `json:"name"`
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return fail(err)
+		}
+		text, ok := PromptText[p.Name]
+		if !ok {
+			resp.Error = &RPCError{-32602, fmt.Sprintf("unknown prompt %q", p.Name)}
+			return resp
+		}
+		resp.Result = map[string]interface{}{
+			"messages": []map[string]interface{}{{
+				"role":    "user",
+				"content": map[string]string{"type": "text", "text": text},
+			}},
 		}
 
 	case "tools/list":

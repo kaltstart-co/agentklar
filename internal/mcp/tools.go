@@ -68,3 +68,33 @@ var ToolDefs = []ToolDef{
 		"task_id": taskID,
 	}, "task_id")},
 }
+
+// Prompt surface: the workflows a human reaches for from the client's
+// slash menu. Approval stays human-only — no prompt drives a decision.
+
+type PromptDef struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
+var PromptDefs = []PromptDef{
+	{"next", "Claim the next Ready task and work it to submission."},
+	{"status", "Show the board: every task, its state, and what is blocked on a human."},
+	{"ship", "Submit the task you are working on for review with QA evidence."},
+}
+
+var PromptText = map[string]string{
+	"next": "Use the agentklar tools: call list_ready_tasks, pick the highest-priority task, " +
+		"claim it with claim_task, then read it fully with get_task. Implement the work so every " +
+		"acceptance criterion is met, run the task's verify command, then submit_for_review with a " +
+		"summary and record_qa with the command output as evidence. Do not attempt to approve — " +
+		"tell the human what is awaiting their approval.",
+	"status": "Use the agentklar tools to report the board: bind_workspace for context, then " +
+		"get_task for each known task (start from list_ready_tasks and any tasks mentioned in this " +
+		"conversation). Summarize as a short table: id, title, state, holder, and what action is " +
+		"needed next — flagging anything waiting on human approval.",
+	"ship": "For the task currently being worked in this conversation: re-read its acceptance " +
+		"criteria with get_task, run its verify command, record_qa with the real command output, " +
+		"then submit_for_review with an honest summary of what changed. If any criterion is unmet, " +
+		"say so instead of submitting.",
+}
