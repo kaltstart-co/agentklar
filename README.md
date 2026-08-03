@@ -17,10 +17,42 @@ Website: **[agentklar.kaltstart.co](https://agentklar.kaltstart.co)** · a
 **New here?** The full **[Setup & Usage guide](docs/USAGE.md)** takes you from install →
 connect your agent (MCP) → set up a board (new or existing Vikunja) → run a task.
 
-> **Status: Phase 0/1 development slice.** The workflow is real and tested end to end,
-> including a live Vikunja adapter with nonce-bound human approval. There is not yet a
-> signed release or installer — you build from source. Per the delivery plan, distribution
-> work begins after the workflow survives a dogfood pilot.
+## Install
+
+**One line** (macOS, Linux) — downloads the newest Release binary, verifies its
+SHA-256 against `checksums.txt`, installs to `~/.local/bin`, and wires skill +
+slash commands into OpenCode, Claude Code, and Codex:
+
+```bash
+curl -sSL https://raw.githubusercontent.com/kaltstart-co/agentklar/main/install.sh | bash
+```
+
+Skip agent wiring with `--no-agents`; change the install location with
+`AGENTKLAR_INSTALL_DIR=/path`. If no prebuilt binary matches your platform and
+Go is installed, the script falls back to `go install`.
+
+**With Go** (no clone, no manual build):
+
+```bash
+go install github.com/kaltstart-co/agentklar/cmd/agentklar@latest
+agentklar install --agents opencode,claude,codex
+```
+
+Then, once per repo:
+
+```bash
+agentklar init        # create a workspace + propose .agentklar/quality.toml
+agentklar status      # one-glance overview
+```
+
+Build from source is still supported — see [CONTRIBUTING.md](CONTRIBUTING.md).
+
+> **Status: Phase 0/1 development slice.** The workflow is real and tested end
+> to end, including a live Vikunja adapter with nonce-bound human approval.
+> Pre-release binaries are published on the
+> [Releases page](https://github.com/kaltstart-co/agentklar/releases) and
+> fetched by `install.sh`; they are not yet signed. Per the delivery plan,
+> hardening continues after the workflow survives a dogfood pilot.
 
 ## What works today
 

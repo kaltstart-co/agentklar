@@ -211,28 +211,28 @@
   <section id="start">
     <div class="wrap">
       <p class="eyebrow">Get started</p>
-      <h2>Build it, run one task end to end.</h2>
-      <p class="lead">One Go binary. No installer, no Docker, no sudo. Here is the whole path.</p>
-      <div class="req"><span><b>Go</b> 1.25+</span><span><b>git</b></span><span><b>macOS</b> or <b>Linux</b></span></div>
+      <h2>Install it, run one task end to end.</h2>
+      <p class="lead">One binary, installed in a single line. No clone, no manual build, no sudo.</p>
+      <div class="req"><span><b>macOS</b> or <b>Linux</b></span><span><b>curl</b> &amp; <b>tar</b> (or <b>Go</b> 1.25+)</span></div>
 
       <div class="step">
-        <div class="step-h"><span class="n">1</span><span class="t">Build</span></div>
-        <div class="cb"><button class="copy" data-copy="git clone https://github.com/kaltstart-co/agentklar
-cd agentklar && go build -o agentklar ./cmd/agentklar">Copy</button>
-<pre>git clone https://github.com/kaltstart-co/agentklar
-cd agentklar &amp;&amp; go build -o agentklar ./cmd/agentklar</pre></div>
+        <div class="step-h"><span class="n">1</span><span class="t">Install</span></div>
+        <div class="cb"><button class="copy" data-copy="curl -sSL https://raw.githubusercontent.com/kaltstart-co/agentklar/main/install.sh | bash">Copy</button>
+<pre>curl -sSL https://raw.githubusercontent.com/kaltstart-co/agentklar/main/install.sh | bash
+<span class="c"># installs to ~/.local/bin and wires skill + slash commands into your agents</span></pre></div>
+        <p style="margin:.5rem 0 0;font-size:.86rem;color:var(--muted)">Prefer Go? <code style="font-family:var(--mono);color:var(--accent-ink)">go install github.com/kaltstart-co/agentklar/cmd/agentklar@latest</code></p>
       </div>
 
       <div class="step">
         <div class="step-h"><span class="n">2</span><span class="t">Create a task</span><span class="d">you set the goal</span></div>
-        <div class="cb"><button class="copy" data-copy='./agentklar init
-./agentklar task new AK-1 Fix the parser \
+        <div class="cb"><button class="copy" data-copy='agentklar init
+agentklar task new AK-1 Fix the parser \
   --criteria "handles empty input;tests pass" --verify "go test ./..."
-./agentklar task ready AK-1'>Copy</button>
-<pre>./agentklar init
-./agentklar task new AK-1 Fix the parser \
+agentklar task ready AK-1'>Copy</button>
+<pre>agentklar init
+agentklar task new AK-1 Fix the parser \
   <span class="f">--criteria</span> "handles empty input;tests pass" <span class="f">--verify</span> "go test ./..."
-./agentklar task ready AK-1</pre></div>
+agentklar task ready AK-1</pre></div>
       </div>
 
       <div class="step">

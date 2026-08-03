@@ -107,8 +107,17 @@
     <div class="wrap">
       <p class="eyebrow"><span class="num">1</span> &middot; Install</p>
       <h2>Get the binary.</h2>
-      <h3 class="s">From a release (recommended)</h3>
-      <p class="small">Download your OS/arch archive from the <a href="https://github.com/kaltstart-co/agentklar/releases">Releases page</a>, verify against <span class="mono">checksums.txt</span>, and put it on your PATH.</p>
+      <h3 class="s">One line (recommended)</h3>
+      <p class="small">Downloads the newest release archive, verifies its SHA-256 against <span class="mono">checksums.txt</span>, installs to <span class="mono">~/.local/bin</span>, and wires skill + slash commands into OpenCode, Claude Code, and Codex.</p>
+      <div class="block"><button class="cp" data-copy="curl -sSL https://raw.githubusercontent.com/kaltstart-co/agentklar/main/install.sh | bash">Copy</button>
+<pre>curl -sSL https://raw.githubusercontent.com/kaltstart-co/agentklar/main/install.sh | bash
+<span class="c"># skip agent wiring: append --no-agents</span></pre></div>
+      <h3 class="s">With Go (no clone, no manual build)</h3>
+      <div class="block"><button class="cp" data-copy="go install github.com/kaltstart-co/agentklar/cmd/agentklar@latest">Copy</button>
+<pre>go install github.com/kaltstart-co/agentklar/cmd/agentklar@latest
+agentklar install --agents opencode,claude,codex</pre></div>
+      <h3 class="s">From a release archive</h3>
+      <p class="small">Or download your OS/arch archive from the <a href="https://github.com/kaltstart-co/agentklar/releases">Releases page</a>, verify against <span class="mono">checksums.txt</span>, and put it on your PATH.</p>
       <div class="block"><button class="cp" data-copy="tar xzf agentklar_*_darwin_arm64.tar.gz
 install -m 0755 agentklar ~/.local/bin/agentklar
 agentklar version">Copy</button>
