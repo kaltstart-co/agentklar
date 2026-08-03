@@ -93,8 +93,40 @@ func (s *Server) Dispatch(req Request) Response {
 			"capabilities":    map[string]interface{}{"tools": map[string]interface{}{}},
 		}
 
-	case "tools/list", "list_methods":
+	case "tools/list":
+		// MCP spec shape: a `tools` array with schemas. (list_methods kept
+		// below for the legacy flat protocol.)
+		resp.Result = map[string]interface{}{"tools": ToolDefs}
+
+	case "list_methods":
 		resp.Result = map[string]interface{}{"methods": contracts.MCPMethods}
+
+	case "tools/call":
+		// Spec-compliant wrapper: unwrap {name, arguments} and dispatch to
+		// the flat method, then wrap the result as tool content.
+		var call struct {
+			Name      string          `json:"name"`
+			Arguments json.RawMessage `json:"arguments"`
+		}
+		if err := json.Unmarshal(req.Params, &call); err != nil {
+			return fail(err)
+		}
+		inner := s.Dispatch(Request{JSONRPC: req.JSONRPC, ID: req.ID, Method: call.Name, Params: call.Arguments})
+		if inner.Error != nil {
+			// Tool-level failure: surface to the model, not the transport.
+			resp.Result = map[string]interface{}{
+				"content": []map[string]interface{}{{"type": "text", "text": inner.Error.Message}},
+				"isError": true,
+			}
+			return resp
+		}
+		body, err := json.Marshal(inner.Result)
+		if err != nil {
+			return fail(err)
+		}
+		resp.Result = map[string]interface{}{
+			"content": []map[string]interface{}{{"type": "text", "text": string(body)}},
+		}
 
 	case "bind_workspace":
 		resp.Result = map[string]string{"workspace": s.Workspace}
