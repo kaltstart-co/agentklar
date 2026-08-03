@@ -11,6 +11,7 @@ import (
 	akctx "github.com/kaltstart-co/agentklar/internal/context"
 	"github.com/kaltstart-co/agentklar/internal/knowledge"
 	"github.com/kaltstart-co/agentklar/internal/memory"
+	"github.com/kaltstart-co/agentklar/internal/notify"
 )
 
 // cmdKnowledge manages the in-repo .agentklar/knowledge/ layer (decisions,
@@ -202,9 +203,9 @@ func cmdContext(args []string) error {
 		return nil
 
 	case "index":
-		// Gather knowledge (in-repo) and memory (workspace sqlite) into the index.
-		// Repo code indexing is a follow-on; the two knowledge layers are the
-		// high-value, immediately-useful inputs.
+		// Gather knowledge (in-repo) and memory (workspace sqlite) into the index,
+		// then walk the repo's code. The context store is the union of all three
+		// layers — what an agent gets back as a focused work packet on claim.
 		var docs []akctx.Doc
 		if ks, err := knowledge.New(repoRoot()); err == nil {
 			entries, _ := ks.List()
@@ -224,11 +225,73 @@ func cmdContext(args []string) error {
 		if err != nil {
 			return err
 		}
-		fmt.Printf("indexed %d docs into the context store\n", n)
+		codeN, err := store.IndexCode(repoRoot())
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: code index partial: %v\n", err)
+		}
+		fmt.Printf("indexed %d knowledge/memory docs + %d code files\n", n, codeN)
 		_ = eng
 		return nil
 	}
 	return fmt.Errorf("unknown context subcommand %q", args[0])
+}
+
+// cmdAlerts drives the human-alert log. Agents record alerts (over MCP
+// notify_human or here); only the human can acknowledge them — an agent can
+// never silence alerts it raised.
+func cmdAlerts(args []string) error {
+	if len(args) < 1 {
+		return fmt.Errorf("usage: agentklar alerts list|pending|ack")
+	}
+	_, dir, err := openEngine()
+	if err != nil {
+		return err
+	}
+	store, err := notify.New(dir)
+	if err != nil {
+		return err
+	}
+	switch args[0] {
+	case "list":
+		entries, err := store.List("")
+		if err != nil {
+			return err
+		}
+		fmt.Printf("%d alerts\n", len(entries))
+		for _, a := range entries {
+			ack := " "
+			if a.Acknowledged {
+				ack = "x"
+			}
+			fmt.Printf("  [%s] #%d %-6s %s  (task %s, by %s)\n", ack, a.ID, a.Severity, truncate(a.Message, 60), a.TaskID, a.Holder)
+		}
+		return nil
+	case "pending":
+		entries, err := store.Pending()
+		if err != nil {
+			return err
+		}
+		fmt.Printf("%d pending alert(s)\n", len(entries))
+		for _, a := range entries {
+			fmt.Printf("  #%d %-6s %s\n", a.ID, a.Severity, truncate(a.Message, 70))
+		}
+		return nil
+	case "ack":
+		if len(args) < 2 {
+			return fmt.Errorf("usage: agentklar alerts ack <id>  (human-only)")
+		}
+		id, err := strconv.ParseInt(args[1], 10, 64)
+		if err != nil {
+			return fmt.Errorf("id must be a number")
+		}
+		if err := store.Ack(id); err != nil {
+			return err
+		}
+		fmt.Printf("acknowledged #%d\n", id)
+		fmt.Fprintln(os.Stderr, "note: acknowledging alerts is human-only; no agent method can call this.")
+		return nil
+	}
+	return fmt.Errorf("unknown alerts subcommand %q", args[0])
 }
 
 func truncate(s string, n int) string {

@@ -1,0 +1,24 @@
+{{define "content"}}
+<h1>Alerts</h1>
+{{if not .AlertOK}}<p class="empty">Alert store not available in this workspace.</p>
+{{else if not .Alerts}}<p class="empty">No alerts. Agents raise them with <code>notify_human</code> (blocked / needs input / error / done).</p>
+{{else}}
+{{range .Alerts}}
+<div class="panel">
+  <div class="row" style="justify-content:space-between;align-items:baseline">
+    <h2 style="margin:0">{{.Message}}</h2>
+    <span class="badge {{.Severity}}">{{.Severity}}</span>
+  </div>
+  <div class="muted id" style="margin:.2rem 0 .6rem">
+    #{{.ID}} · {{if .Acknowledged}}acknowledged{{else}}<b>pending</b>{{end}} · by {{.Holder}}{{if .TaskID}} · task {{.TaskID}}{{end}} · {{.CreatedAt}}
+  </div>
+  {{if not .Acknowledged}}
+  <form method="post" action="/alerts/{{.ID}}/ack">
+    <button class="btn" type="submit">Acknowledge</button>
+  </form>
+  {{end}}
+</div>
+{{end}}
+{{end}}
+<p class="muted" style="margin-top:1rem;font-size:.8rem">Every alert is logged with provenance. Agents can record but never acknowledge their own alerts — acknowledging is human-only.</p>
+{{end}}

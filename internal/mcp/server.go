@@ -16,6 +16,7 @@ import (
 	akctx "github.com/kaltstart-co/agentklar/internal/context"
 	"github.com/kaltstart-co/agentklar/internal/contracts"
 	"github.com/kaltstart-co/agentklar/internal/memory"
+	"github.com/kaltstart-co/agentklar/internal/notify"
 	"github.com/kaltstart-co/agentklar/internal/tracker"
 	"github.com/kaltstart-co/agentklar/internal/workflow"
 )
@@ -48,6 +49,9 @@ type Server struct {
 	// workflow state machine or the human-only Done boundary.
 	Memory  *memory.Store
 	Context *akctx.Store
+	// Notify is the optional human-alert store. When nil, notify_human returns
+	// "unavailable". It only records alerts — never an approval path.
+	Notify *notify.Store
 }
 
 // Serve runs a line-delimited JSON-RPC loop over stdio.
@@ -357,6 +361,38 @@ func (s *Server) Dispatch(req Request) Response {
 			return fail(err)
 		}
 		resp.Result = map[string]interface{}{"results": entries}
+
+	case "notify_human":
+		var p struct {
+			TaskID   string `json:"task_id"`
+			Holder   string `json:"holder"`
+			Severity string `json:"severity"`
+			Message  string `json:"message"`
+			Speak    *bool  `json:"speak"`
+		}
+		json.Unmarshal(req.Params, &p)
+		if s.Notify == nil {
+			return unavailable("notify_human")
+		}
+		if p.Message == "" {
+			return fail(fmt.Errorf("notify_human requires a message"))
+		}
+		sev := notify.Severity(strings.ToLower(p.Severity))
+		if sev == "" {
+			sev = notify.Info
+		}
+		if p.Holder == "" {
+			p.Holder = "agent"
+		}
+		speak := true
+		if p.Speak != nil {
+			speak = *p.Speak
+		}
+		id, err := s.Notify.Record(p.TaskID, p.Holder, sev, p.Message, speak)
+		if err != nil {
+			return fail(err)
+		}
+		resp.Result = map[string]interface{}{"id": id, "logged": true}
 
 	default:
 		resp.Error = &RPCError{-32601, fmt.Sprintf("unknown method %q", req.Method)}

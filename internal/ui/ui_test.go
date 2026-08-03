@@ -6,10 +6,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/kaltstart-co/agentklar/internal/contracts"
+	"github.com/kaltstart-co/agentklar/internal/notify"
 	"github.com/kaltstart-co/agentklar/internal/store"
 	"github.com/kaltstart-co/agentklar/internal/workflow"
 )
@@ -325,3 +327,64 @@ func TestStaticCSSServedTemplatesNotExposed(t *testing.T) {
 		t.Fatalf("GET /static/layout.html status = %d, want 404 (templates must not leak)", leak.Code)
 	}
 }
+
+// Alerts: an agent-raised alert is logged and visible; the human acknowledges
+// it (agents cannot). Cover the HTML page, the JSON list, and the ack path.
+func TestAlertsLogAck(t *testing.T) {
+	dir := t.TempDir()
+	s, err := New(dir, dir)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(func() { s.Close() })
+	if s.alerts == nil {
+		t.Fatal("alerts store not initialized")
+	}
+	// Silence real speech/banner delivery during the test.
+	s.alerts.SetDeliver(nil)
+
+	id, err := s.alerts.Record("T-1", "agent-a", notify.Block, "network down; cannot reach registry", false)
+	if err != nil {
+		t.Fatalf("record: %v", err)
+	}
+
+	// HTML page lists the alert.
+	html := do(t, s.Handler(), "GET", "/alerts", nil)
+	if html.Code != http.StatusOK {
+		t.Fatalf("GET /alerts status = %d", html.Code)
+	}
+	if !strings.Contains(html.Body.String(), "network down") {
+		t.Fatalf("GET /alerts body missing alert message:\n%s", html.Body.String())
+	}
+
+	// JSON list contains it.
+	rec := do(t, s.Handler(), "GET", "/api/alerts", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /api/alerts status = %d", rec.Code)
+	}
+	var got []notify.Alert
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal alerts: %v", err)
+	}
+	if len(got) != 1 || got[0].Message != "network down; cannot reach registry" {
+		t.Fatalf("alerts = %#v", got)
+	}
+	if got[0].Acknowledged {
+		t.Fatal("alert should start unacknowledged")
+	}
+
+	// Human acknowledges via the API; agents have no such method.
+	ack := do(t, s.Handler(), "POST", "/api/alerts/"+strconvI(id)+"/ack", nil)
+	if ack.Code != http.StatusOK {
+		t.Fatalf("POST ack status = %d, want 200", ack.Code)
+	}
+	rec2 := do(t, s.Handler(), "GET", "/api/alerts", nil)
+	var after []notify.Alert
+	json.Unmarshal(rec2.Body.Bytes(), &after)
+	if !after[0].Acknowledged {
+		t.Fatal("alert should be acknowledged after ack")
+	}
+}
+
+// strconvI keeps the test free of an extra import line for a single use.
+func strconvI(i int64) string { return strconv.FormatInt(i, 10) }

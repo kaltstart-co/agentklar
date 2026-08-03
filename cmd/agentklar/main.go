@@ -19,6 +19,7 @@ import (
 	"github.com/kaltstart-co/agentklar/internal/gate"
 	"github.com/kaltstart-co/agentklar/internal/mcp"
 	"github.com/kaltstart-co/agentklar/internal/memory"
+	"github.com/kaltstart-co/agentklar/internal/notify"
 	"github.com/kaltstart-co/agentklar/internal/quality"
 	"github.com/kaltstart-co/agentklar/internal/store"
 	"github.com/kaltstart-co/agentklar/internal/tracker"
@@ -36,7 +37,8 @@ Usage:
                                         Open a surface in the OS default
   agentklar knowledge list|decide|add|show   Shared project knowledge (in-repo)
   agentklar memory list|search|remember|forget   Shared cross-session memory
-  agentklar context search|index         Focused work packets (knowledge+memory)
+  agentklar context search|index         Focused work packets (knowledge+memory+code)
+  agentklar alerts list|pending|ack      Human-alert log (agent notify_human; ack is human-only)
   agentklar ui [--addr --open]           Native local web UI (board/memory/context/approvals)
   agentklar task new <id> <title>       Create a Draft task
   agentklar task import <ticket.md>     Create a task from an interrogator ticket
@@ -150,6 +152,11 @@ func run(args []string) error {
 			return cmdContext(nil)
 		}
 		return cmdContext(args[1:])
+	case "alerts":
+		if len(args) < 2 {
+			return cmdAlerts(nil)
+		}
+		return cmdAlerts(args[1:])
 	case "ui":
 		return cmdUI(args[1:])
 	case "gate":
@@ -506,7 +513,8 @@ func cmdMCP() error {
 	// A failure leaves the methods "unavailable" but never breaks the MCP loop.
 	memStore, _ := memory.New(dir)
 	ctxStore, _ := akctx.New(dir)
-	srv := &mcp.Server{Engine: eng, Workspace: dir, Memory: memStore, Context: ctxStore}
+	notifyStore, _ := notify.New(dir)
+	srv := &mcp.Server{Engine: eng, Workspace: dir, Memory: memStore, Context: ctxStore, Notify: notifyStore}
 	return srv.Serve(os.Stdin, os.Stdout)
 }
 

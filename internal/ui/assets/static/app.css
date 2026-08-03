@@ -148,6 +148,9 @@ input:focus { outline: none; border-color: var(--accent); }
 .badge.done { color: var(--ok); border-color: var(--ok); }
 .badge.user_approval { color: var(--warn); border-color: var(--warn); }
 .badge.changes_requested { color: var(--bad); border-color: var(--bad); }
+.badge.info { color: var(--muted); border-color: var(--muted); }
+.badge.warn { color: var(--warn); border-color: var(--warn); }
+.badge.error, .badge.block { color: var(--bad); border-color: var(--bad); }
 
 table { width: 100%; border-collapse: collapse; }
 th, td { text-align: left; padding: .45rem .55rem; border-bottom: 1px solid var(--border); vertical-align: top; }

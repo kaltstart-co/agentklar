@@ -76,6 +76,15 @@ When several agents work the same project, they share context through three laye
 - `agentklar context index` then `context search "<q>"` — focused work packets across knowledge + memory.
 - Over MCP: `remember {namespace,key,value}`, `recall {query}`, `get_context {task_id|query}`.
 
+### Alert the human (voice + logged)
+When you are **blocked**, need a decision, hit an error (e.g. network down), or
+finished and want more work, call `notify_human {severity, message, task_id?}`.
+It logs the alert (with provenance) and, by default for warn/error/block, speaks
+it aloud and shows a banner. Severity: `info | warn | error | block`.
+- The human sees it in `agentklar alerts`, the UI (Alerts tab), and `status`.
+- Acknowledging is **human-only** — you cannot silence alerts you raised.
+- Use it sparingly and with a clear, actionable message.
+
 Everything an agent knows, the human can see (Transparency). Never claim a fact the gate or memory hasn't recorded.
 
 ### Board & UI

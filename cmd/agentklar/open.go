@@ -10,6 +10,7 @@ import (
 
 	"github.com/kaltstart-co/agentklar/internal/contracts"
 	"github.com/kaltstart-co/agentklar/internal/knowledge"
+	"github.com/kaltstart-co/agentklar/internal/notify"
 	"github.com/kaltstart-co/agentklar/internal/quality"
 	"github.com/kaltstart-co/agentklar/internal/tracker/vikunja"
 )
@@ -154,6 +155,12 @@ func cmdStatus() error {
 		fmt.Printf("board:     connected — approve as %s → %s\n", cfg.HumanUser, boardURL(cfg.URL, cfg.ProjectID))
 	} else {
 		fmt.Printf("board:     none (tracker-less; tasks live in the local DB)\n")
+	}
+
+	if ns, _ := notify.New(dir); ns != nil {
+		if pending, _ := ns.Pending(); len(pending) > 0 {
+			fmt.Printf("alerts:    %d pending — run 'agentklar alerts pending' or open the UI\n", len(pending))
+		}
 	}
 
 	if cfg, err := quality.Load(repo); err == nil {

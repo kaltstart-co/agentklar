@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strconv"
 
 	"github.com/kaltstart-co/agentklar/internal/contracts"
+	"github.com/kaltstart-co/agentklar/internal/notify"
 	"github.com/kaltstart-co/agentklar/internal/workflow"
 )
 
@@ -124,6 +126,72 @@ func (s *Server) handleApproveHTML(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+// handleAlerts renders the alert log. Agents raise alerts (notify_human);
+// only the human acknowledges them here.
+func (s *Server) handleAlerts(w http.ResponseWriter, r *http.Request) {
+	var (
+		alerts []notify.Alert
+		ok     bool
+	)
+	if s.alerts != nil {
+		ok = true
+		alerts, _ = s.alerts.List("")
+	}
+	s.render(w, "alerts", viewData{Title: "Alerts", Section: "alerts", Alerts: alerts, AlertOK: ok})
+}
+
+// handleAckAlertHTML acknowledges an alert from a human click, then refreshes.
+func (s *Server) handleAckAlertHTML(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if s.alerts == nil {
+		http.Error(w, "alerts unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	n, err := strconv.ParseInt(id, 10, 64)
+	if err != nil {
+		http.Error(w, "bad id", http.StatusBadRequest)
+		return
+	}
+	if err := s.alerts.Ack(n); err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	http.Redirect(w, r, "/alerts", http.StatusSeeOther)
+}
+
+func (s *Server) handleAPIAlerts(w http.ResponseWriter, r *http.Request) {
+	if s.alerts == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "alerts unavailable"})
+		return
+	}
+	alerts, err := s.alerts.List("")
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if alerts == nil {
+		alerts = []notify.Alert{}
+	}
+	writeJSON(w, http.StatusOK, alerts)
+}
+
+func (s *Server) handleAPIAckAlert(w http.ResponseWriter, r *http.Request) {
+	if s.alerts == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "alerts unavailable"})
+		return
+	}
+	n, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		return
+	}
+	if err := s.alerts.Ack(n); err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "acknowledged"})
 }
 
 // --- JSON API ---

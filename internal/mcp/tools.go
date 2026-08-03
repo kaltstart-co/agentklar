@@ -79,6 +79,12 @@ var ToolDefs = []ToolDef{
 	{"recall", "Full-text search over shared memory and knowledge.", obj(map[string]interface{}{
 		"query": str("What to search for."),
 	}, "query")},
+	{"notify_human", "Alert the human that you are blocked, need a decision, hit an error (e.g. network down), or finished and want more work. Always logged with provenance; never an approval.", obj(map[string]interface{}{
+		"task_id":  str("Optional related task id."),
+		"severity": str("info | warn | error | block"),
+		"message":  str("What to tell the human."),
+		"speak":    str("If true, speak the message aloud (default true for warn/error/block)."),
+	}, "severity", "message")},
 }
 
 // Prompt surface: the workflows a human reaches for from the client's

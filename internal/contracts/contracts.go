@@ -164,6 +164,7 @@ var MCPMethods = []string{
 	"get_context",                   // focused work packet from the context index (knowledge+memory+code+tickets)
 	"remember",                      // write a shared memory row (provenance stamped from the active claim)
 	"recall",                        // FTS5 search over shared memory + knowledge
+	"notify_human",                  // alert the human (blocked/needs input/error/done) — logged, never an approval
 }
 
 // ForbiddenMCPMethods are operations that must never appear on the agent

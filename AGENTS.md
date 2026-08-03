@@ -60,7 +60,8 @@ them. Field authority is split, never duplicated.
 | `internal/knowledge` | In-repo `.agentklar/knowledge/` — ADRs, conventions, glossary, runbook. Versioned, human-reviewable. |
 | `internal/memory` | Shared cross-session memory (`memory.sqlite`, FTS5) with provenance. Human-only deletion. |
 | `internal/context` | FTS5 context index + focused work packets for agent claims. |
-| `internal/ui` | Native local web UI (board/knowledge/memory/context/approvals) + JSON API. Default view; the approve click is the trusted local channel. Vikunja is one optional board backend. |
+| `internal/notify` | Human-alert log + best-effort voice/banner delivery (`notify_human`). Provenance per row; ack is human-only. |
+| `internal/ui` | Native local web UI (board/knowledge/memory/context/approvals/alerts) + JSON API. Default view; the approve click is the trusted local channel. Vikunja is one optional board backend. |
 | `internal/ticket` | Parses interrogator-style ticket Markdown for `task import`. |
 | `internal/mcp` | Agent-facing JSON-RPC surface (no approval method). |
 | `cmd/agentklar` | The CLI. `cmd/agentklar-bar` is the macOS menu-bar widget. |
@@ -93,7 +94,7 @@ These are enforced by executable tests. Changing them is a contract violation:
 `bind_workspace`, `list_ready_tasks`, `claim_task`, `heartbeat_task`,
 `submit_for_review`, `record_review`, `record_qa`, `release_task`, `get_task`,
 `add_comment`, `request_approval_presentation`, `get_context`, `remember`,
-`recall`. There is intentionally no `approve` / `reject` / `done`.
+`recall`, `notify_human`. There is intentionally no `approve` / `reject` / `done`.
 
 ## Conventions
 

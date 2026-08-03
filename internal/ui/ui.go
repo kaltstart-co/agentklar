@@ -28,6 +28,7 @@ import (
 	"github.com/kaltstart-co/agentklar/internal/contracts"
 	"github.com/kaltstart-co/agentklar/internal/knowledge"
 	"github.com/kaltstart-co/agentklar/internal/memory"
+	"github.com/kaltstart-co/agentklar/internal/notify"
 	"github.com/kaltstart-co/agentklar/internal/store"
 	"github.com/kaltstart-co/agentklar/internal/workflow"
 )
@@ -41,7 +42,7 @@ var assetsFS embed.FS
 // {{define "content"}}. (Per-set parsing sidesteps the html/template Clone
 // namespace quirk and keeps each page's "content" isolated.)
 var pageFiles = []string{
-	"board", "task", "knowledge", "memory", "context", "approvals",
+	"board", "task", "knowledge", "memory", "context", "approvals", "alerts",
 }
 
 // Server is the local UI server. It holds read/write handles to the protected
@@ -56,6 +57,7 @@ type Server struct {
 	knowledge *knowledge.Store // optional; nil if open failed
 	memory    *memory.Store    // optional; nil if open failed
 	context   *akctx.Store     // optional; nil if open failed
+	alerts    *notify.Store    // optional; nil if open failed
 
 	pages  map[string]*template.Template // file basename -> layout+page set
 	router http.Handler
@@ -77,6 +79,7 @@ func New(workspaceDir, repoRoot string) (*Server, error) {
 	kStore, _ := knowledge.New(repoRoot)
 	mStore, _ := memory.New(workspaceDir)
 	cStore, _ := akctx.New(workspaceDir)
+	aStore, _ := notify.New(workspaceDir)
 
 	// Validate that every template parses. This is the registration call from
 	// the spec; it is not used for rendering (per-page sets below are).
@@ -105,6 +108,7 @@ func New(workspaceDir, repoRoot string) (*Server, error) {
 		knowledge:    kStore,
 		memory:       mStore,
 		context:      cStore,
+		alerts:       aStore,
 		pages:        pages,
 	}
 	s.router = s.routes()
@@ -139,6 +143,9 @@ func (s *Server) Close() error {
 	if s.context != nil {
 		s.context.Close()
 	}
+	if s.alerts != nil {
+		s.alerts.Close()
+	}
 	return nil
 }
 
@@ -167,6 +174,8 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /context", s.handleContext)
 	mux.HandleFunc("GET /approvals", s.handleApprovals)
 	mux.HandleFunc("POST /approvals/{id}", s.handleApproveHTML)
+	mux.HandleFunc("GET /alerts", s.handleAlerts)
+	mux.HandleFunc("POST /alerts/{id}/ack", s.handleAckAlertHTML)
 
 	// JSON API (same data; the stable contract for future clients).
 	mux.HandleFunc("GET /api/tasks", s.handleAPITasks)
@@ -175,6 +184,8 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /api/context", s.handleAPIContext)
 	mux.HandleFunc("GET /api/approvals", s.handleAPIApprovals)
 	mux.HandleFunc("POST /api/approvals/{id}", s.handleAPIApprove)
+	mux.HandleFunc("GET /api/alerts", s.handleAPIAlerts)
+	mux.HandleFunc("POST /api/alerts/{id}/ack", s.handleAPIAckAlert)
 
 	return mux
 }
@@ -229,6 +240,10 @@ type viewData struct {
 
 	// Approvals
 	Approvals []approvalView
+
+	// Alerts
+	Alerts  []notify.Alert
+	AlertOK bool
 }
 
 type columnView struct {
