@@ -13,7 +13,9 @@ import (
 	"io"
 	"strings"
 
+	akctx "github.com/kaltstart-co/agentklar/internal/context"
 	"github.com/kaltstart-co/agentklar/internal/contracts"
+	"github.com/kaltstart-co/agentklar/internal/memory"
 	"github.com/kaltstart-co/agentklar/internal/tracker"
 	"github.com/kaltstart-co/agentklar/internal/workflow"
 )
@@ -41,6 +43,11 @@ type Server struct {
 	Engine    *workflow.Engine
 	Workspace string
 	Policy    tracker.ApprovalPolicy
+	// Memory and Context are optional shared-knowledge stores. When nil,
+	// the corresponding methods return "unavailable" — they never affect the
+	// workflow state machine or the human-only Done boundary.
+	Memory  *memory.Store
+	Context *akctx.Store
 }
 
 // Serve runs a line-delimited JSON-RPC loop over stdio.
@@ -296,8 +303,70 @@ func (s *Server) Dispatch(req Request) Response {
 				"from their own tracker account; you cannot approve on their behalf.",
 		}
 
+	case "get_context":
+		var p struct {
+			TaskID string `json:"task_id"`
+			Query  string `json:"query"`
+		}
+		json.Unmarshal(req.Params, &p)
+		if s.Context == nil {
+			return unavailable("get_context")
+		}
+		query := p.Query
+		if query == "" && p.TaskID != "" {
+			query = p.TaskID
+		}
+		packet, err := s.Context.Packet(query, 25)
+		if err != nil {
+			return fail(err)
+		}
+		resp.Result = packet
+
+	case "remember":
+		var p struct {
+			Namespace string `json:"namespace"`
+			Key       string `json:"key"`
+			Value     string `json:"value"`
+			TaskID    string `json:"task_id"`
+			Holder    string `json:"holder"`
+		}
+		json.Unmarshal(req.Params, &p)
+		if s.Memory == nil {
+			return unavailable("remember")
+		}
+		if p.Holder == "" {
+			p.Holder = "agent"
+		}
+		id, err := s.Memory.Remember(p.Namespace, p.Key, p.Value, p.TaskID, p.Holder)
+		if err != nil {
+			return fail(err)
+		}
+		resp.Result = map[string]interface{}{"id": id, "status": "remembered"}
+
+	case "recall":
+		var p struct {
+			Query string `json:"query"`
+			Limit int    `json:"limit"`
+		}
+		json.Unmarshal(req.Params, &p)
+		if s.Memory == nil {
+			return unavailable("recall")
+		}
+		entries, err := s.Memory.Recall(p.Query, p.Limit)
+		if err != nil {
+			return fail(err)
+		}
+		resp.Result = map[string]interface{}{"results": entries}
+
 	default:
 		resp.Error = &RPCError{-32601, fmt.Sprintf("unknown method %q", req.Method)}
 	}
 	return resp
+}
+
+// unavailable returns a standard error response for an optional store that the
+// server was not configured with.
+func unavailable(name string) Response {
+	return Response{JSONRPC: "2.0", Error: &RPCError{-32601,
+		fmt.Sprintf("%s unavailable: the %s store is not enabled in this workspace", name, name)}}
 }

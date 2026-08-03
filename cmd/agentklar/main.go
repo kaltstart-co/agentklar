@@ -14,9 +14,11 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	akctx "github.com/kaltstart-co/agentklar/internal/context"
 	"github.com/kaltstart-co/agentklar/internal/contracts"
 	"github.com/kaltstart-co/agentklar/internal/gate"
 	"github.com/kaltstart-co/agentklar/internal/mcp"
+	"github.com/kaltstart-co/agentklar/internal/memory"
 	"github.com/kaltstart-co/agentklar/internal/quality"
 	"github.com/kaltstart-co/agentklar/internal/store"
 	"github.com/kaltstart-co/agentklar/internal/tracker"
@@ -30,8 +32,11 @@ Usage:
   agentklar init                        Initialize a workspace for the current repo
   agentklar status                      One-glance: tasks, pending approvals, board
   agentklar doctor                      Technical health: recipes, commands, counts
-  agentklar open board|app|workspace|config|quality
+  agentklar open board|app|workspace|config|quality|knowledge|docs
                                         Open a surface in the OS default
+  agentklar knowledge list|decide|add|show   Shared project knowledge (in-repo)
+  agentklar memory list|search|remember|forget   Shared cross-session memory
+  agentklar context search|index         Focused work packets (knowledge+memory)
   agentklar task new <id> <title>       Create a Draft task
   agentklar task import <ticket.md>     Create a task from an interrogator ticket
   agentklar task import-plan <dir>      Import a project's dev-task tickets (waves)
@@ -129,6 +134,21 @@ func run(args []string) error {
 		return cmdStatus()
 	case "install":
 		return cmdInstall(args[1:])
+	case "knowledge":
+		if len(args) < 2 {
+			return cmdKnowledge(nil)
+		}
+		return cmdKnowledge(args[1:])
+	case "memory":
+		if len(args) < 2 {
+			return cmdMemory(nil)
+		}
+		return cmdMemory(args[1:])
+	case "context":
+		if len(args) < 2 {
+			return cmdContext(nil)
+		}
+		return cmdContext(args[1:])
 	case "gate":
 		if len(args) < 2 {
 			return fmt.Errorf("gate requires a task id")
@@ -479,7 +499,11 @@ func cmdMCP() error {
 	if err != nil {
 		return err
 	}
-	srv := &mcp.Server{Engine: eng, Workspace: dir}
+	// Best-effort: enable the shared-knowledge stores when they initialize.
+	// A failure leaves the methods "unavailable" but never breaks the MCP loop.
+	memStore, _ := memory.New(dir)
+	ctxStore, _ := akctx.New(dir)
+	srv := &mcp.Server{Engine: eng, Workspace: dir, Memory: memStore, Context: ctxStore}
 	return srv.Serve(os.Stdin, os.Stdout)
 }
 

@@ -161,6 +161,9 @@ var MCPMethods = []string{
 	"get_task",
 	"add_comment",
 	"request_approval_presentation", // asks agentklar to surface a pending approval; carries no decision
+	"get_context",                   // focused work packet from the context index (knowledge+memory+code+tickets)
+	"remember",                      // write a shared memory row (provenance stamped from the active claim)
+	"recall",                        // FTS5 search over shared memory + knowledge
 }
 
 // ForbiddenMCPMethods are operations that must never appear on the agent

@@ -47,11 +47,11 @@ var ToolDefs = []ToolDef{
 		"notes":   str("Reviewer notes."),
 	}, "task_id", "result")},
 	{"record_qa", "Record an automated QA result with evidence.", obj(map[string]interface{}{
-		"task_id":  taskID,
-		"result":   str("pass or fail"),
-		"command":  str("Command that was run."),
+		"task_id":   taskID,
+		"result":    str("pass or fail"),
+		"command":   str("Command that was run."),
 		"exit_code": map[string]interface{}{"type": "integer", "description": "Exit code of the command."},
-		"log":      str("Trimmed output as evidence."),
+		"log":       str("Trimmed output as evidence."),
 	}, "task_id", "result")},
 	{"release_task", "Release a claimed task back to Ready (work abandoned or blocked).", obj(map[string]interface{}{
 		"task_id": taskID,
@@ -67,6 +67,18 @@ var ToolDefs = []ToolDef{
 	{"request_approval_presentation", "Ask agentklar to surface a pending approval to the human. Carries no decision.", obj(map[string]interface{}{
 		"task_id": taskID,
 	}, "task_id")},
+	{"get_context", "Get a focused work packet (knowledge + memory + code + ticket pointers) for a task or query, so you don't re-read the whole repo.", obj(map[string]interface{}{
+		"task_id": str("Optional task id to build the packet around."),
+		"query":   str("Optional free-text query for the context index."),
+	})},
+	{"remember", "Write a shared memory row (cross-session, cross-agent). Provenance is stamped from your active claim; you cannot delete memory.", obj(map[string]interface{}{
+		"namespace": str("Scope, usually the task id. Empty for global."),
+		"key":       str("Stable key within the namespace."),
+		"value":     str("The fact or note to remember."),
+	}, "key", "value")},
+	{"recall", "Full-text search over shared memory and knowledge.", obj(map[string]interface{}{
+		"query": str("What to search for."),
+	}, "query")},
 }
 
 // Prompt surface: the workflows a human reaches for from the client's

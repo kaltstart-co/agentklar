@@ -56,7 +56,10 @@ them. Field authority is split, never duplicated.
 | `internal/quality` | Recipe parsing + execution with attestation. Only declared recipes run; prose is never translated to shell. |
 | `internal/gate` | Completion Review + Auto QA pipeline, Slop Guard. |
 | `internal/tracker` | Field authority, nonce-bound approval parsing, echo suppression. |
-| `internal/tracker/vikunja` | Live Vikunja REST adapter + approval reconciliation. |
+| `internal/tracker/vikunja` | Live Vikunja REST adapter + approval reconciliation (becoming optional). |
+| `internal/knowledge` | In-repo `.agentklar/knowledge/` — ADRs, conventions, glossary, runbook. Versioned, human-reviewable. |
+| `internal/memory` | Shared cross-session memory (`memory.sqlite`, FTS5) with provenance. Human-only deletion. |
+| `internal/context` | FTS5 context index + focused work packets for agent claims. |
 | `internal/ticket` | Parses interrogator-style ticket Markdown for `task import`. |
 | `internal/mcp` | Agent-facing JSON-RPC surface (no approval method). |
 | `cmd/agentklar` | The CLI. `cmd/agentklar-bar` is the macOS menu-bar widget. |
@@ -80,13 +83,16 @@ These are enforced by executable tests. Changing them is a contract violation:
   (a sidecar the gate does **not** load) — never auto-enables them.
 - **Atomic claims with fencing.** Concurrent claims produce exactly one
   winner; a stale fencing token can never mutate protected state.
+- **Transparency.** Everything an agent knows, the human can see: knowledge is
+  in-repo markdown, memory rows carry provenance and are human-only deletable,
+  and the context index is searchable from the CLI. No hidden agent state.
 
 ## MCP methods an agent may call
 
 `bind_workspace`, `list_ready_tasks`, `claim_task`, `heartbeat_task`,
 `submit_for_review`, `record_review`, `record_qa`, `release_task`, `get_task`,
-`add_comment`, `request_approval_presentation`. There is intentionally no
-`approve` / `reject` / `done`.
+`add_comment`, `request_approval_presentation`, `get_context`, `remember`,
+`recall`. There is intentionally no `approve` / `reject` / `done`.
 
 ## Conventions
 

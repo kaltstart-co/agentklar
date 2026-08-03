@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/kaltstart-co/agentklar/internal/contracts"
+	"github.com/kaltstart-co/agentklar/internal/knowledge"
 	"github.com/kaltstart-co/agentklar/internal/quality"
 	"github.com/kaltstart-co/agentklar/internal/tracker/vikunja"
 )
@@ -48,6 +49,28 @@ func cmdOpen(args []string) error {
 			return fmt.Errorf("no quality.toml at %s; run 'agentklar init' to propose one", qpath)
 		}
 		return openPath(qpath)
+	case "knowledge":
+		ks, err := knowledge.New(repoRoot())
+		if err != nil {
+			return err
+		}
+		return openPath(ks.Dir())
+	case "docs":
+		d := filepath.Join(repoRoot(), "docs")
+		if _, err := os.Stat(d); err != nil {
+			return fmt.Errorf("no docs/ at %s", d)
+		}
+		return openPath(d)
+	case "memory", "context", "ui":
+		// These are sqlite-backed or not-yet-built (ui). Open the workspace so
+		// the human can see the backing files; the native UI (Phase D) will
+		// replace the 'ui' target with a live local page.
+		eng, d, err := openEngine()
+		if err != nil {
+			return err
+		}
+		_ = eng
+		return openPath(d)
 	}
 	_ = eng
 	return fmt.Errorf("unknown open target %q (want: board|app|workspace|config|quality)", args[0])
