@@ -28,7 +28,13 @@ const usage = `agentklar — agents that know what done means (dev build)
 
 Usage:
   agentklar init                        Initialize a workspace for the current repo
+  agentklar status                      One-glance: tasks, pending approvals, board
+  agentklar doctor                      Technical health: recipes, commands, counts
+  agentklar open board|app|workspace|config|quality
+                                        Open a surface in the OS default
   agentklar task new <id> <title>       Create a Draft task
+  agentklar task import <ticket.md>     Create a task from an interrogator ticket
+  agentklar task import-plan <dir>      Import a project's dev-task tickets (waves)
   agentklar task ready <id>             Mark a task Ready (Definition of Ready enforced)
   agentklar task list                   List tasks
   agentklar task show <id>              Show a task with evidence and reviews
@@ -37,14 +43,16 @@ Usage:
   agentklar reject <id> <reason>        Reject a task awaiting human approval
   agentklar mcp                         Run the agent-facing MCP server on stdio
   agentklar mcp install [--client]      Print MCP config to connect your agent
+  agentklar install [--agents ...]      Install skill + slash commands globally
   agentklar tracker connect ...         Connect a Vikunja board (new or existing)
   agentklar tracker sync                Place every task's card in its state column
   agentklar reconcile                   Apply human approvals posted on the board
-  agentklar doctor                      Report workspace health
   agentklar version                     Print the version, commit, and build date
 
 Flags for 'task new':
   --lane quick|standard|major  --criteria "a;b;c"  --verify "how"  --target codex|gemini|any
+Flags for 'task import' / 'import-plan':
+  --lane quick|standard|major  --target codex|gemini|any  --ready
 `
 
 // Build metadata, stamped at release time via -ldflags "-X main.version=...".
@@ -112,6 +120,15 @@ func run(args []string) error {
 			return fmt.Errorf("task requires a subcommand")
 		}
 		return cmdTask(args[1:])
+	case "open":
+		if len(args) < 2 {
+			return cmdOpen(nil)
+		}
+		return cmdOpen(args[1:])
+	case "status":
+		return cmdStatus()
+	case "install":
+		return cmdInstall(args[1:])
 	case "gate":
 		if len(args) < 2 {
 			return fmt.Errorf("gate requires a task id")
@@ -201,6 +218,10 @@ func cmdTask(args []string) error {
 		return err
 	}
 	switch args[0] {
+	case "import":
+		return cmdTaskImport(args[1:])
+	case "import-plan":
+		return cmdTaskImportPlan(args[1:])
 	case "new":
 		if len(args) < 3 {
 			return fmt.Errorf("task new <id> <title> [flags]")
