@@ -6,3 +6,6 @@
 *.png
 *.log
 !docs/**/*.png
+# Agentklar local knowledge scaffolding is generated on demand;
+# commit real decisions/ADRs intentionally, not these defaults.
+.agentklar/knowledge/
