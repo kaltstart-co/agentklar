@@ -1,0 +1,41 @@
+{{define "content"}}
+<h1>Shared Memory</h1>
+{{if not .MemOK}}<p class="empty">Memory store not available.</p>
+{{else}}
+<form method="get" action="/memory" class="row" style="margin-bottom:1rem">
+  <input type="search" id="mem-q" name="q" value="{{.Q}}" placeholder="search memory (FTS)&hellip;" autocomplete="off">
+  <button class="btn" type="submit">Search</button>
+</form>
+<table>
+<thead><tr><th>Namespace</th><th>Key</th><th>Value</th><th>Holder</th><th>When</th></tr></thead>
+<tbody id="mem-results">
+{{range .Memory}}<tr><td><code>{{.Namespace}}</code></td><td><code>{{.Key}}</code></td><td>{{.Value}}</td><td>{{.Holder}}</td><td class="muted">{{.CreatedAt}}</td></tr>
+{{else}}<tr><td colspan="5" class="empty">no entries</td></tr>{{end}}
+</tbody>
+</table>
+<script>
+(function(){
+  var input=document.getElementById('mem-q'); var out=document.getElementById('mem-results');
+  if(!input||!out) return;
+  var timer=null;
+  function esc(s){return (s==null?'':String(s)).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+  function render(rows){
+    if(!rows||!rows.length){out.innerHTML='<tr><td colspan="5" class="empty">no entries</td></tr>';return;}
+    out.innerHTML=rows.map(function(e){
+      return '<tr><td><code>'+esc(e.Namespace)+'</code></td><td><code>'+esc(e.Key)+'</code></td><td>'+esc(e.Value)+'</td><td>'+esc(e.Holder)+'</td><td class="muted">'+esc(e.CreatedAt)+'</td></tr>';
+    }).join('');
+  }
+  input.addEventListener('input',function(){
+    clearTimeout(timer);
+    var q=input.value.trim();
+    timer=setTimeout(function(){
+      fetch('/api/memory'+(q?('?q='+encodeURIComponent(q)):''),{headers:{'Accept':'application/json'}})
+        .then(function(r){return r.json();})
+        .then(render)
+        .catch(function(){});
+    },150);
+  });
+})();
+</script>
+{{end}}
+{{end}}

@@ -1,0 +1,19 @@
+{{define "content"}}
+<h1>Project Knowledge</h1>
+{{if .Error}}<p class="empty">{{.Error}}</p>
+{{else if not .KnowOK}}<p class="empty">Knowledge store not available.</p>
+{{else if not .Knowledge}}<p class="empty">No knowledge entries yet.</p>
+{{else}}
+{{range .Knowledge}}
+<div class="panel">
+  <div class="row" style="justify-content:space-between">
+    <h2 style="margin:0">{{.Title}}</h2>
+    <span class="badge">{{.Kind}}</span>
+  </div>
+  <div class="muted id" style="margin:.2rem 0 .5rem">{{.Slug}}</div>
+  <pre>{{.Body}}</pre>
+  {{if .Path}}<div class="muted" style="font-size:.78rem">{{.Path}}</div>{{end}}
+</div>
+{{end}}
+{{end}}
+{{end}}

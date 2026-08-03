@@ -1,0 +1,53 @@
+{{define "content"}}
+{{with .Task}}
+<h1>{{.Title}}</h1>
+<div class="row" style="margin-bottom:.6rem">
+  <span class="badge {{.State}}">{{$.StateLabel}}</span>
+  <span class="muted id">{{.ID}}</span>
+  {{if .TrackerID}}<span class="muted">tracker: {{.TrackerID}}</span>{{end}}
+</div>
+<div class="kv">
+  <span class="k">Project</span><span>{{.Project}}</span>
+  <span class="k">Repo</span><span>{{if .RepoPath}}<code>{{.RepoPath}}</code>{{else}}<span class="muted">&mdash;</span>{{end}}</span>
+  <span class="k">Lane</span><span>{{.Lane}}</span>
+  <span class="k">Isolation</span><span>{{.Isolation}}</span>
+  <span class="k">Target</span><span>{{.Target}}</span>
+  <span class="k">Review cycles</span><span>{{.ReviewCycles}}</span>
+</div>
+{{if .Objective}}<h2>Objective</h2><p>{{.Objective}}</p>{{end}}
+{{if .Criteria}}
+<h2>Acceptance criteria</h2>
+<ul class="criteria">{{range .Criteria}}<li>{{.}}</li>{{end}}</ul>
+{{end}}
+{{if .Verification}}<h2>Verification</h2><pre>{{.Verification}}</pre>{{end}}
+{{end}}
+
+<h2>Evidence</h2>
+{{if .Evidence}}
+<table>
+<thead><tr><th>Provenance</th><th>Criterion</th><th>Command</th><th>Exit</th><th>Log</th><th>Note</th></tr></thead>
+<tbody>
+{{range .Evidence}}
+<tr>
+  <td><span class="badge">{{.Provenance}}</span></td>
+  <td>{{.Criterion}}</td>
+  <td><code>{{.Command}}</code></td>
+  <td>{{if .ExitCode}}{{.ExitCode}}{{else}}&mdash;{{end}}</td>
+  <td>{{.LogPath}}</td>
+  <td>{{.Note}}</td>
+</tr>
+{{end}}
+</tbody>
+</table>
+{{else}}<p class="empty">No evidence recorded.</p>{{end}}
+
+<h2>Comments</h2>
+{{if .Comments}}
+<table>
+<thead><tr><th>Actor</th><th>Type</th><th>Body</th><th>When</th></tr></thead>
+<tbody>
+{{range .Comments}}<tr><td>{{.Actor}}</td><td>{{.CType}}</td><td>{{.Body}}</td><td class="muted">{{.CreatedAt}}</td></tr>{{end}}
+</tbody>
+</table>
+{{else}}<p class="empty">No comments.</p>{{end}}
+{{end}}

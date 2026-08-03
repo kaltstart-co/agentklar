@@ -1,0 +1,27 @@
+{{define "layout"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>{{.Title}} &mdash; agentklar</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header class="topnav">
+  <div class="brand">agentklar</div>
+  <nav>
+    <a href="/" {{if eq .Section "board"}}class="active"{{end}}>Board</a>
+    <a href="/knowledge" {{if eq .Section "knowledge"}}class="active"{{end}}>Knowledge</a>
+    <a href="/memory" {{if eq .Section "memory"}}class="active"{{end}}>Memory</a>
+    <a href="/context" {{if eq .Section "context"}}class="active"{{end}}>Context</a>
+    <a href="/approvals" {{if eq .Section "approvals"}}class="active"{{end}}>Approvals</a>
+  </nav>
+</header>
+<main class="container">
+{{block "content" .}}{{end}}
+</main>
+</body>
+</html>
+{{end}}

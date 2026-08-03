@@ -1,0 +1,29 @@
+{{define "content"}}
+<h1>Context Index</h1>
+{{if not .CtxOK}}<p class="empty">Context store not available.</p>
+{{else}}
+<form method="get" action="/context" class="row" style="margin-bottom:1rem">
+  <input type="search" id="ctx-q" name="q" value="{{.Q}}" placeholder="search indexed context&hellip;" autocomplete="off">
+  <button class="btn" type="submit">Search</button>
+</form>
+{{if .Q}}
+<p class="muted" style="margin:.2rem 0 .8rem">{{len .ContextPkt.Items}} result(s) for &ldquo;{{.Q}}&rdquo;</p>
+<table>
+<thead><tr><th>Source</th><th>Ref</th><th>Title</th><th>Body</th></tr></thead>
+<tbody id="ctx-results">
+{{range .ContextPkt.Items}}<tr><td><span class="badge">{{.Source}}</span></td><td><code>{{.Ref}}</code></td><td>{{.Title}}</td><td class="muted">{{.Body}}</td></tr>
+{{else}}<tr><td colspan="4" class="empty">no matches</td></tr>{{end}}
+</tbody>
+</table>
+{{else}}
+<p class="empty">Enter a query to search the indexed knowledge, memory, code, and tickets.</p>
+{{end}}
+<script>
+(function(){
+  var input=document.getElementById('ctx-q');
+  if(!input) return;
+  input.focus();
+})();
+</script>
+{{end}}
+{{end}}

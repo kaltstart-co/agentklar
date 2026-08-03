@@ -37,6 +37,7 @@ Usage:
   agentklar knowledge list|decide|add|show   Shared project knowledge (in-repo)
   agentklar memory list|search|remember|forget   Shared cross-session memory
   agentklar context search|index         Focused work packets (knowledge+memory)
+  agentklar ui [--addr --open]           Native local web UI (board/memory/context/approvals)
   agentklar task new <id> <title>       Create a Draft task
   agentklar task import <ticket.md>     Create a task from an interrogator ticket
   agentklar task import-plan <dir>      Import a project's dev-task tickets (waves)
@@ -149,6 +150,8 @@ func run(args []string) error {
 			return cmdContext(nil)
 		}
 		return cmdContext(args[1:])
+	case "ui":
+		return cmdUI(args[1:])
 	case "gate":
 		if len(args) < 2 {
 			return fmt.Errorf("gate requires a task id")

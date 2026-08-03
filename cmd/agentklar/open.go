@@ -61,16 +61,18 @@ func cmdOpen(args []string) error {
 			return fmt.Errorf("no docs/ at %s", d)
 		}
 		return openPath(d)
-	case "memory", "context", "ui":
-		// These are sqlite-backed or not-yet-built (ui). Open the workspace so
-		// the human can see the backing files; the native UI (Phase D) will
-		// replace the 'ui' target with a live local page.
-		eng, d, err := openEngine()
+	case "memory", "context":
+		// These are sqlite-backed; open the workspace so the human can see the
+		// backing files. (The native UI at `agentklar ui` is the rich view.)
+		_, d, err := openEngine()
 		if err != nil {
 			return err
 		}
-		_ = eng
 		return openPath(d)
+	case "ui":
+		// Launch the native UI server and pop the browser. This blocks (Ctrl-C
+		// to stop) — `open ui` is the friendly front door to `agentklar ui`.
+		return cmdUI([]string{"--open"})
 	}
 	_ = eng
 	return fmt.Errorf("unknown open target %q (want: board|app|workspace|config|quality)", args[0])

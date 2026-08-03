@@ -1,0 +1,21 @@
+{{define "content"}}
+<h1>Task Board</h1>
+{{if .Error}}<p class="empty">{{.Error}}</p>
+{{else}}
+<div class="board">
+{{range .Columns}}
+  <section class="col">
+    <h3>{{.Label}} <span class="muted">{{len .Tasks}}</span></h3>
+    {{range .Tasks}}
+      <a class="card" href="/tasks/{{.ID}}">
+        <div class="t">{{.Title}}</div>
+        <div class="id">{{.ID}}</div>
+      </a>
+    {{else}}
+      <div class="empty">&mdash;</div>
+    {{end}}
+  </section>
+{{end}}
+</div>
+{{end}}
+{{end}}
