@@ -60,6 +60,7 @@ them. Field authority is split, never duplicated.
 | `internal/knowledge` | In-repo `.agentklar/knowledge/` — ADRs, conventions, glossary, runbook. Versioned, human-reviewable. |
 | `internal/memory` | Shared cross-session memory (`memory.sqlite`, FTS5) with provenance. Human-only deletion. |
 | `internal/context` | FTS5 context index + focused work packets for agent claims. |
+| `internal/ui` | Native local web UI (board/knowledge/memory/context/approvals) + JSON API. Default view; the approve click is the trusted local channel. Vikunja is one optional board backend. |
 | `internal/ticket` | Parses interrogator-style ticket Markdown for `task import`. |
 | `internal/mcp` | Agent-facing JSON-RPC surface (no approval method). |
 | `cmd/agentklar` | The CLI. `cmd/agentklar-bar` is the macOS menu-bar widget. |

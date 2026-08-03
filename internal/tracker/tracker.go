@@ -13,7 +13,32 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/kaltstart-co/agentklar/internal/contracts"
 )
+
+// Tracker is the optional board-projection backend. The core workflow never
+// requires one: when nothing is configured, Noop is used and everything still
+// works — the native UI (`agentklar ui`) is the default view and the CLI/UI
+// approve action is the default trusted channel. A backend such as Vikunja
+// only adds a live Kanban projection of the protected state in control.sqlite.
+//
+// The board is ALWAYS a projection, never an approval boundary: moving a card
+// is a transition request, never a Done decision.
+type Tracker interface {
+	// PlaceCard moves a task's card to the column for the given state.
+	// Best-effort: implementations must not panic on a missing/offline board.
+	PlaceCard(trackerID string, state contracts.State) error
+	// Configured reports whether a real backend is bound (for status display).
+	Configured() bool
+}
+
+// Noop is the default Tracker used when no backend is configured. Every method
+// is a no-op, so the workflow runs fully tracker-less.
+type Noop struct{}
+
+func (Noop) PlaceCard(string, contracts.State) error { return nil }
+func (Noop) Configured() bool                        { return false }
 
 var (
 	ErrNotHumanActor  = errors.New("approval comment was not authored by an allowed human account")

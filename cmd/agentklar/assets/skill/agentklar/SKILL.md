@@ -1,6 +1,6 @@
 ---
 name: agentklar
-description: Use when the user mentions tracked coding tasks, "what's done", task boards, pending approvals, Definition of Done, or running quality gates. Drives the `agentklar` CLI and its MCP server to shape, claim, submit, and gate work — but never to approve it. Covers the Draft→Ready→In Progress→Review→QA→Approval→Done workflow, the human-only completion boundary, the Vikunja board, and the interrogator→task import bridge. Triggers on "agentklar", "/agentklar", "is this done", "what needs my approval", "open the board".
+description: Use when the user mentions tracked coding tasks, "what's done", task boards, pending approvals, Definition of Done, shared memory/knowledge across agents, or running quality gates. Drives the `agentklar` CLI, its MCP server, and the native web UI — but never to approve a task. Covers the Draft→Ready→In Progress→Review→QA→Approval→Done workflow, the human-only completion boundary, shared knowledge/memory/context for multi-agent work, the native UI, the optional Vikunja board, and the interrogator→task import bridge. Triggers on "agentklar", "/agentklar", "is this done", "what needs my approval", "open the board/UI", "remember/recall".
 license: MIT
 ---
 
@@ -69,12 +69,22 @@ that file; the human copies accepted ones into `quality.toml`.
 - Trusted channel: comment `approve <nonce>` on the Vikunja card as yourself,
   then `agentklar reconcile`.
 
+### Shared knowledge (multi-agent memory)
+When several agents work the same project, they share context through three layers — all human-visible, all with provenance:
+- `agentklar knowledge decide "<title>" --decision "..."` — writes an ADR to `.agentklar/knowledge/` (in-repo, git-versioned). `knowledge list|show`.
+- `agentklar memory remember <key> --value "..."` — shared `memory.sqlite` (FTS5); `memory search`; **human-only `memory forget`**.
+- `agentklar context index` then `context search "<q>"` — focused work packets across knowledge + memory.
+- Over MCP: `remember {namespace,key,value}`, `recall {query}`, `get_context {task_id|query}`.
+
+Everything an agent knows, the human can see (Transparency). Never claim a fact the gate or memory hasn't recorded.
+
 ### Board & UI
-- `agentklar open board` — open the Vikunja board in your browser.
+- `agentklar open ui` (or `agentklar ui`) — the **native local web UI**: Board, Knowledge, Memory, Context, Evidence, Approvals. This is the default; no external service needed. The Approve button there is a trusted human channel.
+- `agentklar open board` — open a connected Vikunja board (optional).
 - `agentklar open app` — launch the macOS menu-bar widget (approval badge).
-- `agentklar open workspace|config|quality` — reveal those paths.
-- `agentklar tracker connect …` — bind a Vikunja project (creates the 8 workflow columns).
-- `agentklar tracker sync` — force every card to match its state.
+- `agentklar open workspace|config|quality|knowledge|docs` — reveal those paths.
+- Vikunja is **optional** (one backend behind the tracker interface). The core loop runs fully without it.
+- `agentklar tracker connect …` — optionally bind a Vikunja project; `agentklar tracker sync` to re-project.
 
 ## Slash commands (opencode / Claude Code)
 `/agentklar` (status + help), `/agentklar-task <idea>`, `/agentklar-board`,
@@ -89,7 +99,9 @@ that file; the human copies accepted ones into `quality.toml`.
 
 ## Install (if `agentklar` is not on PATH)
 ```bash
-git clone https://github.com/kaltstart-co/agentklar && cd agentklar
-go build -o ~/.local/bin/agentklar ./cmd/agentklar
-agentklar mcp install --client opencode   # or codex | generic
+# one line (macOS/Linux):
+curl -sSL https://raw.githubusercontent.com/kaltstart-co/agentklar/main/install.sh | bash
+# or with Go:
+go install github.com/kaltstart-co/agentklar/cmd/agentklar@latest
+agentklar install --agents opencode,claude,codex   # skill + slash commands + MCP
 ```

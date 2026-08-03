@@ -125,6 +125,35 @@ agentklar tracker sync
 
 ---
 
+## Native web UI (no external service needed)
+
+The built-in UI is the default — one local page for the board, shared knowledge,
+memory, context search, evidence, and approvals. It binds to `127.0.0.1`, so the
+**Approve** click is your trusted human channel (an agent has no MCP method for it).
+
+```bash
+agentklar open ui            # start the UI server and open it (Ctrl-C to stop)
+agentklar ui --addr 127.0.0.1:7681   # same, with a fixed port
+```
+
+The same data is exposed as JSON (`GET /api/tasks`, `/api/memory?q=`,
+`/api/context?q=`, `/api/approvals`) so a future richer client can reuse it.
+
+### Shared knowledge & memory (for multi-agent work)
+
+```bash
+agentklar knowledge decide "Use Postgres" --decision "Already deployed; no SQLite."
+agentklar memory remember flaky-auth --value "TestLogin flakes on cold cache" --task AK-7
+agentklar context index                       # pull knowledge + memory into the index
+agentklar context search "auth cache"
+```
+
+Vikunja is **optional** — one board backend behind the tracker interface. The
+core workflow runs fully without it. To use it anyway, see
+[`agentklar tracker connect --help`](#).
+
+---
+
 ## Menu-bar widget (macOS)
 
 A small menu-bar app shows how many tasks are **awaiting your approval** across all your

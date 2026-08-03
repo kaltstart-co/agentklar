@@ -135,18 +135,37 @@ func placeCard(dir, trackerID string, state contracts.State) {
 	if trackerID == "" {
 		return
 	}
+	_ = openTracker(dir).PlaceCard(trackerID, state)
+}
+
+// openTracker returns the configured board backend, or tracker.Noop when none
+// is bound (the default, tracker-less mode). Vikunja is one optional backend.
+func openTracker(dir string) tracker.Tracker {
 	cfg, err := vikunja.LoadConfig(dir)
 	if err != nil || cfg == nil {
-		return
+		return tracker.Noop{}
 	}
-	svc := cfg.Client()
-	board, err := svc.EnsureBoard(cfg.ProjectID)
+	return &vikunjaTracker{cfg: cfg}
+}
+
+// vikunjaTracker adapts a stored Vikunja binding to the tracker.Tracker
+// interface. PlaceCard mirrors the original best-effort projection.
+type vikunjaTracker struct{ cfg *vikunja.Config }
+
+func (v *vikunjaTracker) Configured() bool { return v.cfg != nil }
+
+func (v *vikunjaTracker) PlaceCard(trackerID string, state contracts.State) error {
+	if v.cfg == nil || trackerID == "" {
+		return nil
+	}
+	svc := v.cfg.Client()
+	board, err := svc.EnsureBoard(v.cfg.ProjectID)
 	if err != nil {
-		return
+		return err
 	}
 	var tid int64
 	fmt.Sscanf(trackerID, "%d", &tid)
-	_ = board.PlaceTask(svc, tid, state)
+	return board.PlaceTask(svc, tid, state)
 }
 
 // cmdReconcile pulls comments for every task in User Approval and applies the
