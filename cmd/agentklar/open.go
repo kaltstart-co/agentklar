@@ -2,11 +2,13 @@ package main
 
 import (
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/kaltstart-co/agentklar/internal/contracts"
 	"github.com/kaltstart-co/agentklar/internal/knowledge"
@@ -87,6 +89,20 @@ func boardURL(apiURL string, projectID int64) string {
 	return fmt.Sprintf("%s/projects/%d", base, projectID)
 }
 
+// trackerReachable does a short HTTP probe of the tracker API so status never
+// claims a board is "connected" when its server is down. Any 1.5s-or-less
+// response (even an error status) counts as reachable; a timeout/conn-refused
+// does not.
+func trackerReachable(apiURL string) bool {
+	c := &http.Client{Timeout: 1500 * time.Millisecond}
+	resp, err := c.Get(strings.TrimRight(apiURL, "/") + "/info")
+	if err != nil {
+		return false
+	}
+	resp.Body.Close()
+	return true
+}
+
 // openApp launches the macOS menu-bar widget if it has been built.
 func openApp() error {
 	candidates := []string{
@@ -148,13 +164,18 @@ func cmdStatus() error {
 	}
 	fmt.Println()
 	if pending > 0 {
-		fmt.Printf("⤷ %d task(s) waiting on YOUR approval — run 'agentklar open board' or 'agentklar reconcile'\n", pending)
+		fmt.Printf("⤷ %d task(s) waiting on YOUR approval — run 'agentklar open ui' (Approvals tab) or 'agentklar approve <id>'\n", pending)
 	}
-
+	// The native UI is the default view and needs no external service. Mention
+	// the optional Vikunja board only when one is actually reachable, so status
+	// never points the human at a dead URL.
+	fmt.Printf("ui:        agentklar open ui   (native board/approvals/alerts — no extra service needed)\n")
 	if cfg, _ := vikunja.LoadConfig(dir); cfg != nil {
-		fmt.Printf("board:     connected — approve as %s → %s\n", cfg.HumanUser, boardURL(cfg.URL, cfg.ProjectID))
-	} else {
-		fmt.Printf("board:     none (tracker-less; tasks live in the local DB)\n")
+		if trackerReachable(cfg.URL) {
+			fmt.Printf("board:     connected — approve as %s → %s\n", cfg.HumanUser, boardURL(cfg.URL, cfg.ProjectID))
+		} else {
+			fmt.Printf("board:     configured but not reachable at %s — start Vikunja or just use the native UI above\n", cfg.URL)
+		}
 	}
 
 	if ns, _ := notify.New(dir); ns != nil {

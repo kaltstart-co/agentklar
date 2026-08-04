@@ -1,13 +1,17 @@
 ---
-description: Open the Agentklar board (Vikunja) or the menu-bar app.
+description: Open the Agentklar board / native UI.
 ---
 
-Open the Agentklar board in the browser:
+Open Agentklar's board. Prefer the **native UI** (needs no external service):
+
 ```
-agentklar open board
+agentklar open ui
 ```
-If no tracker is connected, tell the user to run
-`agentklar tracker connect --url <api> --svc-user <bot> --svc-pass <pass> --human <them>`
-and offer to walk through it. Also mention `agentklar open app` (macOS menu-bar
-widget showing the pending-approval badge) and `agentklar open workspace` /
-`config` / `quality` for revealing those paths in Finder.
+
+That opens the local web UI (Board / Knowledge / Memory / Context / Approvals /
+Alerts) in your browser. Stop it with Ctrl-C when done.
+
+Only if `agentklar status` prints a `board: connected` line (a Vikunja backend
+is configured AND reachable) should you offer `agentklar open board` instead. If
+status says `not reachable`, tell the user to start Vikunja or just use the
+native UI above. Also mention `agentklar open app` for the macOS menu-bar widget.
