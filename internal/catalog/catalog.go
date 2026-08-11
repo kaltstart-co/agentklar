@@ -268,18 +268,29 @@ func legacyCompatible(workspace, repo string) (bool, error) {
 		return false, fmt.Errorf("open legacy workspace: %w", err)
 	}
 	defer db.Close()
-	var conflict int
-	err = db.QueryRow(`SELECT 1 FROM tasks WHERE repo_path <> '' AND repo_path <> ? LIMIT 1`, repo).Scan(&conflict)
-	if errors.Is(err, sql.ErrNoRows) {
-		return true, nil
-	}
+	rows, err := db.Query(`SELECT DISTINCT repo_path FROM tasks WHERE repo_path <> ''`)
 	if missingTasksTable(err) {
 		return false, nil
 	}
 	if err != nil {
 		return false, fmt.Errorf("inspect legacy workspace: %w", err)
 	}
-	return false, nil
+	defer rows.Close()
+	found := false
+	for rows.Next() {
+		var path string
+		if err := rows.Scan(&path); err != nil {
+			return false, err
+		}
+		if path != repo {
+			return false, nil
+		}
+		found = true
+	}
+	if err := rows.Err(); err != nil {
+		return false, fmt.Errorf("inspect legacy workspace: %w", err)
+	}
+	return found, nil
 }
 
 func missingTasksTable(err error) bool {

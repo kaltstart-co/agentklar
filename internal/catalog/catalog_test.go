@@ -106,6 +106,52 @@ func TestRegisterKeepsCompatibleLegacyWorkspace(t *testing.T) {
 	}
 }
 
+func TestRegisterUsesHashedWorkspaceForEmptyLegacyTasks(t *testing.T) {
+	c := newTestCatalog(t)
+	root := t.TempDir()
+	legacy := filepath.Join(root, "workspaces", "app")
+	createLegacyWorkspace(t, legacy)
+
+	p, err := c.Register(filepath.Join(root, "acme", "app"), legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertHashedWorkspace(t, p, legacy)
+}
+
+func TestRegisterUsesHashedWorkspaceForEmptyLegacyRepoPaths(t *testing.T) {
+	c := newTestCatalog(t)
+	root := t.TempDir()
+	legacy := filepath.Join(root, "workspaces", "app")
+	seedLegacyWorkspace(t, legacy, "")
+
+	p, err := c.Register(filepath.Join(root, "acme", "app"), legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertHashedWorkspace(t, p, legacy)
+}
+
+func TestRegisterKeepsLegacyWorkspaceWithMatchingAndEmptyRepoPaths(t *testing.T) {
+	c := newTestCatalog(t)
+	root := t.TempDir()
+	repo := filepath.Join(root, "acme", "app")
+	legacy := filepath.Join(root, "workspaces", "app")
+	seedLegacyWorkspace(t, legacy, repo, "")
+
+	p, err := c.Register(repo, legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonicalLegacy, err := canonicalPath(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.WorkspacePath != canonicalLegacy {
+		t.Fatalf("workspace = %q, want %q", p.WorkspacePath, canonicalLegacy)
+	}
+}
+
 func TestRegisterUsesHashedWorkspaceWithoutLegacyDatabase(t *testing.T) {
 	c := newTestCatalog(t)
 	root := t.TempDir()
@@ -259,7 +305,7 @@ func newTestCatalog(t *testing.T) *Catalog {
 	return c
 }
 
-func seedLegacyWorkspace(t *testing.T, workspace, repo string) {
+func createLegacyWorkspace(t *testing.T, workspace string) *sql.DB {
 	t.Helper()
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -269,10 +315,18 @@ func seedLegacyWorkspace(t *testing.T, workspace, repo string) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	_, err = db.Exec(`INSERT INTO tasks (id, project, repo_path, title, lane, state, created_at, updated_at)
-		VALUES ('legacy', 'app', ?, 'legacy', 'quick', 'Draft', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`, repo)
-	if err != nil {
-		t.Fatal(err)
+	return db
+}
+
+func seedLegacyWorkspace(t *testing.T, workspace string, repos ...string) {
+	t.Helper()
+	db := createLegacyWorkspace(t, workspace)
+	for i, repo := range repos {
+		_, err := db.Exec(`INSERT INTO tasks (id, project, repo_path, title, lane, state, created_at, updated_at)
+			VALUES (?, 'app', ?, 'legacy', 'quick', 'Draft', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`, fmt.Sprintf("legacy-%d", i), repo)
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 
