@@ -2,7 +2,7 @@
 // human uses to see the task board, project knowledge, shared memory, the
 // context index, recorded evidence, and to approve work. It replaces the
 // external Vikunja dependency; the human clicks "approve" here, on a server
-// bound to 127.0.0.1 — a trusted channel.
+// bound to 127.0.0.1 and authenticated by a one-time browser launch.
 //
 // Every view is backed by the same data path as a JSON API exposed at /api/...;
 // the HTML pages are simply one client of that data. Handlers stay thin: they
@@ -15,7 +15,9 @@
 package ui
 
 import (
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"embed"
 	"encoding/hex"
 	"errors"
@@ -27,6 +29,7 @@ import (
 	"net/url"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/kaltstart-co/agentklar/internal/catalog"
 	akctx "github.com/kaltstart-co/agentklar/internal/context"
@@ -50,10 +53,8 @@ var pageFiles = []string{
 	"board", "task", "knowledge", "memory", "context", "approvals", "alerts",
 }
 
-// Server is the local UI server. It holds read/write handles to the protected
-// control database (for listing tasks and for the trusted approval path) and
-// best-effort handles to the optional knowledge/memory/context layers. A nil
-// optional store degrades its view to "not available" rather than panicking.
+// Server is the local UI server. The legacy single-project constructor keeps
+// stores open; the control-center constructor opens project stores per request.
 type Server struct {
 	workspaceDir string
 	repoRoot     string
@@ -65,7 +66,10 @@ type Server struct {
 	alerts           *notify.Store    // optional; nil if open failed
 	catalog          *catalog.Catalog
 	currentProjectID string
-	csrfToken        string
+	bootToken        string
+	sessionToken     string
+	bootMu           sync.Mutex
+	bootUsed         bool
 
 	pages  map[string]*template.Template // file basename -> layout+page set
 	router http.Handler
@@ -144,21 +148,47 @@ func newServer() (*Server, error) {
 		pages[name] = t
 	}
 
-	token := make([]byte, 32)
-	if _, err := rand.Read(token); err != nil {
-		return nil, fmt.Errorf("ui: csrf token: %w", err)
+	tokens := make([]byte, 64)
+	if _, err := rand.Read(tokens); err != nil {
+		return nil, fmt.Errorf("ui: session tokens: %w", err)
 	}
-	return &Server{pages: pages, csrfToken: hex.EncodeToString(token)}, nil
+	return &Server{
+		pages:        pages,
+		bootToken:    hex.EncodeToString(tokens[:32]),
+		sessionToken: hex.EncodeToString(tokens[32:]),
+	}, nil
 }
 
 // Handler returns the routed http.Handler (a *http.ServeMux). Exported so the
 // CLI can serve it however it likes (httptest, http.Serve, etc.).
 func (s *Server) Handler() http.Handler { return s.router }
 
+// LaunchURL returns the one-time browser bootstrap URL. Callers must pass it
+// directly to the browser and must never print or log it.
+func (s *Server) LaunchURL(base string) (string, error) {
+	u, err := url.Parse(base)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || !isLoopbackHost(u.Hostname()) {
+		return "", errors.New("ui: invalid launch URL")
+	}
+	u.Path = "/_agentklar/bootstrap"
+	u.RawPath = ""
+	u.RawQuery = url.Values{"token": {s.bootToken}}.Encode()
+	u.Fragment = ""
+	return u.String(), nil
+}
+
+func isLoopbackHost(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
 // Listen starts a local TCP listener. An empty addr defaults to 127.0.0.1:0 so
 // the OS picks a free port; the returned listener lets the CLI print the URL.
-// The UI is a trusted channel only because it is local: an agent has no MCP
-// method to approve, and binding to loopback keeps the surface physical.
+// The UI stays on loopback; mutations additionally require the browser session
+// established by LaunchURL's one-time capability.
 func (s *Server) Listen(addr string) (net.Listener, error) {
 	if addr == "" {
 		addr = "127.0.0.1:0"
@@ -167,11 +197,8 @@ func (s *Server) Listen(addr string) (net.Listener, error) {
 	if err != nil {
 		return nil, err
 	}
-	if host != "localhost" {
-		ip := net.ParseIP(host)
-		if ip == nil || !ip.IsLoopback() {
-			return nil, fmt.Errorf("%w: %s", ErrNonLoopback, addr)
-		}
+	if !isLoopbackHost(host) {
+		return nil, fmt.Errorf("%w: %s", ErrNonLoopback, addr)
 	}
 	return net.Listen("tcp", addr)
 }
@@ -216,8 +243,10 @@ func (s *Server) routes() http.Handler {
 	}
 
 	// HTML pages (the layout nav: Board / Knowledge / Memory / Context / Approvals).
+	mux.HandleFunc("GET /_agentklar/bootstrap", s.handleBootstrap)
 	mux.HandleFunc("GET /{$}", s.handleBoard)
 	mux.HandleFunc("GET /tasks/{id}", s.handleTask)
+	mux.HandleFunc("GET /projects/{project}/tasks/{task}", s.handleTask)
 	mux.HandleFunc("GET /knowledge", s.handleKnowledge)
 	mux.HandleFunc("GET /memory", s.handleMemory)
 	mux.HandleFunc("GET /context", s.handleContext)
@@ -246,19 +275,25 @@ func (s *Server) routes() http.Handler {
 		mux.HandleFunc("POST /api/projects/{project}/tasks/{task}/transition", s.handleProjectTransition)
 		mux.HandleFunc("POST /api/projects/{project}/tasks/{task}/request-changes", s.handleProjectRequestChanges)
 		mux.HandleFunc("POST /api/projects/{project}/tasks/{task}/position", s.handleProjectPosition)
+		mux.HandleFunc("GET /api/projects/{project}/tasks/{task}/dependencies", s.handleProjectDependencies)
+		mux.HandleFunc("PUT /api/projects/{project}/tasks/{task}/dependencies", s.handleProjectDependencies)
+		mux.HandleFunc("POST /api/projects/{project}/tasks/{task}/archive", s.handleProjectArchive)
 	}
 
-	return s.rejectCrossOrigin(mux)
+	return s.protectHumanMutations(mux)
 }
 
-func (s *Server) rejectCrossOrigin(next http.Handler) http.Handler {
+func (s *Server) protectHumanMutations(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Referrer-Policy", "no-referrer")
 		if r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodOptions {
-			if r.Header.Get("Sec-Fetch-Site") == "cross-site" || !sameOrigin(r) {
+			if !s.isHuman(r) || r.Header.Get("Sec-Fetch-Site") == "cross-site" || !sameOrigin(r) {
 				if strings.HasPrefix(r.URL.Path, "/api/") {
-					writeAPIError(w, http.StatusForbidden, "cross_origin", "cross-origin mutation rejected")
+					writeAPIError(w, http.StatusForbidden, "human_session_required", "authenticated human session and exact origin required")
 				} else {
-					http.Error(w, "cross-origin mutation rejected", http.StatusForbidden)
+					http.Error(w, "authenticated human session and exact origin required", http.StatusForbidden)
 				}
 				return
 			}
@@ -270,14 +305,51 @@ func (s *Server) rejectCrossOrigin(next http.Handler) http.Handler {
 func sameOrigin(r *http.Request) bool {
 	origin := r.Header.Get("Origin")
 	if origin == "" {
-		return true
+		return false
 	}
 	u, err := url.Parse(origin)
 	scheme := "http"
 	if r.TLS != nil {
 		scheme = "https"
 	}
-	return err == nil && u.Scheme == scheme && strings.EqualFold(u.Host, r.Host)
+	return err == nil && u.Scheme == scheme && strings.EqualFold(u.Host, r.Host) && u.User == nil && u.Path == "" && u.RawQuery == "" && u.Fragment == ""
+}
+
+const humanSessionCookie = "agentklar_human"
+
+func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	token := r.URL.Query().Get("token")
+	s.bootMu.Lock()
+	valid := !s.bootUsed && hmac.Equal([]byte(token), []byte(s.bootToken))
+	if valid {
+		s.bootUsed = true
+	}
+	s.bootMu.Unlock()
+	if !valid {
+		http.Error(w, "invalid or consumed launch capability", http.StatusForbidden)
+		return
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     humanSessionCookie,
+		Value:    s.sessionToken,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   r.TLS != nil,
+		SameSite: http.SameSiteStrictMode,
+	})
+	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+func (s *Server) isHuman(r *http.Request) bool {
+	cookie, err := r.Cookie(humanSessionCookie)
+	return err == nil && hmac.Equal([]byte(cookie.Value), []byte(s.sessionToken))
+}
+
+func (s *Server) approvalToken(projectID, taskID string, submissionID int64, nonce string) string {
+	mac := hmac.New(sha256.New, []byte(s.sessionToken))
+	fmt.Fprintf(mac, "%s\x00%s\x00%d\x00%s", projectID, taskID, submissionID, nonce)
+	return hex.EncodeToString(mac.Sum(nil))
 }
 
 // render executes the named page inside the shared layout. The layout receives
@@ -290,7 +362,6 @@ func (s *Server) render(w http.ResponseWriter, page string, d viewData) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	d.CSRFToken = s.csrfToken
 	if err := t.ExecuteTemplate(w, "layout", d); err != nil {
 		// The header is already written on a successful Execute; fall back to a
 		// plain error only if execution failed before any bytes were flushed.
@@ -308,7 +379,8 @@ type viewData struct {
 	StateLabel string // human-readable task state, for the detail page badge
 	Q          string // current search query (memory/context)
 	Error      string
-	CSRFToken  string
+	ProjectID  string
+	TaskPrefix string
 
 	// Board
 	Columns []columnView
@@ -349,6 +421,8 @@ type approvalView struct {
 	SubmissionID int64
 	ProjectID    string
 	Action       string
+	TaskURL      string
+	CSRFToken    string
 }
 
 // comment mirrors the append-only comments table. There is no public

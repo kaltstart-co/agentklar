@@ -80,15 +80,6 @@ func do(t *testing.T, h http.Handler, method, target string, body io.Reader) *ht
 	return rec
 }
 
-func approveDo(t *testing.T, s *Server, target string) *httptest.ResponseRecorder {
-	t.Helper()
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, target, strings.NewReader("csrf_token="+s.csrfToken))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	s.Handler().ServeHTTP(rec, req)
-	return rec
-}
-
 // GET / renders the board and lists the seeded task.
 func TestBoardHTMLListsTask(t *testing.T) {
 	dir := t.TempDir()
@@ -167,8 +158,10 @@ func TestApprovePendingHTML(t *testing.T) {
 	seedApproval(t, dir)
 	s, _ := New(dir, dir)
 	t.Cleanup(func() { s.Close() })
+	cookie := bootstrapHuman(t, s)
+	action, token := approvalFormFor(t, s, cookie, "")
 
-	rec := approveDo(t, s, "/approvals/T-1")
+	rec := postApproval(t, s, cookie, action, token)
 	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("POST /approvals/T-1 status = %d, want 303 (SeeOther)", rec.Code)
 	}
@@ -206,9 +199,10 @@ func TestApproveNonPendingIs409AndIdempotent(t *testing.T) {
 	pending, other := seedApproval(t, dir)
 	s, _ := New(dir, dir)
 	t.Cleanup(func() { s.Close() })
+	cookie := bootstrapHuman(t, s)
 
 	// (1) A Draft task: 409, stays draft.
-	rec := approveDo(t, s, "/approvals/"+other)
+	rec := postApproval(t, s, cookie, "/approvals/"+other, "not-a-valid-token")
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("approve draft status = %d, want 409", rec.Code)
 	}
@@ -218,17 +212,18 @@ func TestApproveNonPendingIs409AndIdempotent(t *testing.T) {
 	}
 
 	// (2) There is no generic JSON approval endpoint.
-	rec = do(t, s.Handler(), "POST", "/api/approvals/"+other, nil)
+	rec = humanRequest(t, s, cookie, "POST", "/api/approvals/"+other, "")
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("api approve status = %d, want 404", rec.Code)
 	}
 
 	// (3) Approve the pending one, then approve AGAIN: second attempt 409,
 	//     state stays Done (nonce single-use boundary holds).
-	if rec := approveDo(t, s, "/approvals/"+pending); rec.Code != http.StatusSeeOther {
+	action, token := approvalFormFor(t, s, cookie, "")
+	if rec := postApproval(t, s, cookie, action, token); rec.Code != http.StatusSeeOther {
 		t.Fatalf("first approve status = %d, want 303", rec.Code)
 	}
-	again := approveDo(t, s, "/approvals/"+pending)
+	again := postApproval(t, s, cookie, "/approvals/"+pending, token)
 	if again.Code != http.StatusConflict {
 		t.Fatalf("second approve status = %d, want 409", again.Code)
 	}
@@ -346,6 +341,7 @@ func TestAlertsLogAck(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	t.Cleanup(func() { s.Close() })
+	cookie := bootstrapHuman(t, s)
 	if s.alerts == nil {
 		t.Fatal("alerts store not initialized")
 	}
@@ -383,7 +379,7 @@ func TestAlertsLogAck(t *testing.T) {
 	}
 
 	// Human acknowledges via the API; agents have no such method.
-	ack := do(t, s.Handler(), "POST", "/api/alerts/"+strconvI(id)+"/ack", nil)
+	ack := humanRequest(t, s, cookie, "POST", "/api/alerts/"+strconvI(id)+"/ack", "")
 	if ack.Code != http.StatusOK {
 		t.Fatalf("POST ack status = %d, want 200", ack.Code)
 	}

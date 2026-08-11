@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,9 +12,14 @@ import (
 	"time"
 
 	"github.com/kaltstart-co/agentklar/internal/catalog"
+	akctx "github.com/kaltstart-co/agentklar/internal/context"
 	"github.com/kaltstart-co/agentklar/internal/contracts"
+	"github.com/kaltstart-co/agentklar/internal/knowledge"
+	"github.com/kaltstart-co/agentklar/internal/memory"
+	"github.com/kaltstart-co/agentklar/internal/notify"
 	"github.com/kaltstart-co/agentklar/internal/store"
 	"github.com/kaltstart-co/agentklar/internal/workflow"
+	modernsqlite "modernc.org/sqlite"
 )
 
 const maxRequestBody = 1 << 20
@@ -36,13 +42,83 @@ func (s *Server) openProject(id string) (*projectRuntime, error) {
 	}
 	p, err := s.catalog.Get(id)
 	if err != nil {
-		return nil, workflow.ErrNotFound
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, workflow.ErrNotFound
+		}
+		return nil, fmt.Errorf("catalog lookup: %w", err)
 	}
 	db, err := store.Open(filepath.Join(p.WorkspacePath, "control.sqlite"))
 	if err != nil {
 		return nil, fmt.Errorf("open project %s: %w", id, err)
 	}
 	return &projectRuntime{project: p, engine: workflow.New(db)}, nil
+}
+
+func (s *Server) currentProject() (catalog.Project, error) {
+	if s.catalog == nil {
+		return catalog.Project{RepoPath: s.repoRoot, WorkspacePath: s.workspaceDir}, nil
+	}
+	p, err := s.catalog.Get(s.currentProjectID)
+	if err != nil {
+		return catalog.Project{}, fmt.Errorf("catalog lookup: %w", err)
+	}
+	return p, nil
+}
+
+func (s *Server) currentKnowledge() (*knowledge.Store, error) {
+	if s.catalog == nil {
+		return s.knowledge, nil
+	}
+	p, err := s.currentProject()
+	if err != nil {
+		return nil, err
+	}
+	return knowledge.New(p.RepoPath)
+}
+
+func (s *Server) currentMemory() (*memory.Store, func(), error) {
+	if s.catalog == nil {
+		return s.memory, func() {}, nil
+	}
+	p, err := s.currentProject()
+	if err != nil {
+		return nil, func() {}, err
+	}
+	store, err := memory.New(p.WorkspacePath)
+	if err != nil {
+		return nil, func() {}, err
+	}
+	return store, func() { _ = store.Close() }, nil
+}
+
+func (s *Server) currentContext() (*akctx.Store, func(), error) {
+	if s.catalog == nil {
+		return s.context, func() {}, nil
+	}
+	p, err := s.currentProject()
+	if err != nil {
+		return nil, func() {}, err
+	}
+	store, err := akctx.New(p.WorkspacePath)
+	if err != nil {
+		return nil, func() {}, err
+	}
+	return store, func() { _ = store.Close() }, nil
+}
+
+func (s *Server) currentAlerts() (*notify.Store, func(), error) {
+	if s.catalog == nil {
+		return s.alerts, func() {}, nil
+	}
+	p, err := s.currentProject()
+	if err != nil {
+		return nil, func() {}, err
+	}
+	store, err := notify.New(p.WorkspacePath)
+	if err != nil {
+		return nil, func() {}, err
+	}
+	return store, func() { _ = store.Close() }, nil
 }
 
 func (s *Server) handleAPIProjects(w http.ResponseWriter, _ *http.Request) {
@@ -93,7 +169,17 @@ func (s *Server) handleProjectTasks(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rt.Close()
 	if r.Method == http.MethodGet {
-		tasks, err := rt.engine.ListAll()
+		archived := r.URL.Query().Get("archived")
+		if archived != "" && archived != "true" && archived != "false" {
+			writeAPIError(w, http.StatusBadRequest, "invalid_input", "archived must be true or false")
+			return
+		}
+		var tasks []workflow.Task
+		if archived == "true" {
+			tasks, err = rt.engine.ListArchived()
+		} else {
+			tasks, err = rt.engine.ListAll()
+		}
 		if err != nil {
 			writeWorkflowError(w, err)
 			return
@@ -113,12 +199,82 @@ func (s *Server) handleProjectTasks(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, "invalid_input", err.Error())
 		return
 	}
-	if err := rt.engine.CreateTask(task); err != nil {
-		writeAPIError(w, http.StatusConflict, "task_exists", err.Error())
+	if _, err := rt.engine.GetTask(task.ID); err == nil {
+		writeAPIError(w, http.StatusConflict, "task_exists", "task already exists")
+		return
+	} else if !errors.Is(err, workflow.ErrNotFound) {
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
-	created, _ := rt.engine.GetTask(task.ID)
+	if err := rt.engine.CreateTask(task); err != nil {
+		if isUniqueConstraint(err) {
+			writeAPIError(w, http.StatusConflict, "task_exists", "task already exists")
+		} else {
+			writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		}
+		return
+	}
+	created, err := rt.engine.GetTask(task.ID)
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", "created task could not be reloaded")
+		return
+	}
 	writeJSON(w, http.StatusCreated, created)
+}
+
+func isUniqueConstraint(err error) bool {
+	var sqliteErr *modernsqlite.Error
+	if !errors.As(err, &sqliteErr) {
+		return false
+	}
+	return sqliteErr.Code() == 1555 || sqliteErr.Code() == 2067
+}
+
+func (s *Server) handleProjectDependencies(w http.ResponseWriter, r *http.Request) {
+	rt, err := s.openProject(r.PathValue("project"))
+	if err != nil {
+		writeWorkflowError(w, err)
+		return
+	}
+	defer rt.Close()
+	id := r.PathValue("task")
+	if r.Method == http.MethodGet {
+		deps, err := rt.engine.Dependencies(id)
+		if err != nil {
+			writeWorkflowError(w, err)
+			return
+		}
+		if deps == nil {
+			deps = []string{}
+		}
+		writeJSON(w, http.StatusOK, map[string][]string{"dependencies": deps})
+		return
+	}
+	var in struct {
+		Dependencies []string `json:"dependencies"`
+	}
+	if !decodeJSON(w, r, &in) {
+		return
+	}
+	if err := rt.engine.SetDependencies(id, in.Dependencies); err != nil {
+		writeWorkflowError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string][]string{"dependencies": in.Dependencies})
+}
+
+func (s *Server) handleProjectArchive(w http.ResponseWriter, r *http.Request) {
+	rt, err := s.openProject(r.PathValue("project"))
+	if err != nil {
+		writeWorkflowError(w, err)
+		return
+	}
+	defer rt.Close()
+	if err := rt.engine.ArchiveTask(r.PathValue("task")); err != nil {
+		writeWorkflowError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "archived"})
 }
 
 func (s *Server) handleProjectTask(w http.ResponseWriter, r *http.Request) {

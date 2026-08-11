@@ -17,8 +17,8 @@ import (
 
 // cmdUI starts the native local web UI: one page for the board, knowledge,
 // memory, context, evidence, and approvals. It binds to 127.0.0.1 so the
-// "approve" click is a trusted human channel (an agent has no MCP method and
-// no network path to localhost from outside). Ctrl-C stops the server.
+// "approve" click is a trusted human channel after the browser consumes the
+// one-time launch capability. Ctrl-C stops the server.
 func cmdUI(args []string) error {
 	fs := flag.NewFlagSet("ui", flag.ContinueOnError)
 	addr := fs.String("addr", "127.0.0.1:7681", "address to serve on (pick a free port if busy)")
@@ -66,10 +66,14 @@ func cmdUI(args []string) error {
 	fmt.Printf("Ctrl-C to stop. Approve from this page only — it is your trusted local channel.\n")
 
 	if *open {
+		launchURL, err := srv.LaunchURL(url)
+		if err != nil {
+			return err
+		}
 		// Give the server a beat to be ready, then pop the browser.
 		go func() {
 			time.Sleep(150 * time.Millisecond)
-			_ = openURL(url)
+			_ = openURL(launchURL)
 		}()
 	}
 

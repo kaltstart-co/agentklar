@@ -7,7 +7,7 @@
   <section class="col">
     <h3>{{.Label}} <span class="muted">{{len .Tasks}}</span></h3>
     {{range .Tasks}}
-      <a class="card" href="/tasks/{{.ID}}">
+      <a class="card" href="{{$.TaskPrefix}}/tasks/{{.ID}}">
         <div class="t">{{.Title}}</div>
         <div class="id">{{.ID}}</div>
       </a>

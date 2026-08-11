@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"crypto/hmac"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -40,11 +41,16 @@ func (s *Server) handleBoard(w http.ResponseWriter, r *http.Request) {
 	for _, st := range boardOrder() {
 		columns = append(columns, columnView{State: st, Label: stateLabel(st), Tasks: buckets[st]})
 	}
-	s.render(w, "board", viewData{Title: "Board", Section: "board", Columns: columns})
+	prefix := ""
+	if s.catalog != nil {
+		prefix = "/projects/" + url.PathEscape(s.currentProjectID)
+	}
+	s.render(w, "board", viewData{Title: "Board", Section: "board", Columns: columns, ProjectID: s.currentProjectID, TaskPrefix: prefix})
 }
 
 func (s *Server) handleTask(w http.ResponseWriter, r *http.Request) {
-	engine, closeFn, err := s.currentEngine()
+	projectID := r.PathValue("project")
+	engine, closeFn, err := s.engineForProject(projectID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		return
@@ -73,13 +79,18 @@ func (s *Server) handleTask(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleKnowledge(w http.ResponseWriter, r *http.Request) {
 	d := viewData{Title: "Knowledge", Section: "knowledge"}
-	if s.knowledge == nil {
+	store, err := s.currentKnowledge()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if store == nil {
 		d.KnowOK = false
 		s.render(w, "knowledge", d)
 		return
 	}
 	d.KnowOK = true
-	entries, err := s.knowledge.List()
+	entries, err := store.List()
 	if err != nil {
 		d.Error = err.Error()
 		s.render(w, "knowledge", d)
@@ -100,16 +111,22 @@ func (s *Server) handleKnowledge(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleMemory(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query().Get("q")
 	d := viewData{Title: "Memory", Section: "memory", Q: q}
-	if s.memory == nil {
+	store, closeFn, err := s.currentMemory()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer closeFn()
+	if store == nil {
 		d.MemOK = false
 		s.render(w, "memory", d)
 		return
 	}
 	d.MemOK = true
 	if q != "" {
-		d.Memory, _ = s.memory.Recall(q, 50)
+		d.Memory, _ = store.Recall(q, 50)
 	} else {
-		d.Memory, _ = s.memory.List("")
+		d.Memory, _ = store.List("")
 	}
 	s.render(w, "memory", d)
 }
@@ -117,18 +134,32 @@ func (s *Server) handleMemory(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleContext(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query().Get("q")
 	d := viewData{Title: "Context", Section: "context", Q: q}
-	if s.context == nil {
+	store, closeFn, err := s.currentContext()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer closeFn()
+	if store == nil {
 		d.CtxOK = false
 		s.render(w, "context", d)
 		return
 	}
 	d.CtxOK = true
-	d.ContextPkt, _ = s.context.Packet(q, 50)
+	d.ContextPkt, _ = store.Packet(q, 50)
 	s.render(w, "context", d)
 }
 
 func (s *Server) handleApprovals(w http.ResponseWriter, r *http.Request) {
-	apps, _ := s.allPendingApprovals()
+	human := s.isHuman(r)
+	if human {
+		w.Header().Set("Cache-Control", "no-store")
+	}
+	apps, err := s.allPendingApprovals(human)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	s.render(w, "approvals", viewData{Title: "Approvals", Section: "approvals", Approvals: apps})
 }
 
@@ -137,12 +168,16 @@ func (s *Server) handleApprovals(w http.ResponseWriter, r *http.Request) {
 // On any error the protected state is unchanged and a 409 is returned.
 func (s *Server) handleApproveHTML(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBody)
-	if err := r.ParseForm(); err != nil || r.PostForm.Get("csrf_token") != s.csrfToken {
-		http.Error(w, "invalid form token", http.StatusForbidden)
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "invalid form", http.StatusBadRequest)
 		return
 	}
 	id := r.PathValue("id")
-	if err := s.approve(r.PathValue("project"), id); err != nil {
+	if err := s.approve(r.PathValue("project"), id, r.PostForm.Get("csrf_token")); err != nil {
+		if errors.Is(err, errInvalidFormToken) {
+			http.Error(w, err.Error(), http.StatusForbidden)
+			return
+		}
 		http.Error(w, err.Error(), approvalErrorStatus(err))
 		return
 	}
@@ -156,9 +191,15 @@ func (s *Server) handleAlerts(w http.ResponseWriter, r *http.Request) {
 		alerts []notify.Alert
 		ok     bool
 	)
-	if s.alerts != nil {
+	store, closeFn, err := s.currentAlerts()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer closeFn()
+	if store != nil {
 		ok = true
-		alerts, _ = s.alerts.List("")
+		alerts, _ = store.List("")
 	}
 	s.render(w, "alerts", viewData{Title: "Alerts", Section: "alerts", Alerts: alerts, AlertOK: ok})
 }
@@ -166,7 +207,13 @@ func (s *Server) handleAlerts(w http.ResponseWriter, r *http.Request) {
 // handleAckAlertHTML acknowledges an alert from a human click, then refreshes.
 func (s *Server) handleAckAlertHTML(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if s.alerts == nil {
+	store, closeFn, err := s.currentAlerts()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer closeFn()
+	if store == nil {
 		http.Error(w, "alerts unavailable", http.StatusServiceUnavailable)
 		return
 	}
@@ -175,7 +222,7 @@ func (s *Server) handleAckAlertHTML(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad id", http.StatusBadRequest)
 		return
 	}
-	if err := s.alerts.Ack(n); err != nil {
+	if err := store.Ack(n); err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
@@ -183,11 +230,17 @@ func (s *Server) handleAckAlertHTML(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAPIAlerts(w http.ResponseWriter, r *http.Request) {
-	if s.alerts == nil {
+	store, closeFn, err := s.currentAlerts()
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	defer closeFn()
+	if store == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "alerts unavailable"})
 		return
 	}
-	alerts, err := s.alerts.List("")
+	alerts, err := store.List("")
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -199,7 +252,13 @@ func (s *Server) handleAPIAlerts(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAPIAckAlert(w http.ResponseWriter, r *http.Request) {
-	if s.alerts == nil {
+	store, closeFn, err := s.currentAlerts()
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	defer closeFn()
+	if store == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "alerts unavailable"})
 		return
 	}
@@ -208,7 +267,7 @@ func (s *Server) handleAPIAckAlert(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
 		return
 	}
-	if err := s.alerts.Ack(n); err != nil {
+	if err := store.Ack(n); err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
 		return
 	}
@@ -260,20 +319,26 @@ func (s *Server) handleAPITask(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAPIMemory(w http.ResponseWriter, r *http.Request) {
-	if s.memory == nil {
+	store, closeFn, err := s.currentMemory()
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	defer closeFn()
+	if store == nil {
 		writeJSON(w, http.StatusOK, map[string]string{"error": "memory store not available"})
 		return
 	}
 	q := r.URL.Query().Get("q")
 	var entries interface{}
-	var err error
+	var queryErr error
 	if q != "" {
-		entries, err = s.memory.Recall(q, 50)
+		entries, queryErr = store.Recall(q, 50)
 	} else {
-		entries, err = s.memory.List("")
+		entries, queryErr = store.List("")
 	}
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	if queryErr != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": queryErr.Error()})
 		return
 	}
 	if entries == nil {
@@ -283,12 +348,18 @@ func (s *Server) handleAPIMemory(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAPIContext(w http.ResponseWriter, r *http.Request) {
-	if s.context == nil {
+	store, closeFn, err := s.currentContext()
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	defer closeFn()
+	if store == nil {
 		writeJSON(w, http.StatusOK, map[string]string{"error": "context store not available"})
 		return
 	}
 	q := r.URL.Query().Get("q")
-	pkt, err := s.context.Packet(q, 50)
+	pkt, err := store.Packet(q, 50)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -297,7 +368,7 @@ func (s *Server) handleAPIContext(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAPIApprovals(w http.ResponseWriter, r *http.Request) {
-	apps, err := s.allPendingApprovals()
+	apps, err := s.allPendingApprovals(false)
 	if err != nil {
 		writeWorkflowError(w, err)
 		return
@@ -325,10 +396,9 @@ type approvalJSON struct {
 	ProjectID    string        `json:"ProjectID,omitempty"`
 }
 
-// pendingApprovals lists every task currently in user_approval along with its
-// pending nonce. The nonce stays server-side; the HTML form never embeds it —
-// the server re-resolves it from its own store at click time.
-func pendingApprovals(engine *workflow.Engine, projectID string) ([]approvalView, error) {
+// pendingApprovals lists tasks currently awaiting a human decision. The
+// approval nonce stays server-side and only contributes to the action token.
+func (s *Server) pendingApprovals(engine *workflow.Engine, projectID string, human bool) ([]approvalView, error) {
 	tasks, err := engine.ListAll()
 	if err != nil {
 		return nil, err
@@ -338,25 +408,32 @@ func pendingApprovals(engine *workflow.Engine, projectID string) ([]approvalView
 		if t.State != contracts.StateUserApproval {
 			continue
 		}
-		_, subID, err := engine.PendingApproval(t.ID)
+		nonce, subID, err := engine.PendingApproval(t.ID)
 		if err != nil {
-			continue
+			return nil, err
 		}
 		action := "/approvals/" + url.PathEscape(t.ID)
 		if projectID != "" {
 			action = "/projects/" + url.PathEscape(projectID) + action
 		}
-		out = append(out, approvalView{Task: t, SubmissionID: subID, ProjectID: projectID, Action: action})
+		taskURL := "/tasks/" + url.PathEscape(t.ID)
+		if projectID != "" {
+			taskURL = "/projects/" + url.PathEscape(projectID) + taskURL
+		}
+		token := ""
+		if human {
+			token = s.approvalToken(projectID, t.ID, subID, nonce)
+		}
+		out = append(out, approvalView{Task: t, SubmissionID: subID, ProjectID: projectID, Action: action, TaskURL: taskURL, CSRFToken: token})
 	}
 	return out, nil
 }
 
-// approve resolves a pending human approval to Done using the server's own
-// stored nonce. This is the same engine path the dev CLI `approve` uses; it is
-// human-only in practice because an agent has no MCP method for it and the UI
-// binds to 127.0.0.1. A task not in user_approval yields errNotPending and
-// leaves protected state untouched.
-func (s *Server) approve(projectID, taskID string) error {
+// approve resolves a pending human approval only when its form token matches
+// the selected project, task, submission, and current stored nonce.
+var errInvalidFormToken = errors.New("invalid approval form token")
+
+func (s *Server) approve(projectID, taskID, formToken string) error {
 	engine := s.engine
 	closeFn := func() {}
 	if s.catalog != nil {
@@ -378,27 +455,38 @@ func (s *Server) approve(projectID, taskID string) error {
 	if t.State != contracts.StateUserApproval {
 		return fmt.Errorf("%w: state=%s", errNotPending, t.State)
 	}
-	nonce, _, err := engine.PendingApproval(taskID)
+	nonce, submissionID, err := engine.PendingApproval(taskID)
 	if err != nil {
 		return fmt.Errorf("load pending approval: %w", err)
+	}
+	expected := s.approvalToken(projectID, taskID, submissionID, nonce)
+	if !hmac.Equal([]byte(formToken), []byte(expected)) {
+		return errInvalidFormToken
 	}
 	return engine.ResolveApproval(taskID, nonce, true, "local-ui", "ui")
 }
 
 func (s *Server) currentEngine() (*workflow.Engine, func(), error) {
+	return s.engineForProject("")
+}
+
+func (s *Server) engineForProject(projectID string) (*workflow.Engine, func(), error) {
 	if s.catalog == nil {
 		return s.engine, func() {}, nil
 	}
-	rt, err := s.openProject(s.currentProjectID)
+	if projectID == "" {
+		projectID = s.currentProjectID
+	}
+	rt, err := s.openProject(projectID)
 	if err != nil {
 		return nil, func() {}, err
 	}
 	return rt.engine, func() { _ = rt.Close() }, nil
 }
 
-func (s *Server) allPendingApprovals() ([]approvalView, error) {
+func (s *Server) allPendingApprovals(human bool) ([]approvalView, error) {
 	if s.catalog == nil {
-		return pendingApprovals(s.engine, "")
+		return s.pendingApprovals(s.engine, "", human)
 	}
 	projects, err := s.catalog.List()
 	if err != nil {
@@ -410,7 +498,7 @@ func (s *Server) allPendingApprovals() ([]approvalView, error) {
 		if err != nil {
 			return nil, err
 		}
-		apps, err := pendingApprovals(rt.engine, project.ID)
+		apps, err := s.pendingApprovals(rt.engine, project.ID, human)
 		rt.Close()
 		if err != nil {
 			return nil, err

@@ -49,6 +49,26 @@ func (e *Engine) ListAll() ([]Task, error) {
 	return out, rows.Err()
 }
 
+// ListArchived returns hidden task history without changing active board
+// listings. Archived rows remain fully addressable through GetTask.
+func (e *Engine) ListArchived() ([]Task, error) {
+	rows, err := e.db.Query(`SELECT ` + taskColumns + ` FROM tasks
+		WHERE archived_at <> '' ORDER BY archived_at DESC, id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Task
+	for rows.Next() {
+		t, err := scanTask(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *t)
+	}
+	return out, rows.Err()
+}
+
 // Dependencies returns prerequisite task IDs in stable lexical order.
 func (e *Engine) Dependencies(taskID string) ([]string, error) {
 	var exists int

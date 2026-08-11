@@ -832,3 +832,23 @@ func TestArchiveTaskKeepsProtectedHistory(t *testing.T) {
 		t.Fatalf("archived task listed: %v", taskIDs(all))
 	}
 }
+
+func TestListArchivedDoesNotChangeListAll(t *testing.T) {
+	e := newEngine(t)
+	for _, id := range []string{"active", "archived"} {
+		if err := e.CreateTask(Task{ID: id, Project: "p", Title: id}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := e.ArchiveTask("archived"); err != nil {
+		t.Fatal(err)
+	}
+	active, err := e.ListAll()
+	if err != nil || len(active) != 1 || active[0].ID != "active" {
+		t.Fatalf("active=%v err=%v", active, err)
+	}
+	archived, err := e.ListArchived()
+	if err != nil || len(archived) != 1 || archived[0].ID != "archived" {
+		t.Fatalf("archived=%v err=%v", archived, err)
+	}
+}

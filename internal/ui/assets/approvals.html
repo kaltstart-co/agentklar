@@ -5,17 +5,17 @@
 {{range .Approvals}}
 <div class="panel">
   <div class="row" style="justify-content:space-between">
-    <h2 style="margin:0"><a href="/tasks/{{.Task.ID}}">{{.Task.Title}}</a></h2>
+    <h2 style="margin:0"><a href="{{.TaskURL}}">{{.Task.Title}}</a></h2>
     <span class="badge user_approval">awaiting approval</span>
   </div>
   <div class="muted id" style="margin:.2rem 0 .6rem">{{.Task.ID}}</div>
   {{if .Task.Criteria}}<h2>Acceptance criteria</h2>
   <ul class="criteria">{{range .Task.Criteria}}<li>{{.}}</li>{{end}}</ul>{{end}}
   {{if .Task.Verification}}<h2>Verification</h2><pre>{{.Task.Verification}}</pre>{{end}}
-  <form method="post" action="{{.Action}}">
-    <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+  {{if .CSRFToken}}<form method="post" action="{{.Action}}">
+    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
     <button class="btn good" type="submit">Approve &amp; mark Done</button>
-  </form>
+  </form>{{end}}
   <p class="muted" style="margin:.5rem 0 0;font-size:.78rem">Trusted local channel (127.0.0.1). The server resolves its own stored nonce; nothing is exposed to agents.</p>
 </div>
 {{end}}
