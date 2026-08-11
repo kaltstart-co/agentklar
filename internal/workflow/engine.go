@@ -144,7 +144,7 @@ func (e *Engine) GetTask(id string) (*Task, error) {
 // MarkReady enforces Definition of Ready: no criteria, no Ready.
 func (e *Engine) MarkReady(taskID string, actor contracts.Actor) error {
 	return e.transition(taskID, contracts.StateDraft, contracts.StateReady, actor, func(tx *sql.Tx, t *Task) error {
-		if len(t.Criteria) == 0 || t.Verification == "" {
+		if len(t.Criteria) == 0 || strings.TrimSpace(t.Verification) == "" {
 			return ErrNotReadyCriteria
 		}
 		return nil
@@ -454,6 +454,12 @@ func (e *Engine) PendingApproval(taskID string) (nonce string, submissionID int6
 // approvedBy records the human actor identity; channel records which
 // trusted channel supplied the decision.
 func (e *Engine) ResolveApproval(taskID, nonce string, approve bool, approvedBy, channel string) error {
+	return e.ResolveApprovalWithReason(taskID, nonce, approve, approvedBy, channel, "")
+}
+
+// ResolveApprovalWithReason records a human rejection reason before moving the
+// task to Changes Requested. ResolveApproval remains for existing callers.
+func (e *Engine) ResolveApprovalWithReason(taskID, nonce string, approve bool, approvedBy, channel, reason string) error {
 	tx, err := e.db.Begin()
 	if err != nil {
 		return err
@@ -495,6 +501,12 @@ func (e *Engine) ResolveApproval(taskID, nonce string, approve bool, approvedBy,
 		decision, approvedBy, channel, taskID); err != nil {
 		return err
 	}
+	if !approve && strings.TrimSpace(reason) != "" {
+		if _, err := tx.Exec(`INSERT INTO comments (task_id, actor, ctype, body, created_at) VALUES (?,?,?,?,?)`,
+			taskID, contracts.ActorHuman, "request_changes", reason, e.ts()); err != nil {
+			return err
+		}
+	}
 	if err := e.transitionInTx(tx, t, to, contracts.ActorHuman); err != nil {
 		return err
 	}
@@ -518,8 +530,9 @@ func (e *Engine) ReleaseTask(taskID string, token int64) error {
 	if t.State != contracts.StateInProgress {
 		return fmt.Errorf("%w: state=%s", ErrWrongState, t.State)
 	}
-	tx.Exec(`DELETE FROM leases WHERE task_id = ?`, taskID)
-	tx.Exec(`DELETE FROM repo_leases WHERE task_id = ?`, taskID)
+	if err := e.dropLeases(tx, taskID); err != nil {
+		return err
+	}
 	if err := e.transitionInTx(tx, t, contracts.StateReady, contracts.ActorAgent); err != nil {
 		return err
 	}
@@ -677,7 +690,7 @@ func (e *Engine) HumanTransition(id string, to contracts.State, reason string) e
 	if to == contracts.StateDone || !contracts.Allowed(t.State, to, contracts.ActorHuman) {
 		return ErrTransition
 	}
-	if to == contracts.StateReady && (len(t.Criteria) == 0 || t.Verification == "") {
+	if to == contracts.StateReady && (len(t.Criteria) == 0 || strings.TrimSpace(t.Verification) == "") {
 		return ErrNotReadyCriteria
 	}
 	if t.State == contracts.StateUserApproval && to == contracts.StateChangesRequested {
@@ -686,6 +699,11 @@ func (e *Engine) HumanTransition(id string, to contracts.State, reason string) e
 		}
 		if _, err := tx.Exec(`INSERT INTO comments (task_id, actor, ctype, body, created_at) VALUES (?,?,?,?,?)`,
 			id, contracts.ActorHuman, "request_changes", reason, e.ts()); err != nil {
+			return err
+		}
+	}
+	if t.State == contracts.StateInProgress && to == contracts.StateCancelled {
+		if err := e.dropLeases(tx, id); err != nil {
 			return err
 		}
 	}
@@ -702,8 +720,14 @@ func (e *Engine) ArchiveTask(id string) error {
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := e.getForUpdate(tx, id); err != nil {
+	t, err := e.getForUpdate(tx, id)
+	if err != nil {
 		return err
+	}
+	if t.State == contracts.StateInProgress {
+		if err := e.dropLeases(tx, id); err != nil {
+			return err
+		}
 	}
 	if _, err := tx.Exec(`UPDATE tasks SET archived_at = ?, updated_at = ? WHERE id = ?`, e.ts(), e.ts(), id); err != nil {
 		return err
@@ -820,6 +844,16 @@ func (e *Engine) transitionInTx(tx *sql.Tx, t *Task, to contracts.State, actor c
 		return err
 	}
 	t.State = to
+	return nil
+}
+
+func (e *Engine) dropLeases(tx *sql.Tx, taskID string) error {
+	if _, err := tx.Exec(`DELETE FROM leases WHERE task_id = ?`, taskID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM repo_leases WHERE task_id = ?`, taskID); err != nil {
+		return err
+	}
 	return nil
 }
 

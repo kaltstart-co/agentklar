@@ -61,6 +61,7 @@ type Decision struct {
 	TaskID  string
 	Nonce   string
 	Approve bool
+	Reason  string
 	Actor   string
 	Channel string // "tracker_comment" | "elicitation"
 }
@@ -111,17 +112,18 @@ func ParseApproval(c Comment, expectedNonce string, policy ApprovalPolicy) (*Dec
 	if err := policy.allows(c.AuthorID); err != nil {
 		return nil, err
 	}
-	m := directive.FindStringSubmatch(c.Body)
+	m := directive.FindStringSubmatchIndex(c.Body)
 	if m == nil {
 		return nil, ErrNoDirective
 	}
-	if !strings.EqualFold(m[2], expectedNonce) {
+	if !strings.EqualFold(c.Body[m[4]:m[5]], expectedNonce) {
 		return nil, ErrNoDirective
 	}
 	return &Decision{
 		TaskID:  c.TaskID,
-		Nonce:   strings.ToLower(m[2]),
-		Approve: strings.EqualFold(m[1], "approve"),
+		Nonce:   strings.ToLower(c.Body[m[4]:m[5]]),
+		Approve: strings.EqualFold(c.Body[m[2]:m[3]], "approve"),
+		Reason:  strings.TrimLeft(strings.TrimSpace(c.Body[m[1]:]), "—-:;,. "),
 		Actor:   c.Author,
 		Channel: "tracker_comment",
 	}, nil
