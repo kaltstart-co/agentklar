@@ -135,6 +135,38 @@ CREATE TABLE IF NOT EXISTS outbox (
 CREATE INDEX IF NOT EXISTS outbox_fp ON outbox(fingerprint, acked);
 `
 
+type migration struct {
+	version int
+	apply   func(*sql.Tx) error
+}
+
+var migrations = []migration{
+	{
+		version: 2,
+		apply: func(tx *sql.Tx) error {
+			for _, statement := range []string{
+				"ALTER TABLE tasks ADD COLUMN priority TEXT NOT NULL DEFAULT 'medium'",
+				"ALTER TABLE tasks ADD COLUMN assignee TEXT NOT NULL DEFAULT ''",
+				"ALTER TABLE tasks ADD COLUMN labels TEXT NOT NULL DEFAULT '[]'",
+				"ALTER TABLE tasks ADD COLUMN due_date TEXT NOT NULL DEFAULT ''",
+				"ALTER TABLE tasks ADD COLUMN position INTEGER NOT NULL DEFAULT 0",
+				"ALTER TABLE tasks ADD COLUMN archived_at TEXT NOT NULL DEFAULT ''",
+				`CREATE TABLE IF NOT EXISTS task_dependencies (
+                    task_id TEXT NOT NULL REFERENCES tasks(id),
+                    depends_on_task_id TEXT NOT NULL REFERENCES tasks(id),
+                    PRIMARY KEY (task_id, depends_on_task_id),
+                    CHECK(task_id <> depends_on_task_id)
+                )`,
+			} {
+				if _, err := tx.Exec(statement); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	},
+}
+
 // Open opens (creating if needed) a control database at path.
 func Open(path string) (*sql.DB, error) {
 	db, err := sql.Open("sqlite", path)
@@ -148,5 +180,34 @@ func Open(path string) (*sql.DB, error) {
 		db.Close()
 		return nil, fmt.Errorf("migrate control.sqlite: %w", err)
 	}
+	if err := migrate(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate control.sqlite: %w", err)
+	}
 	return db, nil
+}
+
+func migrate(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var version int
+	if err := tx.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
+		return err
+	}
+	for _, migration := range migrations {
+		if version >= migration.version {
+			continue
+		}
+		if err := migration.apply(tx); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(fmt.Sprintf("PRAGMA user_version = %d", migration.version)); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }

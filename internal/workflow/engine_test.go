@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"path/filepath"
+	"reflect"
 	"sync"
 	"testing"
 
@@ -323,4 +324,65 @@ func TestReviewCycleCap(t *testing.T) {
 	if _, err := e.SubmitForReview("T1", c.FencingToken, "base", "headZ", "s"); err != ErrCycleLimit {
 		t.Fatalf("expected ErrCycleLimit after %d cycles, got %v", contracts.MaxAutoReviewCycles, err)
 	}
+}
+
+func TestCreateTaskStoresPlanningMetadata(t *testing.T) {
+	e := newEngine(t)
+	task := Task{
+		ID: "T1", Project: "p", Title: "planned", Priority: PriorityUrgent,
+		Assignee: "divyansh", Labels: []string{"control-center", "migration"},
+		DueDate: "2026-08-15", Position: 7,
+	}
+
+	if err := e.CreateTask(task); err != nil {
+		t.Fatal(err)
+	}
+	got, err := e.GetTask("T1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Priority != PriorityUrgent || got.Assignee != "divyansh" || !reflect.DeepEqual(got.Labels, []string{"control-center", "migration"}) || got.DueDate != "2026-08-15" || got.Position != 7 || got.ArchivedAt != "" {
+		t.Fatalf("planning metadata = %+v", got)
+	}
+	if got.CreatedAt == "" || got.UpdatedAt == "" {
+		t.Fatalf("timestamps = %q, %q", got.CreatedAt, got.UpdatedAt)
+	}
+}
+
+func TestListTasksOmitsArchivedAndOrdersPlanningPosition(t *testing.T) {
+	e := newEngine(t)
+	for _, id := range []string{"draft-late", "ready", "draft-early", "archived"} {
+		if err := e.CreateTask(Task{ID: id, Project: "p", Title: id, Criteria: []string{"c"}, Verification: "v"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := e.DB().Exec(`UPDATE tasks SET state = CASE id
+		WHEN 'ready' THEN 'ready' WHEN 'archived' THEN 'ready' ELSE 'draft' END,
+		position = CASE id WHEN 'draft-late' THEN 9 WHEN 'draft-early' THEN 1 ELSE 0 END,
+		archived_at = CASE WHEN id = 'archived' THEN '2026-08-12T00:00:00Z' ELSE '' END`); err != nil {
+		t.Fatal(err)
+	}
+
+	all, err := e.ListAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := taskIDs(all), []string{"draft-early", "draft-late", "ready"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("ListAll() = %v, want %v", got, want)
+	}
+	ready, err := e.ListReady(contracts.TargetAny)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := taskIDs(ready), []string{"ready"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("ListReady() = %v, want %v", got, want)
+	}
+}
+
+func taskIDs(tasks []Task) []string {
+	ids := make([]string, len(tasks))
+	for i, task := range tasks {
+		ids[i] = task.ID
+	}
+	return ids
 }

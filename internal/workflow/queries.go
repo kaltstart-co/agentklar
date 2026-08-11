@@ -32,22 +32,19 @@ type Evidence struct {
 
 // ListAll returns every task in the workspace.
 func (e *Engine) ListAll() ([]Task, error) {
-	rows, err := e.db.Query(`SELECT id, project, repo_path, title, lane, isolation, target, state,
-		objective, criteria, verification, tracker_id, review_cycles FROM tasks ORDER BY created_at`)
+	rows, err := e.db.Query(`SELECT ` + taskColumns + ` FROM tasks
+		WHERE archived_at = '' ORDER BY state, position, created_at`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var out []Task
 	for rows.Next() {
-		var t Task
-		var crit string
-		if err := rows.Scan(&t.ID, &t.Project, &t.RepoPath, &t.Title, &t.Lane, &t.Isolation, &t.Target,
-			&t.State, &t.Objective, &crit, &t.Verification, &t.TrackerID, &t.ReviewCycles); err != nil {
+		t, err := scanTask(rows)
+		if err != nil {
 			return nil, err
 		}
-		json.Unmarshal([]byte(crit), &t.Criteria)
-		out = append(out, t)
+		out = append(out, *t)
 	}
 	return out, rows.Err()
 }

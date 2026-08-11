@@ -44,6 +44,15 @@ func (e *Engine) SetClock(now func() time.Time) { e.now = now }
 
 func (e *Engine) ts() string { return e.now().UTC().Format(time.RFC3339Nano) }
 
+type Priority string
+
+const (
+	PriorityLow    Priority = "low"
+	PriorityMedium Priority = "medium"
+	PriorityHigh   Priority = "high"
+	PriorityUrgent Priority = "urgent"
+)
+
 type Task struct {
 	ID, Project, RepoPath, Title string
 	Lane                         contracts.Lane
@@ -54,6 +63,14 @@ type Task struct {
 	Criteria                     []string
 	TrackerID                    string
 	ReviewCycles                 int
+	Priority                     Priority
+	Assignee                     string
+	Labels                       []string
+	DueDate                      string
+	Position                     int64
+	ArchivedAt                   string
+	CreatedAt                    string
+	UpdatedAt                    string
 }
 
 type Claim struct {
@@ -76,30 +93,35 @@ func (e *Engine) CreateTask(t Task) error {
 	if t.Target == "" {
 		t.Target = contracts.TargetAny
 	}
+	if t.Priority == "" {
+		t.Priority = PriorityMedium
+	}
+	if t.Labels == nil {
+		t.Labels = []string{}
+	}
 	crit, _ := json.Marshal(t.Criteria)
+	labels, _ := json.Marshal(t.Labels)
+	now := e.ts()
 	_, err := e.db.Exec(`INSERT INTO tasks
-		(id, project, repo_path, title, lane, isolation, target, state, objective, criteria, verification, tracker_id, created_at, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		(id, project, repo_path, title, lane, isolation, target, state, objective, criteria, verification, tracker_id,
+		 priority, assignee, labels, due_date, position, archived_at, created_at, updated_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		t.ID, t.Project, t.RepoPath, t.Title, t.Lane, t.Isolation, t.Target,
-		contracts.StateDraft, t.Objective, string(crit), t.Verification, t.TrackerID, e.ts(), e.ts())
+		contracts.StateDraft, t.Objective, string(crit), t.Verification, t.TrackerID,
+		t.Priority, t.Assignee, string(labels), t.DueDate, t.Position, t.ArchivedAt, now, now)
 	return err
 }
 
 func (e *Engine) GetTask(id string) (*Task, error) {
-	row := e.db.QueryRow(`SELECT id, project, repo_path, title, lane, isolation, target, state,
-		objective, criteria, verification, tracker_id, review_cycles FROM tasks WHERE id = ?`, id)
-	var t Task
-	var crit string
-	err := row.Scan(&t.ID, &t.Project, &t.RepoPath, &t.Title, &t.Lane, &t.Isolation, &t.Target,
-		&t.State, &t.Objective, &crit, &t.Verification, &t.TrackerID, &t.ReviewCycles)
+	row := e.db.QueryRow(`SELECT `+taskColumns+` FROM tasks WHERE id = ?`, id)
+	t, err := scanTask(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
-	json.Unmarshal([]byte(crit), &t.Criteria)
-	return &t, nil
+	return t, nil
 }
 
 // MarkReady enforces Definition of Ready: no criteria, no Ready.
@@ -114,9 +136,8 @@ func (e *Engine) MarkReady(taskID string, actor contracts.Actor) error {
 
 // ListReady returns Ready tasks matching the execution target.
 func (e *Engine) ListReady(target contracts.ExecutionTarget) ([]Task, error) {
-	rows, err := e.db.Query(`SELECT id, project, repo_path, title, lane, isolation, target, state,
-		objective, criteria, verification, tracker_id, review_cycles
-		FROM tasks WHERE state = ? AND (target = ? OR target = 'any' OR ? = 'any')`,
+	rows, err := e.db.Query(`SELECT `+taskColumns+` FROM tasks
+		WHERE state = ? AND archived_at = '' AND (target = ? OR target = 'any' OR ? = 'any')`,
 		contracts.StateReady, target, target)
 	if err != nil {
 		return nil, err
@@ -124,14 +145,11 @@ func (e *Engine) ListReady(target contracts.ExecutionTarget) ([]Task, error) {
 	defer rows.Close()
 	var out []Task
 	for rows.Next() {
-		var t Task
-		var crit string
-		if err := rows.Scan(&t.ID, &t.Project, &t.RepoPath, &t.Title, &t.Lane, &t.Isolation, &t.Target,
-			&t.State, &t.Objective, &crit, &t.Verification, &t.TrackerID, &t.ReviewCycles); err != nil {
+		t, err := scanTask(rows)
+		if err != nil {
 			return nil, err
 		}
-		json.Unmarshal([]byte(crit), &t.Criteria)
-		out = append(out, t)
+		out = append(out, *t)
 	}
 	return out, rows.Err()
 }
@@ -523,19 +541,36 @@ func (e *Engine) AddComment(taskID, actor, ctype, body string) error {
 // --- internals ---
 
 func (e *Engine) getForUpdate(tx *sql.Tx, id string) (*Task, error) {
-	row := tx.QueryRow(`SELECT id, project, repo_path, title, lane, isolation, target, state,
-		objective, criteria, verification, tracker_id, review_cycles FROM tasks WHERE id = ?`, id)
-	var t Task
-	var crit string
-	err := row.Scan(&t.ID, &t.Project, &t.RepoPath, &t.Title, &t.Lane, &t.Isolation, &t.Target,
-		&t.State, &t.Objective, &crit, &t.Verification, &t.TrackerID, &t.ReviewCycles)
+	row := tx.QueryRow(`SELECT `+taskColumns+` FROM tasks WHERE id = ?`, id)
+	t, err := scanTask(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
-	json.Unmarshal([]byte(crit), &t.Criteria)
+	return t, nil
+}
+
+const taskColumns = `id, project, repo_path, title, lane, isolation, target, state,
+	objective, criteria, verification, tracker_id, review_cycles,
+	priority, assignee, labels, due_date, position, archived_at, created_at, updated_at`
+
+type taskScanner interface {
+	Scan(...any) error
+}
+
+func scanTask(row taskScanner) (*Task, error) {
+	var t Task
+	var criteria, labels string
+	err := row.Scan(&t.ID, &t.Project, &t.RepoPath, &t.Title, &t.Lane, &t.Isolation, &t.Target,
+		&t.State, &t.Objective, &criteria, &t.Verification, &t.TrackerID, &t.ReviewCycles,
+		&t.Priority, &t.Assignee, &labels, &t.DueDate, &t.Position, &t.ArchivedAt, &t.CreatedAt, &t.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	json.Unmarshal([]byte(criteria), &t.Criteria)
+	json.Unmarshal([]byte(labels), &t.Labels)
 	return &t, nil
 }
 
