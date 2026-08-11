@@ -6,7 +6,9 @@ import (
 	"strings"
 	"testing"
 
+	akctx "github.com/kaltstart-co/agentklar/internal/context"
 	"github.com/kaltstart-co/agentklar/internal/contracts"
+	"github.com/kaltstart-co/agentklar/internal/memory"
 	"github.com/kaltstart-co/agentklar/internal/store"
 	"github.com/kaltstart-co/agentklar/internal/workflow"
 )
@@ -137,5 +139,91 @@ func TestClaimAndSubmitOverMCP(t *testing.T) {
 	task, _ := eng.GetTask("T1")
 	if task.State != contracts.StateCompletionReview {
 		t.Fatalf("expected Completion Review, got %s", task.State)
+	}
+}
+
+func TestRememberImmediatelyUpdatesMemoryAndContext(t *testing.T) {
+	dir := t.TempDir()
+	mem, err := memory.New(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { mem.Close() })
+	contextStore, err := akctx.New(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { contextStore.Close() })
+	srv, _ := newServer(t)
+	srv.Memory, srv.Context = mem, contextStore
+
+	remember := func(value string) {
+		t.Helper()
+		params, _ := json.Marshal(map[string]string{
+			"namespace": "T1", "key": "decision", "value": value,
+			"task_id": "T1", "holder": "codex",
+		})
+		resp := srv.Dispatch(Request{JSONRPC: "2.0", ID: json.RawMessage(`1`), Method: "remember", Params: params})
+		if resp.Error != nil {
+			t.Fatalf("remember %q: %v", value, resp.Error)
+		}
+	}
+	recall := func(query string) []memory.Entry {
+		t.Helper()
+		params, _ := json.Marshal(map[string]interface{}{"query": query, "limit": 10})
+		resp := srv.Dispatch(Request{JSONRPC: "2.0", ID: json.RawMessage(`2`), Method: "recall", Params: params})
+		if resp.Error != nil {
+			t.Fatalf("recall %q: %v", query, resp.Error)
+		}
+		return resp.Result.(map[string]interface{})["results"].([]memory.Entry)
+	}
+	getContext := func(query string) []akctx.Doc {
+		t.Helper()
+		params, _ := json.Marshal(map[string]string{"query": query})
+		resp := srv.Dispatch(Request{JSONRPC: "2.0", ID: json.RawMessage(`3`), Method: "get_context", Params: params})
+		if resp.Error != nil {
+			t.Fatalf("get_context %q: %v", query, resp.Error)
+		}
+		return resp.Result.(akctx.Packet).Items
+	}
+
+	remember("oranges are preferred")
+	if got := recall("oranges"); len(got) != 1 || got[0].Value != "oranges are preferred" {
+		t.Fatalf("recall after remember = %#v", got)
+	}
+	first := getContext("oranges")
+	if len(first) != 1 || first[0].Source != akctx.SourceMemory {
+		t.Fatalf("context after remember = %#v", first)
+	}
+
+	remember("bananas are preferred")
+	if got := recall("oranges"); len(got) != 0 {
+		t.Fatalf("old memory remained searchable after update: %#v", got)
+	}
+	updated := getContext("bananas")
+	if len(updated) != 1 || updated[0].Ref != first[0].Ref {
+		t.Fatalf("context update duplicated or changed ref: first=%#v updated=%#v", first, updated)
+	}
+	if got := getContext("oranges"); len(got) != 0 {
+		t.Fatalf("old context remained searchable after update: %#v", got)
+	}
+}
+
+func TestMalformedParamsReturnInvalidParams(t *testing.T) {
+	srv, _ := newServer(t)
+	resp := srv.Dispatch(Request{JSONRPC: "2.0", ID: json.RawMessage(`1`), Method: "heartbeat_task", Params: json.RawMessage(`{"task_id":`)})
+	if resp.Error == nil || resp.Error.Code != -32602 {
+		t.Fatalf("malformed params response = %#v, want -32602", resp)
+	}
+}
+
+func TestMissingRequiredParamsReturnInvalidParams(t *testing.T) {
+	srv, _ := newServer(t)
+	resp := srv.Dispatch(Request{
+		JSONRPC: "2.0", ID: json.RawMessage(`1`), Method: "heartbeat_task",
+		Params: json.RawMessage(`{"task_id":"T1"}`),
+	})
+	if resp.Error == nil || resp.Error.Code != -32602 || !strings.Contains(resp.Error.Message, "fencing_token") {
+		t.Fatalf("missing fencing_token response = %#v, want named -32602", resp)
 	}
 }

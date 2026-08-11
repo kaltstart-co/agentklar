@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 
 	akctx "github.com/kaltstart-co/agentklar/internal/context"
@@ -95,6 +96,37 @@ func (s *Server) Dispatch(req Request) Response {
 		resp.Error = &RPCError{-32000, err.Error()}
 		return resp
 	}
+	invalid := func(err error) Response {
+		resp.Error = &RPCError{-32602, err.Error()}
+		return resp
+	}
+	decode := func(dst interface{}) *Response {
+		raw := req.Params
+		if len(raw) == 0 {
+			raw = json.RawMessage(`{}`)
+		}
+		if err := json.Unmarshal(raw, dst); err != nil {
+			r := invalid(fmt.Errorf("invalid params: %w", err))
+			return &r
+		}
+		return nil
+	}
+	require := func(fields ...string) *Response {
+		for i := 0; i < len(fields); i += 2 {
+			if strings.TrimSpace(fields[i+1]) == "" {
+				r := invalid(fmt.Errorf("missing required parameter %s", fields[i]))
+				return &r
+			}
+		}
+		return nil
+	}
+	positive := func(name string, value int64) *Response {
+		if value <= 0 {
+			r := invalid(fmt.Errorf("missing or invalid required parameter %s", name))
+			return &r
+		}
+		return nil
+	}
 
 	switch req.Method {
 	case "initialize":
@@ -114,8 +146,11 @@ func (s *Server) Dispatch(req Request) Response {
 		var p struct {
 			Name string `json:"name"`
 		}
-		if err := json.Unmarshal(req.Params, &p); err != nil {
-			return fail(err)
+		if bad := decode(&p); bad != nil {
+			return *bad
+		}
+		if bad := require("name", p.Name); bad != nil {
+			return *bad
 		}
 		text, ok := PromptText[p.Name]
 		if !ok {
@@ -144,8 +179,11 @@ func (s *Server) Dispatch(req Request) Response {
 			Name      string          `json:"name"`
 			Arguments json.RawMessage `json:"arguments"`
 		}
-		if err := json.Unmarshal(req.Params, &call); err != nil {
-			return fail(err)
+		if bad := decode(&call); bad != nil {
+			return *bad
+		}
+		if bad := require("name", call.Name); bad != nil {
+			return *bad
 		}
 		inner := s.Dispatch(Request{JSONRPC: req.JSONRPC, ID: req.ID, Method: call.Name, Params: call.Arguments})
 		if inner.Error != nil {
@@ -165,13 +203,19 @@ func (s *Server) Dispatch(req Request) Response {
 		}
 
 	case "bind_workspace":
+		var p struct{}
+		if bad := decode(&p); bad != nil {
+			return *bad
+		}
 		resp.Result = map[string]string{"workspace": s.Workspace}
 
 	case "list_ready_tasks":
 		var p struct {
 			ExecutionTarget string `json:"execution_target"`
 		}
-		json.Unmarshal(req.Params, &p)
+		if bad := decode(&p); bad != nil {
+			return *bad
+		}
 		target := contracts.ExecutionTarget(p.ExecutionTarget)
 		if target == "" {
 			target = contracts.TargetAny
@@ -186,7 +230,12 @@ func (s *Server) Dispatch(req Request) Response {
 		var p struct {
 			TaskID string `json:"task_id"`
 		}
-		json.Unmarshal(req.Params, &p)
+		if bad := decode(&p); bad != nil {
+			return *bad
+		}
+		if bad := require("task_id", p.TaskID); bad != nil {
+			return *bad
+		}
 		t, err := s.Engine.GetTask(p.TaskID)
 		if err != nil {
 			return fail(err)
@@ -199,7 +248,12 @@ func (s *Server) Dispatch(req Request) Response {
 			ExpectedState string `json:"expected_state"`
 			Holder        string `json:"holder"`
 		}
-		json.Unmarshal(req.Params, &p)
+		if bad := decode(&p); bad != nil {
+			return *bad
+		}
+		if bad := require("task_id", p.TaskID); bad != nil {
+			return *bad
+		}
 		if p.Holder == "" {
 			p.Holder = "agent"
 		}
@@ -223,7 +277,15 @@ func (s *Server) Dispatch(req Request) Response {
 			TaskID       string `json:"task_id"`
 			FencingToken int64  `json:"fencing_token"`
 		}
-		json.Unmarshal(req.Params, &p)
+		if bad := decode(&p); bad != nil {
+			return *bad
+		}
+		if bad := require("task_id", p.TaskID); bad != nil {
+			return *bad
+		}
+		if bad := positive("fencing_token", p.FencingToken); bad != nil {
+			return *bad
+		}
 		if err := s.Engine.Heartbeat(p.TaskID, p.FencingToken); err != nil {
 			return fail(err)
 		}
@@ -237,7 +299,15 @@ func (s *Server) Dispatch(req Request) Response {
 			HeadCommit   string `json:"head_commit"`
 			Summary      string `json:"summary"`
 		}
-		json.Unmarshal(req.Params, &p)
+		if bad := decode(&p); bad != nil {
+			return *bad
+		}
+		if bad := require("task_id", p.TaskID, "base_commit", p.BaseCommit, "head_commit", p.HeadCommit, "summary", p.Summary); bad != nil {
+			return *bad
+		}
+		if bad := positive("fencing_token", p.FencingToken); bad != nil {
+			return *bad
+		}
 		subID, err := s.Engine.SubmitForReview(p.TaskID, p.FencingToken, p.BaseCommit, p.HeadCommit, p.Summary)
 		if err != nil {
 			return fail(err)
@@ -252,7 +322,20 @@ func (s *Server) Dispatch(req Request) Response {
 			Provider     string `json:"provider"`
 			Findings     string `json:"findings"`
 		}
-		json.Unmarshal(req.Params, &p)
+		if bad := decode(&p); bad != nil {
+			return *bad
+		}
+		if bad := require("task_id", p.TaskID, "result", p.Result, "provider", p.Provider, "findings", p.Findings); bad != nil {
+			return *bad
+		}
+		if bad := positive("submission_id", p.SubmissionID); bad != nil {
+			return *bad
+		}
+		switch contracts.ReviewResult(p.Result) {
+		case contracts.ResultPass, contracts.ResultFail, contracts.ResultEvidenceInsufficient, contracts.ResultClarificationNeeded:
+		default:
+			return invalid(fmt.Errorf("invalid result %q", p.Result))
+		}
 		kind := "completion"
 		if req.Method == "record_qa" {
 			kind = "qa"
@@ -269,7 +352,15 @@ func (s *Server) Dispatch(req Request) Response {
 			TaskID       string `json:"task_id"`
 			FencingToken int64  `json:"fencing_token"`
 		}
-		json.Unmarshal(req.Params, &p)
+		if bad := decode(&p); bad != nil {
+			return *bad
+		}
+		if bad := require("task_id", p.TaskID); bad != nil {
+			return *bad
+		}
+		if bad := positive("fencing_token", p.FencingToken); bad != nil {
+			return *bad
+		}
 		if err := s.Engine.ReleaseTask(p.TaskID, p.FencingToken); err != nil {
 			return fail(err)
 		}
@@ -281,7 +372,12 @@ func (s *Server) Dispatch(req Request) Response {
 			Type   string `json:"type"`
 			Body   string `json:"body"`
 		}
-		json.Unmarshal(req.Params, &p)
+		if bad := decode(&p); bad != nil {
+			return *bad
+		}
+		if bad := require("task_id", p.TaskID, "type", p.Type, "body", p.Body); bad != nil {
+			return *bad
+		}
 		// Agent-authored comments are always attributed to the agent actor;
 		// a model cannot post as a human.
 		if err := s.Engine.AddComment(p.TaskID, string(contracts.ActorAgent), p.Type, p.Body); err != nil {
@@ -296,7 +392,12 @@ func (s *Server) Dispatch(req Request) Response {
 		var p struct {
 			TaskID string `json:"task_id"`
 		}
-		json.Unmarshal(req.Params, &p)
+		if bad := decode(&p); bad != nil {
+			return *bad
+		}
+		if bad := require("task_id", p.TaskID); bad != nil {
+			return *bad
+		}
 		if _, _, err := s.Engine.PendingApproval(p.TaskID); err != nil {
 			return fail(err)
 		}
@@ -312,7 +413,9 @@ func (s *Server) Dispatch(req Request) Response {
 			TaskID string `json:"task_id"`
 			Query  string `json:"query"`
 		}
-		json.Unmarshal(req.Params, &p)
+		if bad := decode(&p); bad != nil {
+			return *bad
+		}
 		if s.Context == nil {
 			return unavailable("get_context")
 		}
@@ -334,7 +437,12 @@ func (s *Server) Dispatch(req Request) Response {
 			TaskID    string `json:"task_id"`
 			Holder    string `json:"holder"`
 		}
-		json.Unmarshal(req.Params, &p)
+		if bad := decode(&p); bad != nil {
+			return *bad
+		}
+		if bad := require("key", p.Key, "value", p.Value); bad != nil {
+			return *bad
+		}
 		if s.Memory == nil {
 			return unavailable("remember")
 		}
@@ -345,6 +453,18 @@ func (s *Server) Dispatch(req Request) Response {
 		if err != nil {
 			return fail(err)
 		}
+		if s.Context != nil {
+			ref := strconv.Quote(p.Namespace) + "/" + strconv.Quote(p.Key)
+			_, err := s.Context.Index([]akctx.Doc{{
+				Source: akctx.SourceMemory,
+				Ref:    ref,
+				Title:  strings.TrimSpace(p.Namespace + " " + p.Key),
+				Body:   p.Value,
+			}})
+			if err != nil {
+				return fail(fmt.Errorf("index remembered context: %w", err))
+			}
+		}
 		resp.Result = map[string]interface{}{"id": id, "status": "remembered"}
 
 	case "recall":
@@ -352,7 +472,12 @@ func (s *Server) Dispatch(req Request) Response {
 			Query string `json:"query"`
 			Limit int    `json:"limit"`
 		}
-		json.Unmarshal(req.Params, &p)
+		if bad := decode(&p); bad != nil {
+			return *bad
+		}
+		if bad := require("query", p.Query); bad != nil {
+			return *bad
+		}
 		if s.Memory == nil {
 			return unavailable("recall")
 		}
@@ -370,16 +495,20 @@ func (s *Server) Dispatch(req Request) Response {
 			Message  string `json:"message"`
 			Speak    *bool  `json:"speak"`
 		}
-		json.Unmarshal(req.Params, &p)
+		if bad := decode(&p); bad != nil {
+			return *bad
+		}
+		if bad := require("severity", p.Severity, "message", p.Message); bad != nil {
+			return *bad
+		}
 		if s.Notify == nil {
 			return unavailable("notify_human")
 		}
-		if p.Message == "" {
-			return fail(fmt.Errorf("notify_human requires a message"))
-		}
 		sev := notify.Severity(strings.ToLower(p.Severity))
-		if sev == "" {
-			sev = notify.Info
+		switch sev {
+		case notify.Info, notify.Warn, notify.Error, notify.Block:
+		default:
+			return invalid(fmt.Errorf("invalid severity %q", p.Severity))
 		}
 		if p.Holder == "" {
 			p.Holder = "agent"
