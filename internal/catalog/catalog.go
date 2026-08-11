@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -70,8 +71,19 @@ func (c *Catalog) Register(repoPath, legacyWorkspace string) (Project, error) {
 	if err != nil {
 		return Project{}, err
 	}
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	var lastErr error
+	for attempt := 0; attempt < 8; attempt++ {
+		p, err := c.register(repo, legacy, time.Now().UTC().Format(time.RFC3339Nano))
+		if err == nil || !retryable(err) {
+			return p, err
+		}
+		lastErr = err
+		time.Sleep(time.Duration(attempt+1) * time.Millisecond)
+	}
+	return Project{}, fmt.Errorf("register project after retries: %w", lastErr)
+}
 
+func (c *Catalog) register(repo, legacy, now string) (Project, error) {
 	tx, err := c.db.Begin()
 	if err != nil {
 		return Project{}, err
@@ -94,24 +106,22 @@ func (c *Catalog) Register(repoPath, legacyWorkspace string) (Project, error) {
 		return Project{}, err
 	}
 
-	workspace := legacy
 	compatible, err := legacyCompatible(legacy, repo)
 	if err != nil {
 		return Project{}, err
 	}
-	inUse, err := workspaceInUse(tx, workspace)
-	if err != nil {
-		return Project{}, err
-	}
-	if !compatible || inUse {
-		id := projectID(repo)
-		workspace = filepath.Join(filepath.Dir(legacy), sanitize(filepath.Base(repo))+"-"+id)
-		inUse, err = workspaceInUse(tx, workspace)
+	workspace := legacy
+	if !compatible {
+		workspace, err = availableWorkspace(tx, legacy, repo)
 		if err != nil {
 			return Project{}, err
 		}
-		if inUse {
-			return Project{}, fmt.Errorf("workspace %q is already registered", workspace)
+	} else if inUse, err := workspaceInUse(tx, workspace); err != nil {
+		return Project{}, err
+	} else if inUse {
+		workspace, err = availableWorkspace(tx, legacy, repo)
+		if err != nil {
+			return Project{}, err
 		}
 	}
 	p = Project{
@@ -131,6 +141,11 @@ func (c *Catalog) Register(repoPath, legacyWorkspace string) (Project, error) {
 		return Project{}, err
 	}
 	return p, nil
+}
+
+func retryable(err error) bool {
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "sqlite_busy") || strings.Contains(message, "database is locked")
 }
 
 // Get returns a project by its stable ID.
@@ -175,6 +190,72 @@ func workspaceInUse(tx *sql.Tx, workspace string) (bool, error) {
 	return exists, err
 }
 
+func availableWorkspace(tx *sql.Tx, legacy, repo string) (string, error) {
+	base := filepath.Join(filepath.Dir(legacy), sanitize(filepath.Base(repo))+"-"+projectID(repo))
+	for suffix := 0; ; suffix++ {
+		workspace := base
+		if suffix > 0 {
+			workspace += "-" + strconv.Itoa(suffix+1)
+		}
+		inUse, err := workspaceInUse(tx, workspace)
+		if err != nil {
+			return "", err
+		}
+		if inUse {
+			continue
+		}
+		belongs, exists, err := workspaceBelongsTo(workspace, repo)
+		if err != nil {
+			return "", err
+		}
+		if !exists || belongs {
+			return workspace, nil
+		}
+	}
+}
+
+func workspaceBelongsTo(workspace, repo string) (belongs, exists bool, err error) {
+	control := filepath.Join(workspace, "control.sqlite")
+	if _, err := os.Stat(workspace); errors.Is(err, os.ErrNotExist) {
+		return false, false, nil
+	} else if err != nil {
+		return false, true, fmt.Errorf("stat workspace: %w", err)
+	}
+	if _, err := os.Stat(control); errors.Is(err, os.ErrNotExist) {
+		return false, true, nil
+	} else if err != nil {
+		return false, true, fmt.Errorf("stat workspace database: %w", err)
+	}
+	db, err := sql.Open("sqlite", control)
+	if err != nil {
+		return false, true, fmt.Errorf("open workspace database: %w", err)
+	}
+	defer db.Close()
+	rows, err := db.Query(`SELECT DISTINCT repo_path FROM tasks WHERE repo_path <> ''`)
+	if missingTasksTable(err) {
+		return false, true, nil
+	}
+	if err != nil {
+		return false, true, fmt.Errorf("inspect workspace database: %w", err)
+	}
+	defer rows.Close()
+	found := false
+	for rows.Next() {
+		var path string
+		if err := rows.Scan(&path); err != nil {
+			return false, true, err
+		}
+		if path != repo {
+			return false, true, nil
+		}
+		found = true
+	}
+	if err := rows.Err(); err != nil {
+		return false, true, err
+	}
+	return found, true, nil
+}
+
 func legacyCompatible(workspace, repo string) (bool, error) {
 	control := filepath.Join(workspace, "control.sqlite")
 	if _, err := os.Stat(control); errors.Is(err, os.ErrNotExist) {
@@ -192,10 +273,17 @@ func legacyCompatible(workspace, repo string) (bool, error) {
 	if errors.Is(err, sql.ErrNoRows) {
 		return true, nil
 	}
-	if err != nil {
+	if missingTasksTable(err) {
 		return false, nil
 	}
+	if err != nil {
+		return false, fmt.Errorf("inspect legacy workspace: %w", err)
+	}
 	return false, nil
+}
+
+func missingTasksTable(err error) bool {
+	return err != nil && strings.Contains(strings.ToLower(err.Error()), "no such table: tasks")
 }
 
 func canonicalPath(path string) (string, error) {

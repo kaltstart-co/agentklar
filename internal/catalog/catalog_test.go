@@ -143,6 +143,90 @@ func TestRegisterUsesHashedWorkspaceWithoutLegacyTasksTable(t *testing.T) {
 	assertHashedWorkspace(t, p, legacy)
 }
 
+func TestRegisterSkipsStaleUnregisteredHashedWorkspace(t *testing.T) {
+	c := newTestCatalog(t)
+	root := t.TempDir()
+	repo := filepath.Join(root, "acme", "app")
+	legacy := filepath.Join(root, "workspaces", "app")
+	canonicalRepo, err := canonicalPath(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale := filepath.Join(filepath.Dir(legacy), "app-"+projectID(canonicalRepo))
+	if err := os.MkdirAll(stale, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	p, err := c.Register(repo, legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.WorkspacePath == stale {
+		t.Fatalf("workspace reused stale directory %q", stale)
+	}
+}
+
+func TestRegisterReturnsErrorForCorruptLegacyDatabase(t *testing.T) {
+	c := newTestCatalog(t)
+	root := t.TempDir()
+	legacy := filepath.Join(root, "workspaces", "app")
+	if err := os.MkdirAll(legacy, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(legacy, "control.sqlite"), []byte("not a sqlite database"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := c.Register(filepath.Join(root, "acme", "app"), legacy); err == nil {
+		t.Fatal("Register accepted a corrupt legacy database")
+	}
+}
+
+func TestRegisterIsConcurrentAcrossCatalogInstances(t *testing.T) {
+	root := t.TempDir()
+	first, err := Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Close()
+	second, err := Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Close()
+
+	start := make(chan struct{})
+	results := make(chan struct {
+		project Project
+		err     error
+	}, 2)
+	register := func(c *Catalog) {
+		<-start
+		p, err := c.Register(filepath.Join(root, "acme", "app"), filepath.Join(root, "workspaces", "app"))
+		results <- struct {
+			project Project
+			err     error
+		}{p, err}
+	}
+	go register(first)
+	go register(second)
+	close(start)
+	one, two := <-results, <-results
+	if one.err != nil || two.err != nil {
+		t.Fatalf("concurrent registration errors: %v, %v", one.err, two.err)
+	}
+	if one.project.ID != two.project.ID || one.project.RepoPath != two.project.RepoPath || one.project.WorkspacePath != two.project.WorkspacePath {
+		t.Fatalf("projects differ: %+v != %+v", one.project, two.project)
+	}
+	projects, err := first.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(projects) != 1 {
+		t.Fatalf("projects = %d, want 1", len(projects))
+	}
+}
+
 func TestListOrdersByLastOpenedAt(t *testing.T) {
 	c := newTestCatalog(t)
 	root := t.TempDir()
