@@ -33,7 +33,7 @@ type Evidence struct {
 // ListAll returns every task in the workspace.
 func (e *Engine) ListAll() ([]Task, error) {
 	rows, err := e.db.Query(`SELECT ` + taskColumns + ` FROM tasks
-		WHERE archived_at = '' ORDER BY state, position, created_at`)
+		WHERE archived_at = '' ORDER BY state, position, created_at, id`)
 	if err != nil {
 		return nil, err
 	}

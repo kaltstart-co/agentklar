@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/kaltstart-co/agentklar/internal/contracts"
 	"github.com/kaltstart-co/agentklar/internal/store"
@@ -375,6 +376,34 @@ func TestListTasksOmitsArchivedAndOrdersPlanningPosition(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got, want := taskIDs(ready), []string{"ready"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("ListReady() = %v, want %v", got, want)
+	}
+}
+
+func TestListTasksBreakOrderingTiesByID(t *testing.T) {
+	e := newEngine(t)
+	e.SetClock(func() time.Time { return time.Date(2026, 8, 12, 0, 0, 0, 0, time.UTC) })
+	for _, id := range []string{"z-task", "a-task"} {
+		if err := e.CreateTask(Task{ID: id, Project: "p", Title: id, Criteria: []string{"c"}, Verification: "v"}); err != nil {
+			t.Fatal(err)
+		}
+		if err := e.MarkReady(id, contracts.ActorHuman); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	all, err := e.ListAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := taskIDs(all), []string{"a-task", "z-task"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("ListAll() = %v, want %v", got, want)
+	}
+	ready, err := e.ListReady(contracts.TargetAny)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := taskIDs(ready), []string{"a-task", "z-task"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("ListReady() = %v, want %v", got, want)
 	}
 }

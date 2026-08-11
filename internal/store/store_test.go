@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	_ "modernc.org/sqlite"
@@ -51,6 +52,53 @@ func TestOpen(t *testing.T) {
 
 		if db1 == nil || db2 == nil {
 			t.Fatal("database connections should not be nil")
+		}
+	})
+
+	t.Run("serializes concurrent migrations", func(t *testing.T) {
+		dbPath := filepath.Join(t.TempDir(), "concurrent.db")
+		start := make(chan struct{})
+		errs := make(chan error, 2)
+		var wg sync.WaitGroup
+		for range 2 {
+			wg.Go(func() {
+				<-start
+				db, err := Open(dbPath)
+				if err == nil {
+					err = db.Close()
+				}
+				errs <- err
+			})
+		}
+		close(start)
+		wg.Wait()
+		close(errs)
+		for err := range errs {
+			if err != nil {
+				t.Fatalf("concurrent Open failed: %v", err)
+			}
+		}
+		db, err := Open(dbPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer db.Close()
+		var version int
+		if err := db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
+			t.Fatal(err)
+		}
+		if version != 2 {
+			t.Fatalf("user_version = %d, want 2", version)
+		}
+	})
+
+	t.Run("records every migration version in sequence", func(t *testing.T) {
+		got := make([]int, len(migrations))
+		for i, migration := range migrations {
+			got[i] = migration.version
+		}
+		if want := []int{1, 2}; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+			t.Fatalf("migration versions = %v, want %v", got, want)
 		}
 	})
 

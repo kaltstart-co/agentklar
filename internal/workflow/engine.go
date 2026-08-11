@@ -137,7 +137,8 @@ func (e *Engine) MarkReady(taskID string, actor contracts.Actor) error {
 // ListReady returns Ready tasks matching the execution target.
 func (e *Engine) ListReady(target contracts.ExecutionTarget) ([]Task, error) {
 	rows, err := e.db.Query(`SELECT `+taskColumns+` FROM tasks
-		WHERE state = ? AND archived_at = '' AND (target = ? OR target = 'any' OR ? = 'any')`,
+		WHERE state = ? AND archived_at = '' AND (target = ? OR target = 'any' OR ? = 'any')
+		ORDER BY position, created_at, id`,
 		contracts.StateReady, target, target)
 	if err != nil {
 		return nil, err
