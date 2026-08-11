@@ -17,7 +17,7 @@ own Vikunja board. This guide takes you from install to a task moving across the
 verifies its SHA-256 checksum, and atomically installs the binary and embedded UI:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/kaltstart-co/agentklar/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/kaltstart-co/agentklar/main/install.sh | bash -s --
 ```
 
 Rerun that exact command to update. The project catalog and workspace SQLite
@@ -25,7 +25,7 @@ files under `~/.local/share/agentklar` are preserved. For a custom location,
 use the same directory on every update:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/kaltstart-co/agentklar/main/install.sh | AGENTKLAR_INSTALL_DIR=/path/to/bin bash
+curl -fsSL https://raw.githubusercontent.com/kaltstart-co/agentklar/main/install.sh | AGENTKLAR_INSTALL_DIR=/path/to/bin bash -s --
 ```
 
 Pass installer arguments after `bash -s --`, for example `bash -s -- --no-agents`

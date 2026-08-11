@@ -24,14 +24,14 @@ SHA-256 against `checksums.txt`, installs to `~/.local/bin`, and wires skill +
 slash commands into OpenCode, Claude Code, and Codex:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/kaltstart-co/agentklar/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/kaltstart-co/agentklar/main/install.sh | bash -s --
 ```
 
-Skip agent wiring with `curl -sSL https://raw.githubusercontent.com/kaltstart-co/agentklar/main/install.sh | bash -s -- --no-agents`.
+Skip agent wiring with `curl -fsSL https://raw.githubusercontent.com/kaltstart-co/agentklar/main/install.sh | bash -s -- --no-agents`.
 Use a custom install location with:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/kaltstart-co/agentklar/main/install.sh | AGENTKLAR_INSTALL_DIR=/path/to/bin bash
+curl -fsSL https://raw.githubusercontent.com/kaltstart-co/agentklar/main/install.sh | AGENTKLAR_INSTALL_DIR=/path/to/bin bash -s --
 ```
 
 If no prebuilt binary matches your platform and Go is installed, the script
@@ -43,7 +43,7 @@ Rerun the same one-line installer. It verifies and stages the new binary before
 atomically replacing the old binary, which also updates the embedded UI:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/kaltstart-co/agentklar/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/kaltstart-co/agentklar/main/install.sh | bash -s --
 ```
 
 The project catalog and workspace SQLite files under

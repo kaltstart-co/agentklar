@@ -30,12 +30,29 @@ fi
 SCRIPT
   chmod +x "$dir/payload/agentklar"
   archive="$dir/agentklar_test_linux_amd64.tar.gz"
-  tar -czf "$archive" -C "$dir/payload" agentklar
+  case "$mode" in
+    symlink)
+      cp "$dir/payload/agentklar" "$dir/symlink-target"
+      rm "$dir/payload/agentklar"
+      ln -s "$dir/symlink-target" "$dir/payload/agentklar"
+      tar -czf "$archive" -C "$dir/payload" agentklar
+      ;;
+    unexpected)
+      printf 'surprise\n' >"$dir/payload/extra"
+      tar -czf "$archive" -C "$dir/payload" agentklar extra
+      ;;
+    nested)
+      mkdir -p "$dir/payload/bin"
+      mv "$dir/payload/agentklar" "$dir/payload/bin/agentklar"
+      tar -czf "$archive" -C "$dir/payload" bin/agentklar
+      ;;
+    *) tar -czf "$archive" -C "$dir/payload" agentklar ;;
+  esac
   checksum="$({ command -v shasum >/dev/null && shasum -a 256 "$archive"; } || sha256sum "$archive")"
   case "$mode" in
-    valid) printf '%s  %s\n' "${checksum%% *}" "${archive##*/}" >"$dir/checksums.txt" ;;
     mismatch) printf '%064d  %s\n' 0 "${archive##*/}" >"$dir/checksums.txt" ;;
     missing-entry) printf '%064d  unrelated.tar.gz\n' 0 >"$dir/checksums.txt" ;;
+    *) printf '%s  %s\n' "${checksum%% *}" "${archive##*/}" >"$dir/checksums.txt" ;;
   esac
 }
 
@@ -82,9 +99,24 @@ add_sha() {
   fi
 }
 
+add_go() {
+  local bin="$1"
+  cat >"$bin/go" <<'SCRIPT'
+#!/bin/sh
+[ "${1:-}" = install ] || exit 2
+cat >"$GOBIN/agentklar" <<'BINARY'
+#!/bin/sh
+[ "${1:-}" = version ] && printf 'agentklar go-test\n'
+BINARY
+/bin/chmod +x "$GOBIN/agentklar"
+SCRIPT
+  chmod +x "$bin/go"
+}
+
 run_case() {
-  local name="$1" mode="$2" include_checksum="$3" with_sha="$4" staged_fail="$5"
+  local name="$1" mode="$2" include_checksum="$3" with_sha="$4" staged_fail="$5" with_go="${6:-0}"
   local dir="$TEST_ROOT/$name" status=0
+  local -a args=(--no-agents)
   mkdir -p "$dir/install" "$dir/home/.local/share/agentklar/project"
   printf 'old\n' >"$dir/install/agentklar"
   chmod +x "$dir/install/agentklar"
@@ -94,10 +126,14 @@ run_case() {
   link_tools "$dir/bin"
   make_curl "$dir/bin" "$include_checksum"
   [ "$with_sha" = 1 ] && add_sha "$dir/bin"
+  if [ "$with_go" = 1 ]; then
+    add_go "$dir/bin"
+    args=(--with-go --no-agents)
+  fi
 
   env PATH="$dir/bin" HOME="$dir/home" FIXTURES="$dir/release" INCLUDE_CHECKSUM="$include_checksum" CALL_LOG="$dir/calls" \
     STAGED_VERSION_FAIL="$staged_fail" AGENTKLAR_INSTALL_DIR="$dir/install" \
-    /bin/bash -s -- --no-agents <"$ROOT/install.sh" >"$dir/output" 2>&1 || status=$?
+    /bin/bash -s -- "${args[@]}" <"$ROOT/install.sh" >"$dir/output" 2>&1 || status=$?
 
   [ "$(cat "$dir/home/.local/share/agentklar/project/control.sqlite")" = workspace ] || fail "$name changed workspace data"
   CASE_DIR="$dir"
@@ -125,9 +161,19 @@ run_case missing-sha valid 1 0 0
 grep -qi 'sha256.*required\|required.*sha256' "$CASE_DIR/output" || fail "missing SHA tool error was unclear"
 [ "$(cat "$CASE_DIR/install/agentklar")" = old ] || fail "missing SHA tool replaced existing binary"
 
+for unsafe in symlink unexpected nested; do
+  run_case "$unsafe-archive" "$unsafe" 1 1 0
+  [ "$CASE_STATUS" -ne 0 ] || fail "$unsafe archive succeeded"
+  [ "$(cat "$CASE_DIR/install/agentklar")" = old ] || fail "$unsafe archive replaced existing binary"
+done
+
 run_case valid valid 1 1 0
 [ "$CASE_STATUS" -eq 0 ] || { cat "$CASE_DIR/output" >&2; fail "valid release failed"; }
 grep -q 'agentklar test' "$CASE_DIR/install/agentklar" || fail "valid release did not replace binary"
 [ ! -s "$CASE_DIR/calls" ] || fail "--no-agents did not pass through bash -s --"
+
+run_case with-go valid 1 0 0 1
+[ "$CASE_STATUS" -eq 0 ] || { cat "$CASE_DIR/output" >&2; fail "--with-go failed"; }
+grep -q 'agentklar go-test' "$CASE_DIR/install/agentklar" || fail "--with-go did not replace binary"
 
 printf 'install tests passed\n'

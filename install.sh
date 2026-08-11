@@ -2,7 +2,7 @@
 #
 # install.sh — one-line installer for Agentklar.
 #
-#   curl -sSL https://raw.githubusercontent.com/kaltstart-co/agentklar/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/kaltstart-co/agentklar/main/install.sh | bash -s --
 #
 # What it does:
 #   1. Downloads the newest Release archive for your OS/arch from GitHub
@@ -109,8 +109,11 @@ install_from_release() {
   fi
   color "  verified sha256"
 
-  tar -xzf "$archive" -C "$tmp"
-  [[ -f "$tmp/$BIN" ]] || { err "release archive does not contain $BIN"; exit 1; }
+  members="$(tar -tzf "$archive")" || { err "could not read release archive"; exit 1; }
+  [[ "$members" == "$BIN" ]] || { err "release archive must contain only the top-level $BIN binary"; exit 1; }
+  details="$(tar -tvzf "$archive")" || { err "could not inspect release archive"; exit 1; }
+  [[ "${details:0:1}" == "-" ]] || { err "release archive $BIN member is not a regular file"; exit 1; }
+  tar -xzf "$archive" -C "$tmp" "$BIN"
   activate "$tmp/$BIN"
 }
 
