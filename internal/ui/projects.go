@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -25,8 +27,11 @@ import (
 const maxRequestBody = 1 << 20
 
 type projectOverview struct {
-	Project catalog.Project         `json:"project"`
-	Counts  map[contracts.State]int `json:"counts"`
+	Project   catalog.Project         `json:"project"`
+	Counts    map[contracts.State]int `json:"counts"`
+	Attention int                     `json:"attention"`
+	Approvals int                     `json:"approvals"`
+	Alerts    int                     `json:"alerts"`
 }
 
 type projectRuntime struct {
@@ -66,10 +71,14 @@ func (s *Server) currentProject() (catalog.Project, error) {
 }
 
 func (s *Server) currentKnowledge() (*knowledge.Store, error) {
+	return s.knowledgeForProject("")
+}
+
+func (s *Server) knowledgeForProject(projectID string) (*knowledge.Store, error) {
 	if s.catalog == nil {
 		return s.knowledge, nil
 	}
-	p, err := s.currentProject()
+	p, err := s.projectByID(projectID)
 	if err != nil {
 		return nil, err
 	}
@@ -77,10 +86,14 @@ func (s *Server) currentKnowledge() (*knowledge.Store, error) {
 }
 
 func (s *Server) currentMemory() (*memory.Store, func(), error) {
+	return s.memoryForProject("")
+}
+
+func (s *Server) memoryForProject(projectID string) (*memory.Store, func(), error) {
 	if s.catalog == nil {
 		return s.memory, func() {}, nil
 	}
-	p, err := s.currentProject()
+	p, err := s.projectByID(projectID)
 	if err != nil {
 		return nil, func() {}, err
 	}
@@ -92,10 +105,14 @@ func (s *Server) currentMemory() (*memory.Store, func(), error) {
 }
 
 func (s *Server) currentContext() (*akctx.Store, func(), error) {
+	return s.contextForProject("")
+}
+
+func (s *Server) contextForProject(projectID string) (*akctx.Store, func(), error) {
 	if s.catalog == nil {
 		return s.context, func() {}, nil
 	}
-	p, err := s.currentProject()
+	p, err := s.projectByID(projectID)
 	if err != nil {
 		return nil, func() {}, err
 	}
@@ -107,10 +124,14 @@ func (s *Server) currentContext() (*akctx.Store, func(), error) {
 }
 
 func (s *Server) currentAlerts() (*notify.Store, func(), error) {
+	return s.alertsForProject("")
+}
+
+func (s *Server) alertsForProject(projectID string) (*notify.Store, func(), error) {
 	if s.catalog == nil {
 		return s.alerts, func() {}, nil
 	}
-	p, err := s.currentProject()
+	p, err := s.projectByID(projectID)
 	if err != nil {
 		return nil, func() {}, err
 	}
@@ -119,6 +140,20 @@ func (s *Server) currentAlerts() (*notify.Store, func(), error) {
 		return nil, func() {}, err
 	}
 	return store, func() { _ = store.Close() }, nil
+}
+
+func (s *Server) projectByID(id string) (catalog.Project, error) {
+	if s.catalog == nil {
+		return catalog.Project{RepoPath: s.repoRoot, WorkspacePath: s.workspaceDir}, nil
+	}
+	if id == "" {
+		id = s.currentProjectID
+	}
+	p, err := s.catalog.Get(id)
+	if err != nil {
+		return catalog.Project{}, fmt.Errorf("catalog lookup: %w", err)
+	}
+	return p, nil
 }
 
 func (s *Server) handleAPIProjects(w http.ResponseWriter, _ *http.Request) {
@@ -134,31 +169,52 @@ func (s *Server) handleAPIProjects(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) handleAPIOverview(w http.ResponseWriter, _ *http.Request) {
+	out, err := s.overview()
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "project_unavailable", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) overview() ([]projectOverview, error) {
 	projects, err := s.catalog.List()
 	if err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
-		return
+		return nil, err
 	}
 	out := make([]projectOverview, 0, len(projects))
 	for _, p := range projects {
 		rt, err := s.openProject(p.ID)
 		if err != nil {
-			writeAPIError(w, http.StatusInternalServerError, "project_unavailable", err.Error())
-			return
+			return nil, err
 		}
 		tasks, err := rt.engine.ListAll()
 		rt.Close()
 		if err != nil {
-			writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
-			return
+			return nil, err
 		}
 		counts := make(map[contracts.State]int)
+		attention, approvals := 0, 0
 		for _, task := range tasks {
 			counts[task.State]++
+			switch task.State {
+			case contracts.StateWaiting, contracts.StateBlocked, contracts.StateChangesRequested:
+				attention++
+			case contracts.StateUserApproval:
+				attention++
+				approvals++
+			}
 		}
-		out = append(out, projectOverview{Project: p, Counts: counts})
+		pendingAlerts := 0
+		if alerts, closeFn, err := s.alertsForProject(p.ID); err == nil {
+			if rows, err := alerts.Pending(); err == nil {
+				pendingAlerts = len(rows)
+			}
+			closeFn()
+		}
+		out = append(out, projectOverview{Project: p, Counts: counts, Attention: attention, Approvals: approvals, Alerts: pendingAlerts})
 	}
-	writeJSON(w, http.StatusOK, out)
+	return out, nil
 }
 
 func (s *Server) handleProjectTasks(w http.ResponseWriter, r *http.Request) {
@@ -413,6 +469,130 @@ func (s *Server) handleProjectPosition(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "reordered"})
+}
+
+func (s *Server) handleProjectMemory(w http.ResponseWriter, r *http.Request) {
+	store, closeFn, err := s.memoryForProject(r.PathValue("project"))
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	defer closeFn()
+	var rows []memory.Entry
+	if q := strings.TrimSpace(r.URL.Query().Get("q")); q != "" {
+		rows, err = store.Recall(q, 50)
+	} else {
+		rows, err = store.List("")
+	}
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	if rows == nil {
+		rows = []memory.Entry{}
+	}
+	writeJSON(w, http.StatusOK, rows)
+}
+
+func (s *Server) handleProjectMemoryForget(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid_input", "invalid memory id")
+		return
+	}
+	store, closeFn, err := s.memoryForProject(r.PathValue("project"))
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	entry, err := store.Get(id)
+	if err != nil {
+		closeFn()
+		writeAPIError(w, http.StatusNotFound, "not_found", "memory entry not found")
+		return
+	}
+	ctx, closeContext, err := s.contextForProject(r.PathValue("project"))
+	if err != nil {
+		closeFn()
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", "context cleanup failed: "+err.Error())
+		return
+	}
+	defer closeContext()
+	for _, ref := range []string{akctx.MemoryRef(id), strconv.Quote(entry.Namespace) + "/" + strconv.Quote(entry.Key)} {
+		if err := ctx.Delete(akctx.SourceMemory, ref); err != nil {
+			closeFn()
+			writeAPIError(w, http.StatusInternalServerError, "internal_error", "context cleanup failed: "+err.Error())
+			return
+		}
+	}
+	if err := store.Forget(id); err != nil {
+		closeFn()
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	closeFn()
+	writeJSON(w, http.StatusOK, map[string]string{"status": "forgotten"})
+}
+
+func (s *Server) handleProjectContext(w http.ResponseWriter, r *http.Request) {
+	ctx, closeFn, err := s.contextForProject(r.PathValue("project"))
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	defer closeFn()
+	pkt, err := ctx.Packet(r.URL.Query().Get("q"), 50)
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	p, _ := s.projectByID(r.PathValue("project"))
+	indexedAt := ""
+	if info, err := os.Stat(filepath.Join(p.WorkspacePath, "context.sqlite")); err == nil {
+		indexedAt = info.ModTime().UTC().Format(time.RFC3339)
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"packet": pkt, "indexed_at": indexedAt})
+}
+
+func (s *Server) handleProjectContextReindex(w http.ResponseWriter, r *http.Request) {
+	p, err := s.projectByID(r.PathValue("project"))
+	if err != nil {
+		writeAPIError(w, http.StatusNotFound, "not_found", "project not found")
+		return
+	}
+	var docs []akctx.Doc
+	if ks, err := knowledge.New(p.RepoPath); err == nil {
+		if entries, err := ks.List(); err == nil {
+			for _, e := range entries {
+				docs = append(docs, akctx.Doc{Source: akctx.SourceKnowledge, Ref: string(e.Kind) + "/" + e.Slug, Title: e.Title, Body: e.Body})
+			}
+		}
+	}
+	if ms, err := memory.New(p.WorkspacePath); err == nil {
+		if rows, err := ms.List(""); err == nil {
+			for _, m := range rows {
+				docs = append(docs, akctx.Doc{Source: akctx.SourceMemory, Ref: akctx.MemoryRef(m.ID), Title: strings.TrimSpace(m.Namespace + " " + m.Key), Body: m.Value})
+			}
+		}
+		_ = ms.Close()
+	}
+	ctx, err := akctx.New(p.WorkspacePath)
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	defer ctx.Close()
+	n, err := ctx.Index(docs)
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	codeN, codeErr := ctx.IndexCode(p.RepoPath)
+	status := "indexed"
+	if codeErr != nil {
+		status = "partial"
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"status": status, "documents": n, "code_files": codeN, "indexed_at": time.Now().UTC().Format(time.RFC3339)})
 }
 
 type taskCreate struct {

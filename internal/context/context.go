@@ -137,6 +137,25 @@ func (s *Store) Index(docs []Doc) (int, error) {
 	return len(docs), nil
 }
 
+// Delete removes one derived document from both the source table and its FTS projection.
+func (s *Store) Delete(source Source, ref string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin delete tx: %w", err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`DELETE FROM docs_fts WHERE source = ? AND ref = ?`, source, ref); err != nil {
+		return fmt.Errorf("delete docs_fts %s:%s: %w", source, ref, err)
+	}
+	if _, err := tx.Exec(`DELETE FROM docs WHERE source = ? AND ref = ?`, source, ref); err != nil {
+		return fmt.Errorf("delete docs %s:%s: %w", source, ref, err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit delete tx: %w", err)
+	}
+	return nil
+}
+
 // Search runs an FTS5 ranked search across titles and bodies, returning up to
 // limit docs (0 or negative defaults to 25), best match first. Title matches
 // are weighted above body-only matches. An empty or non-alphanumeric query

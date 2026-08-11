@@ -7,8 +7,11 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
+	"time"
 
 	"github.com/kaltstart-co/agentklar/internal/contracts"
 	"github.com/kaltstart-co/agentklar/internal/notify"
@@ -21,16 +24,36 @@ var errNotPending = errors.New("task is not pending user approval")
 
 // --- HTML pages ---
 
+func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
+	if s.catalog == nil {
+		s.handleBoard(w, r)
+		return
+	}
+	overview, err := s.overview()
+	d := viewData{Title: "Overview", Section: "overview", Overview: overview}
+	if err != nil {
+		d.Error = err.Error()
+	}
+	s.renderRequest(w, r, "overview", d)
+}
+
 func (s *Server) handleBoard(w http.ResponseWriter, r *http.Request) {
-	engine, closeFn, err := s.currentEngine()
+	projectID := r.PathValue("project")
+	engine, closeFn, err := s.engineForProject(projectID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		return
 	}
 	defer closeFn()
-	tasks, err := engine.ListAll()
+	archived := r.URL.Query().Get("archived") == "true"
+	var tasks []workflow.Task
+	if archived {
+		tasks, err = engine.ListArchived()
+	} else {
+		tasks, err = engine.ListAll()
+	}
 	if err != nil {
-		s.render(w, "board", viewData{Title: "Board", Section: "board", Error: err.Error()})
+		s.renderRequest(w, r, "board", viewData{Title: "Board", Section: "board", Error: err.Error(), ProjectID: projectID})
 		return
 	}
 	buckets := make(map[contracts.State][]workflow.Task)
@@ -43,9 +66,12 @@ func (s *Server) handleBoard(w http.ResponseWriter, r *http.Request) {
 	}
 	prefix := ""
 	if s.catalog != nil {
-		prefix = "/projects/" + url.PathEscape(s.currentProjectID)
+		if projectID == "" {
+			projectID = s.currentProjectID
+		}
+		prefix = "/projects/" + url.PathEscape(projectID)
 	}
-	s.render(w, "board", viewData{Title: "Board", Section: "board", Columns: columns, ProjectID: s.currentProjectID, TaskPrefix: prefix})
+	s.renderRequest(w, r, "board", viewData{Title: "Board", Section: "board", Columns: columns, ProjectID: projectID, TaskPrefix: prefix, Archived: archived, AllTasks: tasks})
 }
 
 func (s *Server) handleTask(w http.ResponseWriter, r *http.Request) {
@@ -67,33 +93,40 @@ func (s *Server) handleTask(w http.ResponseWriter, r *http.Request) {
 	}
 	ev, _ := engine.ListEvidence(id)
 	comments, _ := listEngineComments(engine, id)
-	s.render(w, "task", viewData{
-		Title:      t.Title,
-		Section:    "board",
-		StateLabel: stateLabel(t.State),
-		Task:       t,
-		Evidence:   ev,
-		Comments:   comments,
+	reviews, _ := listEngineReviews(engine, id)
+	deps, _ := engine.Dependencies(id)
+	allTasks, _ := engine.ListAll()
+	s.renderRequest(w, r, "task", viewData{
+		Title:        t.Title,
+		Section:      "board",
+		StateLabel:   stateLabel(t.State),
+		Task:         t,
+		Evidence:     ev,
+		Comments:     comments,
+		Reviews:      reviews,
+		ProjectID:    projectID,
+		Dependencies: deps,
+		AllTasks:     allTasks,
 	})
 }
 
 func (s *Server) handleKnowledge(w http.ResponseWriter, r *http.Request) {
-	d := viewData{Title: "Knowledge", Section: "knowledge"}
-	store, err := s.currentKnowledge()
+	d := viewData{Title: "Knowledge", Section: "intelligence"}
+	store, err := s.knowledgeForProject(r.PathValue("project"))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	if store == nil {
 		d.KnowOK = false
-		s.render(w, "knowledge", d)
+		s.renderRequest(w, r, "knowledge", d)
 		return
 	}
 	d.KnowOK = true
 	entries, err := store.List()
 	if err != nil {
 		d.Error = err.Error()
-		s.render(w, "knowledge", d)
+		s.renderRequest(w, r, "knowledge", d)
 		return
 	}
 	// Stable, kind-grouped ordering: decisions, then conventions, glossary, runbook.
@@ -105,13 +138,13 @@ func (s *Server) handleKnowledge(w http.ResponseWriter, r *http.Request) {
 		return entries[i].Slug < entries[j].Slug
 	})
 	d.Knowledge = entries
-	s.render(w, "knowledge", d)
+	s.renderRequest(w, r, "knowledge", d)
 }
 
 func (s *Server) handleMemory(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query().Get("q")
-	d := viewData{Title: "Memory", Section: "memory", Q: q}
-	store, closeFn, err := s.currentMemory()
+	d := viewData{Title: "Memory", Section: "intelligence", Q: q}
+	store, closeFn, err := s.memoryForProject(r.PathValue("project"))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -119,7 +152,7 @@ func (s *Server) handleMemory(w http.ResponseWriter, r *http.Request) {
 	defer closeFn()
 	if store == nil {
 		d.MemOK = false
-		s.render(w, "memory", d)
+		s.renderRequest(w, r, "memory", d)
 		return
 	}
 	d.MemOK = true
@@ -128,13 +161,13 @@ func (s *Server) handleMemory(w http.ResponseWriter, r *http.Request) {
 	} else {
 		d.Memory, _ = store.List("")
 	}
-	s.render(w, "memory", d)
+	s.renderRequest(w, r, "memory", d)
 }
 
 func (s *Server) handleContext(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query().Get("q")
-	d := viewData{Title: "Context", Section: "context", Q: q}
-	store, closeFn, err := s.currentContext()
+	d := viewData{Title: "Context", Section: "intelligence", Q: q}
+	store, closeFn, err := s.contextForProject(r.PathValue("project"))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -142,12 +175,17 @@ func (s *Server) handleContext(w http.ResponseWriter, r *http.Request) {
 	defer closeFn()
 	if store == nil {
 		d.CtxOK = false
-		s.render(w, "context", d)
+		s.renderRequest(w, r, "context", d)
 		return
 	}
 	d.CtxOK = true
 	d.ContextPkt, _ = store.Packet(q, 50)
-	s.render(w, "context", d)
+	if p, err := s.projectByID(r.PathValue("project")); err == nil {
+		if info, err := os.Stat(filepath.Join(p.WorkspacePath, "context.sqlite")); err == nil {
+			d.ContextIndexedAt = info.ModTime().UTC().Format(time.RFC3339)
+		}
+	}
+	s.renderRequest(w, r, "context", d)
 }
 
 func (s *Server) handleApprovals(w http.ResponseWriter, r *http.Request) {
@@ -160,7 +198,7 @@ func (s *Server) handleApprovals(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	s.render(w, "approvals", viewData{Title: "Approvals", Section: "approvals", Approvals: apps})
+	s.renderRequest(w, r, "approvals", viewData{Title: "Approvals", Section: "approvals", Approvals: apps})
 }
 
 // handleApproveHTML is the trusted local approval channel: the human clicks.
@@ -191,7 +229,7 @@ func (s *Server) handleAlerts(w http.ResponseWriter, r *http.Request) {
 		alerts []notify.Alert
 		ok     bool
 	)
-	store, closeFn, err := s.currentAlerts()
+	store, closeFn, err := s.alertsForProject(r.PathValue("project"))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -201,13 +239,13 @@ func (s *Server) handleAlerts(w http.ResponseWriter, r *http.Request) {
 		ok = true
 		alerts, _ = store.List("")
 	}
-	s.render(w, "alerts", viewData{Title: "Alerts", Section: "alerts", Alerts: alerts, AlertOK: ok})
+	s.renderRequest(w, r, "alerts", viewData{Title: "Alerts", Section: "alerts", Alerts: alerts, AlertOK: ok})
 }
 
 // handleAckAlertHTML acknowledges an alert from a human click, then refreshes.
 func (s *Server) handleAckAlertHTML(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	store, closeFn, err := s.currentAlerts()
+	store, closeFn, err := s.alertsForProject(r.PathValue("project"))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -424,7 +462,9 @@ func (s *Server) pendingApprovals(engine *workflow.Engine, projectID string, hum
 		if human {
 			token = s.approvalToken(projectID, t.ID, subID, nonce)
 		}
-		out = append(out, approvalView{Task: t, SubmissionID: subID, ProjectID: projectID, Action: action, TaskURL: taskURL, CSRFToken: token})
+		evidence, _ := engine.ListEvidence(t.ID)
+		reviews, _ := listEngineReviews(engine, t.ID)
+		out = append(out, approvalView{Task: t, Evidence: evidence, Reviews: reviews, SubmissionID: subID, ProjectID: projectID, Action: action, TaskURL: taskURL, CSRFToken: token})
 	}
 	return out, nil
 }

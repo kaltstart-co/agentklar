@@ -27,6 +27,27 @@ func TestNewIdempotent(t *testing.T) {
 	}
 }
 
+func TestDeleteRemovesDocumentAndFTSProjection(t *testing.T) {
+	s, err := New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	if _, err := s.Index([]Doc{{Source: SourceMemory, Ref: "memory/7", Title: "key", Body: "forget-me-needle"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Delete(SourceMemory, "memory/7"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Search("forget-me-needle", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("deleted document remained searchable: %#v", got)
+	}
+}
+
 func TestIndexInsertAndUpsert(t *testing.T) {
 	s, err := New(t.TempDir())
 	if err != nil {

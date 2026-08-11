@@ -50,7 +50,7 @@ var assetsFS embed.FS
 // {{define "content"}}. (Per-set parsing sidesteps the html/template Clone
 // namespace quirk and keeps each page's "content" isolated.)
 var pageFiles = []string{
-	"board", "task", "knowledge", "memory", "context", "approvals", "alerts",
+	"overview", "board", "task", "knowledge", "memory", "context", "approvals", "alerts",
 }
 
 // Server is the local UI server. The legacy single-project constructor keeps
@@ -130,9 +130,28 @@ func NewControlCenter(c *catalog.Catalog, currentProjectID string) (*Server, err
 }
 
 func newServer() (*Server, error) {
+	funcs := template.FuncMap{
+		"allowedHumanStates": func(from contracts.State) []contracts.State {
+			var states []contracts.State
+			for _, to := range boardOrder() {
+				if contracts.Allowed(from, to, contracts.ActorHuman) && to != contracts.StateDone {
+					states = append(states, to)
+				}
+			}
+			return states
+		},
+		"stateLabel": stateLabel,
+		"canArchive": func(state contracts.State) bool {
+			switch state {
+			case contracts.StateDraft, contracts.StateReady, contracts.StateChangesRequested, contracts.StateDone, contracts.StateCancelled:
+				return true
+			}
+			return false
+		},
+	}
 	// Validate that every template parses. This is the registration call from
 	// the spec; it is not used for rendering (per-page sets below are).
-	if _, err := template.New("").ParseFS(assetsFS, "assets/*.html"); err != nil {
+	if _, err := template.New("").Funcs(funcs).ParseFS(assetsFS, "assets/*.html"); err != nil {
 		return nil, fmt.Errorf("ui: parse templates: %w", err)
 	}
 
@@ -141,7 +160,7 @@ func newServer() (*Server, error) {
 	// cleanly overrides the layout's {{block "content"}} with no collisions.
 	pages := make(map[string]*template.Template, len(pageFiles))
 	for _, name := range pageFiles {
-		t, err := template.New("").ParseFS(assetsFS, "assets/layout.html", "assets/"+name+".html")
+		t, err := template.New("").Funcs(funcs).ParseFS(assetsFS, "assets/layout.html", "assets/"+name+".html")
 		if err != nil {
 			return nil, fmt.Errorf("ui: parse template %q: %w", name, err)
 		}
@@ -244,16 +263,23 @@ func (s *Server) routes() http.Handler {
 
 	// HTML pages (the layout nav: Board / Knowledge / Memory / Context / Approvals).
 	mux.HandleFunc("GET /_agentklar/bootstrap", s.handleBootstrap)
-	mux.HandleFunc("GET /{$}", s.handleBoard)
+	mux.HandleFunc("GET /{$}", s.handleHome)
+	mux.HandleFunc("GET /board", s.handleBoard)
+	mux.HandleFunc("GET /projects/{project}/board", s.handleBoard)
 	mux.HandleFunc("GET /tasks/{id}", s.handleTask)
 	mux.HandleFunc("GET /projects/{project}/tasks/{task}", s.handleTask)
 	mux.HandleFunc("GET /knowledge", s.handleKnowledge)
+	mux.HandleFunc("GET /projects/{project}/knowledge", s.handleKnowledge)
 	mux.HandleFunc("GET /memory", s.handleMemory)
+	mux.HandleFunc("GET /projects/{project}/memory", s.handleMemory)
 	mux.HandleFunc("GET /context", s.handleContext)
+	mux.HandleFunc("GET /projects/{project}/context", s.handleContext)
 	mux.HandleFunc("GET /approvals", s.handleApprovals)
 	mux.HandleFunc("POST /approvals/{id}", s.handleApproveHTML)
 	mux.HandleFunc("GET /alerts", s.handleAlerts)
+	mux.HandleFunc("GET /projects/{project}/alerts", s.handleAlerts)
 	mux.HandleFunc("POST /alerts/{id}/ack", s.handleAckAlertHTML)
+	mux.HandleFunc("POST /projects/{project}/alerts/{id}/ack", s.handleAckAlertHTML)
 	mux.HandleFunc("POST /projects/{project}/approvals/{id}", s.handleApproveHTML)
 
 	// JSON API (same data; the stable contract for future clients).
@@ -278,6 +304,10 @@ func (s *Server) routes() http.Handler {
 		mux.HandleFunc("GET /api/projects/{project}/tasks/{task}/dependencies", s.handleProjectDependencies)
 		mux.HandleFunc("PUT /api/projects/{project}/tasks/{task}/dependencies", s.handleProjectDependencies)
 		mux.HandleFunc("POST /api/projects/{project}/tasks/{task}/archive", s.handleProjectArchive)
+		mux.HandleFunc("GET /api/projects/{project}/memory", s.handleProjectMemory)
+		mux.HandleFunc("DELETE /api/projects/{project}/memory/{id}", s.handleProjectMemoryForget)
+		mux.HandleFunc("GET /api/projects/{project}/context", s.handleProjectContext)
+		mux.HandleFunc("POST /api/projects/{project}/context/reindex", s.handleProjectContextReindex)
 	}
 
 	return s.protectHumanMutations(mux)
@@ -369,18 +399,50 @@ func (s *Server) render(w http.ResponseWriter, page string, d viewData) {
 	}
 }
 
+func (s *Server) renderRequest(w http.ResponseWriter, r *http.Request, page string, d viewData) {
+	d.Human = s.isHuman(r)
+	if d.ProjectID == "" {
+		d.ProjectID = r.PathValue("project")
+	}
+	if d.ProjectID == "" {
+		d.ProjectID = s.currentProjectID
+	}
+	if s.catalog != nil {
+		d.Projects, _ = s.catalog.List()
+		for _, p := range d.Projects {
+			if p.ID == d.ProjectID {
+				d.ProjectName = p.Name
+				d.ProjectRepo = p.RepoPath
+				break
+			}
+		}
+		d.BasePath = "/projects/" + url.PathEscape(d.ProjectID)
+	}
+	s.render(w, page, d)
+}
+
 // --- view models ---
 
 // viewData is the bag every page renders against. Pages read only the fields
 // they need; the layout reads Title and Section (for nav highlighting).
 type viewData struct {
-	Title      string
-	Section    string
-	StateLabel string // human-readable task state, for the detail page badge
-	Q          string // current search query (memory/context)
-	Error      string
-	ProjectID  string
-	TaskPrefix string
+	Title            string
+	Section          string
+	StateLabel       string // human-readable task state, for the detail page badge
+	Q                string // current search query (memory/context)
+	Error            string
+	ProjectID        string
+	TaskPrefix       string
+	BasePath         string
+	Human            bool
+	Projects         []catalog.Project
+	ProjectName      string
+	ProjectRepo      string
+	Overview         []projectOverview
+	Archived         bool
+	Dependencies     []string
+	AllTasks         []workflow.Task
+	ContextIndexedAt string
 
 	// Board
 	Columns []columnView
@@ -389,6 +451,7 @@ type viewData struct {
 	Task     *workflow.Task
 	Evidence []workflow.Evidence
 	Comments []comment
+	Reviews  []review
 
 	// Knowledge
 	Knowledge []knowledge.Entry
@@ -418,6 +481,8 @@ type columnView struct {
 
 type approvalView struct {
 	Task         workflow.Task
+	Evidence     []workflow.Evidence
+	Reviews      []review
 	SubmissionID int64
 	ProjectID    string
 	Action       string
@@ -434,6 +499,10 @@ type comment struct {
 	CType     string `json:"CType"`
 	Body      string `json:"Body"`
 	CreatedAt string `json:"CreatedAt"`
+}
+
+type review struct {
+	Kind, Result, Provider, Findings, CreatedAt string
 }
 
 // listComments returns the timeline comments for a task in append order.
@@ -456,6 +525,23 @@ func listEngineComments(engine *workflow.Engine, taskID string) ([]comment, erro
 			return nil, err
 		}
 		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+func listEngineReviews(engine *workflow.Engine, taskID string) ([]review, error) {
+	rows, err := engine.DB().Query(`SELECT kind, result, provider, findings, created_at FROM reviews WHERE task_id = ? ORDER BY id DESC`, taskID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []review
+	for rows.Next() {
+		var item review
+		if err := rows.Scan(&item.Kind, &item.Result, &item.Provider, &item.Findings, &item.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, item)
 	}
 	return out, rows.Err()
 }

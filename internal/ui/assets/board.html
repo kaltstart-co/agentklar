@@ -1,21 +1,61 @@
 {{define "content"}}
-<h1>Task Board</h1>
-{{if .Error}}<p class="empty">{{.Error}}</p>
-{{else}}
-<div class="board">
+<header class="page-head board-head">
+  <div><p class="eyebrow">Delivery</p><h1>{{if .Archived}}Archived history{{else}}Board{{end}}</h1><p class="lede">Protected workflow state, ordered for the work at hand.</p></div>
+  <div class="head-actions">
+    {{if .Archived}}<a class="button secondary" href="{{.BasePath}}/board">Active board</a>{{else}}<a class="button secondary" href="{{.BasePath}}/board?archived=true">Archived history</a>{{end}}
+    <button class="button primary" type="button" data-open-dialog="task-dialog" {{if not .Human}}disabled title="restart with agentklar ui --open"{{end}}>New task</button>
+  </div>
+</header>
+{{if .Error}}<p class="empty">{{.Error}}</p>{{else}}
+{{if not .Archived}}
+<section class="filterbar" aria-label="Board filters">
+  <label><span>Search</span><input type="search" placeholder="ID or title" data-filter="search"></label>
+  <label><span>Assignee</span><input type="search" placeholder="Anyone" data-filter="assignee"></label>
+  <label><span>Priority</span><select data-filter="priority"><option value="">All</option><option>urgent</option><option>high</option><option>medium</option><option>low</option></select></label>
+  <label><span>Label</span><input type="search" placeholder="Any label" data-filter="label"></label>
+  <button class="text-button" type="button" data-clear-filters>Clear</button>
+</section>
+{{end}}
+<div class="board" data-board data-project-id="{{.ProjectID}}">
 {{range .Columns}}
-  <section class="col">
-    <h3>{{.Label}} <span class="muted">{{len .Tasks}}</span></h3>
-    {{range .Tasks}}
-      <a class="card" href="{{$.TaskPrefix}}/tasks/{{.ID}}">
-        <div class="t">{{.Title}}</div>
-        <div class="id">{{.ID}}</div>
-      </a>
-    {{else}}
-      <div class="empty">&mdash;</div>
-    {{end}}
+  <section class="column state-{{.State}}" data-column="{{.State}}" aria-labelledby="col-{{.State}}">
+    <header><h2 id="col-{{.State}}">{{.Label}}</h2><span>{{len .Tasks}}</span></header>
+    <div class="card-stack" data-dropzone="{{.State}}">
+    {{range .Tasks}}{{$task := .}}
+      <article class="task-card" draggable="{{if $.Human}}true{{else}}false{{end}}" tabindex="0" data-task-id="{{.ID}}" data-state="{{.State}}" data-priority="{{.Priority}}" data-assignee="{{.Assignee}}" data-labels="{{range .Labels}}{{.}} {{end}}">
+        <div class="card-top"><span class="task-id">{{.ID}}</span><span class="priority priority-{{.Priority}}">{{.Priority}}</span></div>
+        <a class="task-title" href="{{$.TaskPrefix}}/tasks/{{.ID}}">{{.Title}}</a>
+        {{if .Objective}}<p>{{.Objective}}</p>{{end}}
+        <div class="task-meta">{{if .Assignee}}<span>◎ {{.Assignee}}</span>{{end}}{{if .DueDate}}<time>◷ {{.DueDate}}</time>{{end}}</div>
+        {{if .Labels}}<div class="labels">{{range .Labels}}<span>{{.}}</span>{{end}}</div>{{end}}
+        {{if not $.Archived}}{{with allowedHumanStates .State}}<label class="move-control"><span>Move to</span><select data-move-task="{{$task.ID}}" {{if not $.Human}}disabled{{end}}><option value="">Choose state</option>{{range .}}<option value="{{.}}">{{stateLabel .}}</option>{{end}}</select></label>{{end}}{{end}}
+      </article>
+    {{else}}<p class="column-empty">No tasks</p>{{end}}
+    </div>
   </section>
 {{end}}
 </div>
 {{end}}
+
+<dialog id="task-dialog" class="task-dialog" aria-labelledby="new-task-title">
+  <form method="dialog" data-task-form data-api="/api/projects/{{.ProjectID}}/tasks">
+    <header><div><p class="eyebrow">Plan work</p><h2 id="new-task-title">New task</h2></div><button class="icon-button" value="cancel" aria-label="Close new task dialog">×</button></header>
+    <div class="form-grid">
+      <label><span>Task ID</span><input name="id" required placeholder="AK-301" {{if not .Human}}disabled{{end}}></label>
+      <label class="wide"><span>Title</span><input name="title" required {{if not .Human}}disabled{{end}}></label>
+      <label class="wide"><span>Objective</span><textarea name="objective" rows="3" {{if not .Human}}disabled{{end}}></textarea></label>
+      <label><span>Priority</span><select name="priority" {{if not .Human}}disabled{{end}}><option>medium</option><option>urgent</option><option>high</option><option>low</option></select></label>
+      <label><span>Assignee</span><input name="assignee" {{if not .Human}}disabled{{end}}></label>
+      <label><span>Due date</span><input type="date" name="due_date" {{if not .Human}}disabled{{end}}></label>
+      <label><span>Lane</span><select name="lane" {{if not .Human}}disabled{{end}}><option>standard</option><option>quick</option><option>major</option></select></label>
+      <label><span>Isolation</span><select name="isolation" {{if not .Human}}disabled{{end}}><option>auto</option><option>worktree</option><option>none</option></select></label>
+      <label><span>Target</span><select name="target" {{if not .Human}}disabled{{end}}><option>any</option><option>codex</option><option>opencode</option><option>gemini</option></select></label>
+      <label class="wide"><span>Labels <small>comma separated</small></span><input name="labels" {{if not .Human}}disabled{{end}}></label>
+      <label class="wide"><span>Acceptance criteria <small>one per line</small></span><textarea name="criteria" rows="4" {{if not .Human}}disabled{{end}}></textarea></label>
+      <label class="wide"><span>Verification</span><textarea name="verification" rows="3" placeholder="Declared recipe or review method" {{if not .Human}}disabled{{end}}></textarea></label>
+      <label class="wide"><span>Dependencies</span><select name="dependencies" multiple size="4" {{if not .Human}}disabled{{end}}>{{range .AllTasks}}<option value="{{.ID}}">{{.ID}} — {{.Title}}</option>{{end}}</select></label>
+    </div>
+    <footer><button class="button secondary" value="cancel">Cancel</button><button class="button primary" type="submit" value="default" {{if not .Human}}disabled{{end}}>Create task</button></footer>
+  </form>
+</dialog>
 {{end}}
