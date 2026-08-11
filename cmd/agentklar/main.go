@@ -14,6 +14,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/kaltstart-co/agentklar/internal/catalog"
 	akctx "github.com/kaltstart-co/agentklar/internal/context"
 	"github.com/kaltstart-co/agentklar/internal/contracts"
 	"github.com/kaltstart-co/agentklar/internal/gate"
@@ -92,9 +93,18 @@ func workspaceDir() (string, error) {
 	if err != nil {
 		return "", err
 	}
+	dataRoot := filepath.Join(home, ".local", "share", "agentklar")
 	repo := repoRoot()
-	id := sanitize(filepath.Base(repo))
-	dir := filepath.Join(home, ".local", "share", "agentklar", "workspaces", id)
+	c, err := catalog.Open(dataRoot)
+	if err != nil {
+		return "", err
+	}
+	defer c.Close()
+	project, err := c.Register(repo, filepath.Join(dataRoot, "workspaces", sanitize(filepath.Base(repo))))
+	if err != nil {
+		return "", err
+	}
+	dir := project.WorkspacePath
 	return dir, os.MkdirAll(filepath.Join(dir, "evidence"), 0o755)
 }
 
