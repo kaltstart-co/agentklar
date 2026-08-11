@@ -63,7 +63,7 @@ func cmdUI(args []string) error {
 	}
 	url := "http://" + ln.Addr().String() + "/"
 	fmt.Printf("agentklar UI → %s\n", url)
-	fmt.Printf("Ctrl-C to stop. Approve from this page only — it is your trusted local channel.\n")
+	fmt.Println(uiAccessNotice(*open))
 
 	if *open {
 		launchURL, err := srv.LaunchURL(url)
@@ -86,4 +86,11 @@ func cmdUI(args []string) error {
 		os.Exit(0)
 	}()
 	return http.Serve(ln, srv.Handler())
+}
+
+func uiAccessNotice(open bool) string {
+	if open {
+		return "Ctrl-C to stop. Approve from this page only — it is your trusted local channel."
+	}
+	return "Ctrl-C to stop. Read-only session; restart with `agentklar ui --open` to make human decisions."
 }

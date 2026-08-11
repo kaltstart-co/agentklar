@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"errors"
 	"path/filepath"
 	"reflect"
 	"sync"
@@ -850,5 +851,100 @@ func TestListArchivedDoesNotChangeListAll(t *testing.T) {
 	archived, err := e.ListArchived()
 	if err != nil || len(archived) != 1 || archived[0].ID != "archived" {
 		t.Fatalf("archived=%v err=%v", archived, err)
+	}
+}
+
+func TestArchivedTaskRejectsWorkflowMutations(t *testing.T) {
+	for name, mutate := range map[string]func(*Engine, TaskUpdate) error{
+		"ready": func(e *Engine, _ TaskUpdate) error { return e.MarkReady("archived", contracts.ActorHuman) },
+		"claim": func(e *Engine, _ TaskUpdate) error {
+			_, err := e.ClaimTask("archived", "agent", contracts.StateDraft)
+			return err
+		},
+		"edit":         func(e *Engine, u TaskUpdate) error { return e.UpdateTask("archived", u) },
+		"dependencies": func(e *Engine, _ TaskUpdate) error { return e.SetDependencies("archived", nil) },
+		"transition": func(e *Engine, _ TaskUpdate) error {
+			return e.HumanTransition("archived", contracts.StateCancelled, "")
+		},
+		"approve": func(e *Engine, _ TaskUpdate) error {
+			return e.ResolveApproval("archived", "nonce", true, "human", "ui")
+		},
+		"rearchive": func(e *Engine, _ TaskUpdate) error { return e.ArchiveTask("archived") },
+		"comment":   func(e *Engine, _ TaskUpdate) error { return e.AddComment("archived", "human", "note", "no") },
+		"evidence": func(e *Engine, _ TaskUpdate) error {
+			return e.AddEvidence("archived", 0, contracts.HumanObserved, "", "", "", nil, "", "", "", "no")
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := newEngine(t)
+			if err := e.CreateTask(Task{ID: "archived", Project: "p", Title: "archived"}); err != nil {
+				t.Fatal(err)
+			}
+			if err := e.ArchiveTask("archived"); err != nil {
+				t.Fatal(err)
+			}
+			archived, err := e.GetTask("archived")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := mutate(e, updateFor(archived)); !errors.Is(err, ErrWrongState) {
+				t.Fatalf("archived mutation error = %v, want ErrWrongState", err)
+			}
+			if _, err := e.GetTask("archived"); err != nil {
+				t.Fatalf("archived detail unavailable: %v", err)
+			}
+		})
+	}
+
+	e := newEngine(t)
+	if err := e.CreateTask(Task{ID: "archived", Project: "p", Title: "archived"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.ArchiveTask("archived"); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Reorder(contracts.StateDraft, []string{"archived"}); !errors.Is(err, ErrReorder) {
+		t.Fatalf("archived reorder error = %v, want ErrReorder", err)
+	}
+}
+
+func TestArchivedTaskRejectsLeaseMutation(t *testing.T) {
+	e := newEngine(t)
+	readyTask(t, e, "T1", contracts.LaneStandard, "")
+	claim, err := e.ClaimTask("T1", "agent", contracts.StateReady)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.DB().Exec(`UPDATE tasks SET archived_at = 'now' WHERE id = 'T1'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Heartbeat("T1", claim.FencingToken); !errors.Is(err, ErrWrongState) {
+		t.Fatalf("archived heartbeat error = %v, want ErrWrongState", err)
+	}
+}
+
+func TestActiveTaskRejectsArchivedDependency(t *testing.T) {
+	e := newEngine(t)
+	for _, id := range []string{"active", "archived"} {
+		if err := e.CreateTask(Task{ID: id, Project: "p", Title: id}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := e.ArchiveTask("archived"); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.SetDependencies("active", []string{"archived"}); !errors.Is(err, ErrDependency) {
+		t.Fatalf("archived dependency error = %v, want ErrDependency", err)
+	}
+}
+
+func TestCreateTaskRejectsAmbiguousPathIDs(t *testing.T) {
+	e := newEngine(t)
+	for _, id := range []string{".", "..", "folder/task"} {
+		t.Run(id, func(t *testing.T) {
+			if err := e.CreateTask(Task{ID: id, Project: "p", Title: id}); !errors.Is(err, ErrInvalidTask) {
+				t.Fatalf("CreateTask(%q) error = %v, want ErrInvalidTask", id, err)
+			}
+		})
 	}
 }

@@ -101,6 +101,9 @@ type Claim struct {
 
 // CreateTask inserts a Draft task.
 func (e *Engine) CreateTask(t Task) error {
+	if t.ID == "." || t.ID == ".." || strings.Contains(t.ID, "/") {
+		return ErrInvalidTask
+	}
 	if t.Lane == "" {
 		t.Lane = contracts.LaneStandard
 	}
@@ -277,6 +280,9 @@ func (e *Engine) Heartbeat(taskID string, token int64) error {
 		return err
 	}
 	defer tx.Rollback()
+	if _, err := e.getForUpdate(tx, taskID); err != nil {
+		return err
+	}
 	if err := e.checkFencing(tx, taskID, token); err != nil {
 		return err
 	}
@@ -612,7 +618,7 @@ func (e *Engine) SetDependencies(id string, deps []string) error {
 		}
 		seen[dep] = struct{}{}
 		var exists int
-		if err := tx.QueryRow(`SELECT 1 FROM tasks WHERE id = ?`, dep).Scan(&exists); err != nil {
+		if err := tx.QueryRow(`SELECT 1 FROM tasks WHERE id = ? AND archived_at = ''`, dep).Scan(&exists); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return ErrDependency
 			}
@@ -759,22 +765,43 @@ func (e *Engine) ArchiveTask(id string) error {
 // AddEvidence appends evidence with explicit provenance.
 func (e *Engine) AddEvidence(taskID string, submissionID int64, prov contracts.Provenance,
 	criterion, command, workdir string, exitCode *int, logPath, artifactHash, commitHash, note string) error {
+	tx, err := e.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := e.getForUpdate(tx, taskID); err != nil {
+		return err
+	}
 	var sub interface{}
 	if submissionID > 0 {
 		sub = submissionID
 	}
-	_, err := e.db.Exec(`INSERT INTO evidence
+	_, err = tx.Exec(`INSERT INTO evidence
 		(task_id, submission_id, provenance, criterion, command, workdir, exit_code, log_path, artifact_hash, commit_hash, note, created_at)
 		VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
 		taskID, sub, prov, criterion, command, workdir, exitCode, logPath, artifactHash, commitHash, note, e.ts())
-	return err
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // AddComment appends a timeline comment.
 func (e *Engine) AddComment(taskID, actor, ctype, body string) error {
-	_, err := e.db.Exec(`INSERT INTO comments (task_id, actor, ctype, body, created_at) VALUES (?,?,?,?,?)`,
-		taskID, actor, ctype, body, e.ts())
-	return err
+	tx, err := e.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := e.getForUpdate(tx, taskID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`INSERT INTO comments (task_id, actor, ctype, body, created_at) VALUES (?,?,?,?,?)`,
+		taskID, actor, ctype, body, e.ts()); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // --- internals ---
@@ -787,6 +814,9 @@ func (e *Engine) getForUpdate(tx *sql.Tx, id string) (*Task, error) {
 	}
 	if err != nil {
 		return nil, err
+	}
+	if t.ArchivedAt != "" {
+		return nil, fmt.Errorf("%w: task is archived", ErrWrongState)
 	}
 	return t, nil
 }
