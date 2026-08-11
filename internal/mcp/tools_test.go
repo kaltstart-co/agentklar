@@ -3,6 +3,7 @@ package mcp
 import (
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/kaltstart-co/agentklar/internal/contracts"
@@ -66,6 +67,20 @@ func TestRecallDescriptionMatchesReturnedSources(t *testing.T) {
 	for _, def := range ToolDefs {
 		if def.Name == "recall" && def.Description != "Full-text search over shared memory." {
 			t.Fatalf("recall description overclaims its sources: %q", def.Description)
+		}
+	}
+}
+
+func TestPromptsStopAtSubmissionAndReserveReviewsForTheGate(t *testing.T) {
+	for _, name := range []string{"next", "ship"} {
+		text := PromptText[name]
+		if strings.Contains(text, "record_qa") || strings.Contains(text, "record_review") {
+			t.Errorf("%s prompt asks the agent to fabricate a review: %q", name, text)
+		}
+		for _, required := range []string{"local verification", "submit_for_review", "gate", "review"} {
+			if !strings.Contains(strings.ToLower(text), required) {
+				t.Errorf("%s prompt does not explain %q: %q", name, required, text)
+			}
 		}
 	}
 }

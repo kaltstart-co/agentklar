@@ -102,7 +102,7 @@ var ToolDefs = []ToolDef{
 		"holder":   str("Agent holder raising the alert; defaults to 'agent'."),
 		"severity": str("info | warn | error | block"),
 		"message":  str("What to tell the human."),
-		"speak":    boolean("If true, request spoken delivery; warn/error/block are always delivered."),
+		"speak":    boolean("Defaults to false for info and true for warn/error/block; high-severity alerts always deliver."),
 	}, "severity", "message")},
 }
 
@@ -117,21 +117,21 @@ type PromptDef struct {
 var PromptDefs = []PromptDef{
 	{"next", "Claim the next Ready task and work it to submission."},
 	{"status", "Show the board: every task, its state, and what is blocked on a human."},
-	{"ship", "Submit the task you are working on for review with QA evidence."},
+	{"ship", "Run local verification and submit the task for independent review."},
 }
 
 var PromptText = map[string]string{
 	"next": "Use the agentklar tools: call list_ready_tasks, pick the highest-priority task, " +
 		"claim it with claim_task, then read it fully with get_task. Implement the work so every " +
-		"acceptance criterion is met, run the task's verify command, then submit_for_review with a " +
-		"summary and record_qa with the command output as evidence. Do not attempt to approve — " +
-		"tell the human what is awaiting their approval.",
+		"acceptance criterion is met, run the declared local verification, then stop at submit_for_review " +
+		"with an honest summary. The gate and reviewer record review and QA evidence; the agent must not " +
+		"fabricate those results or attempt to approve. Tell the human what is awaiting review.",
 	"status": "Use the agentklar tools to report the board: bind_workspace for context, then " +
 		"get_task for each known task (start from list_ready_tasks and any tasks mentioned in this " +
 		"conversation). Summarize as a short table: id, title, state, holder, and what action is " +
 		"needed next — flagging anything waiting on human approval.",
 	"ship": "For the task currently being worked in this conversation: re-read its acceptance " +
-		"criteria with get_task, run its verify command, record_qa with the real command output, " +
-		"then submit_for_review with an honest summary of what changed. If any criterion is unmet, " +
-		"say so instead of submitting.",
+		"criteria with get_task, run the declared local verification, then stop at submit_for_review " +
+		"with an honest summary. If any criterion is unmet, say so instead of submitting. The gate and " +
+		"reviewer record review and QA evidence; the agent must not fabricate those results.",
 }

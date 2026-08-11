@@ -11,7 +11,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"strconv"
 	"strings"
 
 	akctx "github.com/kaltstart-co/agentklar/internal/context"
@@ -453,19 +452,22 @@ func (s *Server) Dispatch(req Request) Response {
 		if err != nil {
 			return fail(err)
 		}
+		result := map[string]interface{}{"id": id, "status": "remembered", "context_indexed": false}
 		if s.Context != nil {
-			ref := strconv.Quote(p.Namespace) + "/" + strconv.Quote(p.Key)
 			_, err := s.Context.Index([]akctx.Doc{{
 				Source: akctx.SourceMemory,
-				Ref:    ref,
-				Title:  strings.TrimSpace(p.Namespace + " " + p.Key),
+				Ref:    akctx.MemoryRef(id),
+				Title:  p.Namespace + "/" + p.Key,
 				Body:   p.Value,
 			}})
 			if err != nil {
-				return fail(fmt.Errorf("index remembered context: %w", err))
+				result["warning"] = fmt.Sprintf("memory saved, but context indexing failed: %v", err)
+				resp.Result = result
+				return resp
 			}
+			result["context_indexed"] = true
 		}
-		resp.Result = map[string]interface{}{"id": id, "status": "remembered"}
+		resp.Result = result
 
 	case "recall":
 		var p struct {
@@ -513,7 +515,7 @@ func (s *Server) Dispatch(req Request) Response {
 		if p.Holder == "" {
 			p.Holder = "agent"
 		}
-		speak := true
+		speak := defaultSpeak(sev)
 		if p.Speak != nil {
 			speak = *p.Speak
 		}
@@ -521,13 +523,15 @@ func (s *Server) Dispatch(req Request) Response {
 		if err != nil {
 			return fail(err)
 		}
-		resp.Result = map[string]interface{}{"id": id, "logged": true}
+		resp.Result = map[string]interface{}{"id": id, "logged": true, "speak": speak}
 
 	default:
 		resp.Error = &RPCError{-32601, fmt.Sprintf("unknown method %q", req.Method)}
 	}
 	return resp
 }
+
+func defaultSpeak(sev notify.Severity) bool { return sev != notify.Info }
 
 // unavailable returns a standard error response for an optional store that the
 // server was not configured with.

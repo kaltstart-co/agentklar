@@ -216,7 +216,7 @@ func cmdContext(args []string) error {
 		if ms, err := memory.New(dir); err == nil {
 			rows, _ := ms.List("")
 			for _, m := range rows {
-				ref := fmt.Sprintf("memory/%d", m.ID)
+				ref := akctx.MemoryRef(m.ID)
 				title := m.Namespace + "/" + m.Key
 				docs = append(docs, akctx.Doc{Source: akctx.SourceMemory, Ref: ref, Title: title, Body: m.Value})
 			}
