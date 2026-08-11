@@ -28,7 +28,10 @@ curl -fsSL https://raw.githubusercontent.com/kaltstart-co/agentklar/main/install
 The installer downloads the newest GitHub Release for your platform, verifies
 its SHA-256 checksum, checks the binary, stages it, and atomically replaces the
 installed executable. Existing project data under `~/.local/share/agentklar`
-is not modified.
+is not modified. Agent integration runs afterward as a best-effort step: it
+copies supported skill and command assets and registers MCP where the host CLI
+supports it. Other clients still use `agentklar mcp install`; an integration
+failure does not roll back the installed binary.
 
 Useful options:
 
@@ -100,10 +103,12 @@ One server shows every repository registered by `agentklar init`:
 - **Approvals** — one cross-project queue for approving or requesting changes.
 - **Intelligence** — project knowledge, shared memory, and focused context
   search, with provenance kept visible.
-- **Alerts** — agent-raised events that only a human can acknowledge.
+- **Alerts** — agent-raised events with acknowledgement absent from the MCP
+  surface.
 
-Drag-and-drop is optional: every permitted move also has a keyboard-accessible
-**Move to** control. The server always validates the workflow transition; the
+State changes do not require drag-and-drop: every permitted column move also
+has a keyboard-accessible **Move to** control. Same-column ordering currently
+uses drag-and-drop. The server always validates the workflow transition; the
 browser cannot bypass protected state.
 
 ### Local trust boundary
@@ -126,11 +131,17 @@ not expose the local UI through a tunnel or public listener.
 
 ## Workflow guarantees
 
+Happy path:
+
 ```text
 Draft → Ready → In Progress → Completion Review → Auto QA
       → User Approval → Done
-             ↘ Changes Requested
 ```
+
+An In Progress task may enter Waiting or Blocked and return to In Progress.
+Failed review, failed QA, or human rejection enters Changes Requested; an agent
+then reclaims it into In Progress. A human may cancel tasks from Draft, Ready,
+In Progress, Blocked, or Changes Requested.
 
 - **Definition of Ready** — Ready requires acceptance criteria and a
   verification method.
@@ -147,7 +158,8 @@ Draft → Ready → In Progress → Completion Review → Auto QA
 The terminal commands `agentklar approve` and `agentklar reject` remain
 development conveniences. They warn that a shell-capable agent could invoke
 them; use the `agentklar ui --open` browser session for the protected local
-human channel.
+human channel. The designated human CLI commands `agentklar memory forget` and
+`agentklar alerts ack` have the same shell-access limitation.
 
 ## Data model
 
@@ -185,7 +197,7 @@ One Go binary, the standard library, and SQLite provide the product surface.
 | `internal/ui` | Embedded multi-project control center, local human session, HTML and JSON APIs |
 | `internal/knowledge` | Git-versioned project decisions, conventions, glossary, and runbook |
 | `internal/memory` | Project-scoped, provenance-bearing FTS5 memory |
-| `internal/context` | Rebuildable FTS5 projection of knowledge, memory, tickets, and code |
+| `internal/context` | Rebuildable FTS5 projection of knowledge, memory, and code |
 | `internal/notify` | Project alert log and best-effort local delivery |
 | `internal/mcp` | Project-bound agent JSON-RPC surface with no approval method |
 | `internal/tracker/vikunja` | Optional legacy Vikunja projection and comment reconciliation |
@@ -203,9 +215,10 @@ agentklar tracker connect \
 agentklar tracker sync
 ```
 
-Vikunja does not own protected workflow state. Moving a projected card is only
-a transition request, and human comment approvals are checked against the live
-submission and nonce before they take effect.
+Agentklar projects cards and workflow buckets outward to Vikunja; it does not
+import Vikunja card moves as state transitions. Vikunja may also supply
+human-authored approval or rejection comments. `agentklar reconcile` checks a
+comment against the live submission and nonce before applying the decision.
 
 ## Verify and contribute
 

@@ -21,8 +21,10 @@ Rerun it whenever you want to update. The installer:
 2. Requires and verifies the matching SHA-256 entry in `checksums.txt`.
 3. Rejects unexpected archive members and checks the staged binary.
 4. Atomically replaces the installed executable only after those checks pass.
-5. Refreshes the embedded agent skill and command files unless `--no-agents`
-   is passed.
+5. Attempts best-effort agent integration unless `--no-agents` is passed. It
+   copies supported skill and command assets and registers MCP where the host
+   CLI supports it; other clients still use `agentklar mcp install`. An
+   integration failure does not roll back the installed binary.
 
 It does not replace the catalog or project SQLite stores under
 `~/.local/share/agentklar`.
@@ -143,8 +145,9 @@ plane, not a remotely hosted team service. Stop it with Ctrl-C.
 - **Intelligence:** project knowledge, searchable memory, and context packets.
 - **Alerts:** inspect and acknowledge project alerts.
 
-Drag-and-drop never bypasses workflow rules. A keyboard-accessible **Move to**
-selector provides the same permitted transitions.
+State changes do not require drag-and-drop: a keyboard-accessible **Move to**
+selector provides the same permitted column transitions. Same-column ordering
+currently uses drag-and-drop. Neither path bypasses workflow rules.
 
 ### Approval security
 
@@ -199,13 +202,20 @@ Approval; it does not mark the task Done.
 Open the Approvals view in the running human UI. Approve to move the live
 submission to Done, or request changes with a reason.
 
-The full lifecycle is:
+The happy path is:
 
 ```text
 Draft → Ready → In Progress → Completion Review → Auto QA
       → User Approval → Done
-             ↘ Changes Requested
 ```
+
+Side states are also protected:
+
+- In Progress may enter Waiting or Blocked and later return to In Progress.
+- Failed review, failed QA, or human rejection enters Changes Requested; an
+  agent reclaims the task into In Progress for another submission.
+- A human may cancel a task from Draft, Ready, In Progress, Blocked, or Changes
+  Requested.
 
 ## 6. Plan and inspect work
 
@@ -264,9 +274,10 @@ agentklar memory search "cold cache"
 agentklar memory list --namespace AK-7
 ```
 
-The MCP surface cannot forget a memory row; deletion is exposed only through
-the designated human UI and CLI channels. MCP `remember` writes also update the
-memory projection used by context search.
+The MCP surface cannot forget a memory row. UI deletion requires the local
+human session. `agentklar memory forget` is a designated human CLI convenience,
+but it is not agent-proof when an agent can execute shell commands. MCP
+`remember` writes also update the memory projection used by context search.
 
 ### Context
 
@@ -293,8 +304,9 @@ agentklar alerts list
 agentklar alerts ack 12
 ```
 
-The MCP surface cannot acknowledge an alert. Acknowledgement is exposed only
-through the designated human UI and CLI channels.
+The MCP surface cannot acknowledge an alert. UI acknowledgement requires the
+local human session. `agentklar alerts ack` is a designated human CLI
+convenience, but it is not agent-proof when an agent can execute shell commands.
 
 ## 9. Optional Vikunja projection
 
@@ -313,10 +325,11 @@ agentklar tracker sync
 Use `--svc-token <token>` instead of `--svc-user` and `--svc-pass` when
 preferred. `connect` creates the project and workflow buckets when needed.
 
-Vikunja owns its card content and comments; `control.sqlite` remains the
-authority for states, leases, evidence, submissions, and approvals. Card moves
-are transition requests, never approvals. Existing nonce-bound comment
-approval can still be reconciled with:
+Agentklar projects cards and workflow buckets outward to Vikunja;
+`control.sqlite` remains the authority for states, leases, evidence,
+submissions, and approvals. Vikunja card moves are not imported as workflow
+transitions. Existing nonce-bound human approval or rejection comments can be
+reconciled with:
 
 ```bash
 agentklar reconcile
