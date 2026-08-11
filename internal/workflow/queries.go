@@ -49,6 +49,31 @@ func (e *Engine) ListAll() ([]Task, error) {
 	return out, rows.Err()
 }
 
+// Dependencies returns prerequisite task IDs in stable lexical order.
+func (e *Engine) Dependencies(taskID string) ([]string, error) {
+	var exists int
+	if err := e.db.QueryRow(`SELECT 1 FROM tasks WHERE id = ?`, taskID).Scan(&exists); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	rows, err := e.db.Query(`SELECT depends_on_task_id FROM task_dependencies WHERE task_id = ? ORDER BY depends_on_task_id`, taskID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
 // LatestSubmission returns the newest non-stale submission for a task.
 func (e *Engine) LatestSubmission(taskID string) (*Submission, error) {
 	row := e.db.QueryRow(`SELECT id, task_id, base_commit, head_commit, summary, criteria_snapshot, stale

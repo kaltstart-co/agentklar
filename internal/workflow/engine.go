@@ -14,6 +14,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
+	"strings"
 	"time"
 
 	"github.com/kaltstart-co/agentklar/internal/contracts"
@@ -30,6 +32,10 @@ var (
 	ErrNonceInvalid     = errors.New("approval nonce invalid, expired, or already decided")
 	ErrCycleLimit       = errors.New("automated review cycle limit reached; user action required")
 	ErrNotReadyCriteria = errors.New("task lacks acceptance criteria or verification method")
+	ErrInvalidTask      = errors.New("invalid task update")
+	ErrFrozenTask       = errors.New("submitted task fields are frozen")
+	ErrDependency       = errors.New("invalid task dependency")
+	ErrReorder          = errors.New("invalid task order")
 )
 
 type Engine struct {
@@ -71,6 +77,17 @@ type Task struct {
 	ArchivedAt                   string
 	CreatedAt                    string
 	UpdatedAt                    string
+}
+
+// TaskUpdate is the editable task content. Submitted tasks keep their
+// protected execution fields frozen; only planning metadata may change.
+type TaskUpdate struct {
+	Title, Objective, Verification, Assignee, DueDate string
+	Lane                                              contracts.Lane
+	Isolation                                         contracts.Isolation
+	Target                                            contracts.ExecutionTarget
+	Priority                                          Priority
+	Criteria, Labels                                  []string
 }
 
 type Claim struct {
@@ -245,8 +262,7 @@ func (e *Engine) ClaimTask(taskID, holder string, expected contracts.State) (*Cl
 		VALUES (?,?,?,?,?)`, taskID, holder, token, expiry.UTC().Format(time.RFC3339Nano), e.ts()); err != nil {
 		return nil, err
 	}
-	if _, err := tx.Exec(`UPDATE tasks SET state = ?, updated_at = ? WHERE id = ?`,
-		contracts.StateInProgress, e.ts(), taskID); err != nil {
+	if err := e.transitionInTx(tx, t, contracts.StateInProgress, contracts.ActorAgent); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -318,8 +334,7 @@ func (e *Engine) SubmitForReview(taskID string, token int64, baseCommit, headCom
 	}
 	subID, _ := res.LastInsertId()
 
-	if _, err := tx.Exec(`UPDATE tasks SET state = ?, updated_at = ? WHERE id = ?`,
-		contracts.StateCompletionReview, e.ts(), taskID); err != nil {
+	if err := e.transitionInTx(tx, t, contracts.StateCompletionReview, contracts.ActorAgent); err != nil {
 		return 0, err
 	}
 	// Free the exclusive repo lease; keep the task lease frozen for provenance.
@@ -385,9 +400,6 @@ func (e *Engine) RecordReview(taskID string, submissionID int64, kind string, re
 	if t.State != from {
 		return fmt.Errorf("%w: state=%s expected=%s", ErrWrongState, t.State, from)
 	}
-	if !contracts.Allowed(from, to, contracts.ActorSystem) {
-		return ErrTransition
-	}
 	if to == contracts.StateChangesRequested {
 		if _, err := tx.Exec(`UPDATE tasks SET review_cycles = review_cycles + 1 WHERE id = ?`, taskID); err != nil {
 			return err
@@ -402,7 +414,7 @@ func (e *Engine) RecordReview(taskID string, submissionID int64, kind string, re
 			return err
 		}
 	}
-	if _, err := tx.Exec(`UPDATE tasks SET state = ?, updated_at = ? WHERE id = ?`, to, e.ts(), taskID); err != nil {
+	if err := e.transitionInTx(tx, t, to, contracts.ActorSystem); err != nil {
 		return err
 	}
 
@@ -479,14 +491,11 @@ func (e *Engine) ResolveApproval(taskID, nonce string, approve bool, approvedBy,
 		to = contracts.StateChangesRequested
 		decision = "rejected"
 	}
-	if !contracts.Allowed(contracts.StateUserApproval, to, contracts.ActorHuman) {
-		return ErrTransition
-	}
 	if _, err := tx.Exec(`UPDATE approvals SET decided = 1, decision = ?, decided_by = ?, channel = ? WHERE task_id = ?`,
 		decision, approvedBy, channel, taskID); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`UPDATE tasks SET state = ?, updated_at = ? WHERE id = ?`, to, e.ts(), taskID); err != nil {
+	if err := e.transitionInTx(tx, t, to, contracts.ActorHuman); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -511,8 +520,192 @@ func (e *Engine) ReleaseTask(taskID string, token int64) error {
 	}
 	tx.Exec(`DELETE FROM leases WHERE task_id = ?`, taskID)
 	tx.Exec(`DELETE FROM repo_leases WHERE task_id = ?`, taskID)
-	if _, err := tx.Exec(`UPDATE tasks SET state = ?, updated_at = ? WHERE id = ?`,
-		contracts.StateReady, e.ts(), taskID); err != nil {
+	if err := e.transitionInTx(tx, t, contracts.StateReady, contracts.ActorAgent); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// UpdateTask edits pre-submission content. Once submitted, execution fields remain
+// frozen so the submitted criteria snapshot stays meaningful.
+func (e *Engine) UpdateTask(id string, u TaskUpdate) error {
+	if err := validateTaskUpdate(&u); err != nil {
+		return err
+	}
+	criteria, err := json.Marshal(u.Criteria)
+	if err != nil {
+		return err
+	}
+	labels, err := json.Marshal(u.Labels)
+	if err != nil {
+		return err
+	}
+	tx, err := e.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	t, err := e.getForUpdate(tx, id)
+	if err != nil {
+		return err
+	}
+	if !sameProtectedFields(t, u) {
+		var submitted int
+		if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM submissions WHERE task_id = ?)`, id).Scan(&submitted); err != nil {
+			return err
+		}
+		if submitted == 1 {
+			return ErrFrozenTask
+		}
+	}
+	_, err = tx.Exec(`UPDATE tasks SET title=?, lane=?, isolation=?, target=?, objective=?, criteria=?, verification=?,
+		priority=?, assignee=?, labels=?, due_date=?, updated_at=? WHERE id=?`,
+		u.Title, u.Lane, u.Isolation, u.Target, u.Objective, string(criteria), u.Verification,
+		u.Priority, u.Assignee, string(labels), u.DueDate, e.ts(), id)
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// SetDependencies replaces a task's prerequisites after rejecting missing,
+// duplicate, self-referential, and cyclic dependencies.
+func (e *Engine) SetDependencies(id string, deps []string) error {
+	tx, err := e.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := e.getForUpdate(tx, id); err != nil {
+		return err
+	}
+	seen := make(map[string]struct{}, len(deps))
+	for _, dep := range deps {
+		if dep == "" || dep == id {
+			return ErrDependency
+		}
+		if _, ok := seen[dep]; ok {
+			return ErrDependency
+		}
+		seen[dep] = struct{}{}
+		var exists int
+		if err := tx.QueryRow(`SELECT 1 FROM tasks WHERE id = ?`, dep).Scan(&exists); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return ErrDependency
+			}
+			return err
+		}
+	}
+	if _, err := tx.Exec(`DELETE FROM task_dependencies WHERE task_id = ?`, id); err != nil {
+		return err
+	}
+	for _, dep := range deps {
+		if _, err := tx.Exec(`INSERT INTO task_dependencies (task_id, depends_on_task_id) VALUES (?,?)`, id, dep); err != nil {
+			return err
+		}
+	}
+	var cycle int
+	err = tx.QueryRow(`WITH RECURSIVE reachable(task_id) AS (
+		SELECT depends_on_task_id FROM task_dependencies WHERE task_id = ?
+		UNION
+		SELECT d.depends_on_task_id FROM task_dependencies d JOIN reachable r ON d.task_id = r.task_id
+	) SELECT 1 FROM reachable WHERE task_id = ? LIMIT 1`, id, id).Scan(&cycle)
+	if err == nil {
+		return ErrDependency
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	return tx.Commit()
+}
+
+// Reorder assigns stable positions to exactly the active tasks in one state.
+func (e *Engine) Reorder(state contracts.State, orderedIDs []string) error {
+	tx, err := e.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	rows, err := tx.Query(`SELECT id FROM tasks WHERE state = ? AND archived_at = ''`, state)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	expected := make(map[string]struct{})
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return err
+		}
+		expected[id] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if len(expected) != len(orderedIDs) {
+		return ErrReorder
+	}
+	for _, id := range orderedIDs {
+		if _, ok := expected[id]; !ok {
+			return ErrReorder
+		}
+		delete(expected, id)
+	}
+	if len(expected) != 0 {
+		return ErrReorder
+	}
+	for position, id := range orderedIDs {
+		if _, err := tx.Exec(`UPDATE tasks SET position = ?, updated_at = ? WHERE id = ?`, position, e.ts(), id); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// HumanTransition accepts only an allowed human state-machine edge. Done is
+// deliberately excluded: it requires ResolveApproval's nonce-bound channel.
+func (e *Engine) HumanTransition(id string, to contracts.State, reason string) error {
+	tx, err := e.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	t, err := e.getForUpdate(tx, id)
+	if err != nil {
+		return err
+	}
+	if to == contracts.StateDone || !contracts.Allowed(t.State, to, contracts.ActorHuman) {
+		return ErrTransition
+	}
+	if to == contracts.StateReady && (len(t.Criteria) == 0 || t.Verification == "") {
+		return ErrNotReadyCriteria
+	}
+	if t.State == contracts.StateUserApproval && to == contracts.StateChangesRequested {
+		if strings.TrimSpace(reason) == "" {
+			return ErrInvalidTask
+		}
+		if _, err := tx.Exec(`INSERT INTO comments (task_id, actor, ctype, body, created_at) VALUES (?,?,?,?,?)`,
+			id, contracts.ActorHuman, "request_changes", reason, e.ts()); err != nil {
+			return err
+		}
+	}
+	if err := e.transitionInTx(tx, t, to, contracts.ActorHuman); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// ArchiveTask hides a task from board listings without deleting history.
+func (e *Engine) ArchiveTask(id string) error {
+	tx, err := e.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := e.getForUpdate(tx, id); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`UPDATE tasks SET archived_at = ?, updated_at = ? WHERE id = ?`, e.ts(), e.ts(), id); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -608,18 +801,60 @@ func (e *Engine) transition(taskID string, from, to contracts.State, actor contr
 	if t.State != from {
 		return fmt.Errorf("%w: state=%s expected=%s", ErrWrongState, t.State, from)
 	}
-	if !contracts.Allowed(from, to, actor) {
-		return ErrTransition
-	}
 	if guard != nil {
 		if err := guard(tx, t); err != nil {
 			return err
 		}
 	}
-	if _, err := tx.Exec(`UPDATE tasks SET state = ?, updated_at = ? WHERE id = ?`, to, e.ts(), taskID); err != nil {
+	if err := e.transitionInTx(tx, t, to, actor); err != nil {
 		return err
 	}
 	return tx.Commit()
+}
+
+func (e *Engine) transitionInTx(tx *sql.Tx, t *Task, to contracts.State, actor contracts.Actor) error {
+	if !contracts.Allowed(t.State, to, actor) {
+		return ErrTransition
+	}
+	if _, err := tx.Exec(`UPDATE tasks SET state = ?, updated_at = ? WHERE id = ?`, to, e.ts(), t.ID); err != nil {
+		return err
+	}
+	t.State = to
+	return nil
+}
+
+func validateTaskUpdate(u *TaskUpdate) error {
+	if strings.TrimSpace(u.Title) == "" {
+		return ErrInvalidTask
+	}
+	switch u.Priority {
+	case PriorityLow, PriorityMedium, PriorityHigh, PriorityUrgent:
+	default:
+		return ErrInvalidTask
+	}
+	if u.DueDate != "" {
+		if _, err := time.Parse("2006-01-02", u.DueDate); err != nil {
+			return ErrInvalidTask
+		}
+	}
+	seen := make(map[string]struct{}, len(u.Labels))
+	for _, label := range u.Labels {
+		label = strings.TrimSpace(label)
+		if label == "" {
+			return ErrInvalidTask
+		}
+		if _, ok := seen[label]; ok {
+			return ErrInvalidTask
+		}
+		seen[label] = struct{}{}
+	}
+	return nil
+}
+
+func sameProtectedFields(t *Task, u TaskUpdate) bool {
+	return t.Title == u.Title && t.Objective == u.Objective && t.Verification == u.Verification &&
+		t.Lane == u.Lane && t.Isolation == u.Isolation && t.Target == u.Target &&
+		reflect.DeepEqual(t.Criteria, u.Criteria)
 }
 
 func newNonce() (string, error) {

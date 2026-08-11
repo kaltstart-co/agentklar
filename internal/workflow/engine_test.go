@@ -415,3 +415,237 @@ func taskIDs(tasks []Task) []string {
 	}
 	return ids
 }
+
+func updateFor(t *Task) TaskUpdate {
+	return TaskUpdate{
+		Title: t.Title, Objective: t.Objective, Verification: t.Verification,
+		Lane: t.Lane, Isolation: t.Isolation, Target: t.Target,
+		Priority: t.Priority, Assignee: t.Assignee, DueDate: t.DueDate,
+		Criteria: t.Criteria, Labels: t.Labels,
+	}
+}
+
+func TestUpdateTaskAllowsDraftEditsAndValidatesPlanningFields(t *testing.T) {
+	e := newEngine(t)
+	if err := e.CreateTask(Task{ID: "T1", Project: "p", Title: "draft"}); err != nil {
+		t.Fatal(err)
+	}
+	u := TaskUpdate{
+		Title: "edited", Objective: "ship safely", Verification: "go test ./...",
+		Lane: contracts.LaneMajor, Isolation: contracts.IsolationWorktree, Target: contracts.TargetCodex,
+		Priority: PriorityUrgent, Assignee: "divyansh", DueDate: "2026-08-20",
+		Criteria: []string{"covered"}, Labels: []string{"control-center", "urgent"},
+	}
+	if err := e.UpdateTask("T1", u); err != nil {
+		t.Fatalf("update draft: %v", err)
+	}
+	got, err := e.GetTask("T1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Title != u.Title || got.Objective != u.Objective || got.Verification != u.Verification || got.Lane != u.Lane || got.Isolation != u.Isolation || got.Target != u.Target || got.Priority != u.Priority || got.Assignee != u.Assignee || got.DueDate != u.DueDate || !reflect.DeepEqual(got.Criteria, u.Criteria) || !reflect.DeepEqual(got.Labels, u.Labels) {
+		t.Fatalf("updated task = %+v", got)
+	}
+	for _, bad := range []TaskUpdate{
+		{Title: "", Priority: PriorityMedium},
+		{Title: "ok", Priority: "now"},
+		{Title: "ok", Priority: PriorityMedium, DueDate: "20-08-2026"},
+		{Title: "ok", Priority: PriorityMedium, Labels: []string{"same", "same"}},
+		{Title: "ok", Priority: PriorityMedium, Labels: []string{""}},
+	} {
+		if err := e.UpdateTask("T1", bad); err == nil {
+			t.Fatalf("invalid update accepted: %+v", bad)
+		}
+	}
+}
+
+func TestUpdateTaskFreezesProtectedFieldsAfterSubmission(t *testing.T) {
+	e := newEngine(t)
+	readyTask(t, e, "T1", contracts.LaneStandard, "")
+	c, err := e.ClaimTask("T1", "agent", contracts.StateReady)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.SubmitForReview("T1", c.FencingToken, "base", "head", "summary"); err != nil {
+		t.Fatal(err)
+	}
+	before, err := e.GetTask("T1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	frozen := updateFor(before)
+	frozen.Title = "rewritten"
+	if err := e.UpdateTask("T1", frozen); err == nil {
+		t.Fatal("post-submission title edit was accepted")
+	}
+	planning := updateFor(before)
+	planning.Priority = PriorityHigh
+	planning.Assignee = "owner"
+	planning.DueDate = "2026-08-21"
+	planning.Labels = []string{"review"}
+	if err := e.UpdateTask("T1", planning); err != nil {
+		t.Fatalf("planning update: %v", err)
+	}
+	got, _ := e.GetTask("T1")
+	if got.Priority != PriorityHigh || got.Assignee != "owner" || got.DueDate != "2026-08-21" || !reflect.DeepEqual(got.Labels, []string{"review"}) {
+		t.Fatalf("planning metadata not updated: %+v", got)
+	}
+}
+
+func TestUpdateTaskAllowsProtectedEditsBeforeSubmission(t *testing.T) {
+	e := newEngine(t)
+	readyTask(t, e, "T1", contracts.LaneStandard, "")
+	before, err := e.GetTask("T1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	update := updateFor(before)
+	update.Title = "renamed before claim"
+	update.Criteria = []string{"new criterion"}
+	if err := e.UpdateTask("T1", update); err != nil {
+		t.Fatalf("pre-submission protected edit: %v", err)
+	}
+}
+
+func TestSetDependenciesRejectsMissingSelfAndCyclesAndRetrievesStably(t *testing.T) {
+	e := newEngine(t)
+	for _, id := range []string{"A", "B", "C"} {
+		if err := e.CreateTask(Task{ID: id, Project: "p", Title: id}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, deps := range [][]string{{"missing"}, {"A"}} {
+		if err := e.SetDependencies("A", deps); err == nil {
+			t.Fatalf("invalid dependencies accepted: %v", deps)
+		}
+	}
+	if err := e.SetDependencies("A", []string{"C", "B"}); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := e.Dependencies("A"); err != nil || !reflect.DeepEqual(got, []string{"B", "C"}) {
+		t.Fatalf("Dependencies() = %v, %v", got, err)
+	}
+	if err := e.SetDependencies("B", []string{"A"}); err == nil {
+		t.Fatal("dependency cycle was accepted")
+	}
+	if got, err := e.Dependencies("B"); err != nil || len(got) != 0 {
+		t.Fatalf("failed dependency update was not atomic: %v, %v", got, err)
+	}
+}
+
+func TestReorderIsStableAndRequiresExactlyOneStateColumn(t *testing.T) {
+	e := newEngine(t)
+	for _, id := range []string{"A", "B", "C"} {
+		if err := e.CreateTask(Task{ID: id, Project: "p", Title: id}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := e.CreateTask(Task{ID: "R", Project: "p", Title: "R", Criteria: []string{"c"}, Verification: "v"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.MarkReady("R", contracts.ActorHuman); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Reorder(contracts.StateDraft, []string{"C", "A", "B"}); err != nil {
+		t.Fatal(err)
+	}
+	all, err := e.ListAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := taskIDs(all)[:3], []string{"C", "A", "B"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("draft order = %v, want %v", got, want)
+	}
+	for _, ids := range [][]string{{"A", "A", "B"}, {"A", "B"}, {"A", "B", "R"}} {
+		if err := e.Reorder(contracts.StateDraft, ids); err == nil {
+			t.Fatalf("invalid reorder accepted: %v", ids)
+		}
+	}
+}
+
+func TestHumanBoardTransitionUsesContractsAndRequiresRequestChangesReason(t *testing.T) {
+	e := newEngine(t)
+	if err := e.CreateTask(Task{ID: "T1", Project: "p", Title: "bare"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.HumanTransition("T1", contracts.StateReady, ""); err == nil {
+		t.Fatal("ready accepted without criteria and verification")
+	}
+	draft, err := e.GetTask("T1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	update := updateFor(draft)
+	update.Title = "ready"
+	update.Criteria = []string{"c"}
+	update.Verification = "v"
+	if err := e.UpdateTask("T1", update); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.HumanTransition("T1", contracts.StateReady, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.HumanTransition("T1", contracts.StateDone, "drag"); err == nil {
+		t.Fatal("board move directly to Done was accepted")
+	}
+
+	readyTask(t, e, "A", contracts.LaneStandard, "")
+	c, err := e.ClaimTask("A", "agent", contracts.StateReady)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sub, err := e.SubmitForReview("A", c.FencingToken, "base", "head", "summary")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.RecordReview("A", sub, "completion", contracts.ResultPass, "test", "[]"); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.RecordReview("A", sub, "qa", contracts.ResultPass, "test", "[]"); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.HumanTransition("A", contracts.StateDone, "approve"); err == nil {
+		t.Fatal("approval board move directly to Done was accepted")
+	}
+	if err := e.HumanTransition("A", contracts.StateChangesRequested, ""); err == nil {
+		t.Fatal("request changes without reason was accepted")
+	}
+	if err := e.HumanTransition("A", contracts.StateChangesRequested, "add coverage"); err != nil {
+		t.Fatal(err)
+	}
+	var body string
+	if err := e.DB().QueryRow(`SELECT body FROM comments WHERE task_id = ? ORDER BY id DESC LIMIT 1`, "A").Scan(&body); err != nil || body != "add coverage" {
+		t.Fatalf("request-changes reason = %q, %v", body, err)
+	}
+}
+
+func TestArchiveTaskKeepsProtectedHistory(t *testing.T) {
+	e := newEngine(t)
+	if err := e.CreateTask(Task{ID: "T1", Project: "p", Title: "cancel me"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.HumanTransition("T1", contracts.StateCancelled, "cancelled"); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.AddComment("T1", "human", "note", "keep this"); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.ArchiveTask("T1"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := e.GetTask("T1")
+	if err != nil || got.State != contracts.StateCancelled || got.ArchivedAt == "" {
+		t.Fatalf("archived task = %+v, %v", got, err)
+	}
+	var comments int
+	if err := e.DB().QueryRow(`SELECT COUNT(*) FROM comments WHERE task_id = ?`, "T1").Scan(&comments); err != nil || comments != 1 {
+		t.Fatalf("protected history was deleted: comments=%d, err=%v", comments, err)
+	}
+	all, err := e.ListAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 0 {
+		t.Fatalf("archived task listed: %v", taskIDs(all))
+	}
+}
