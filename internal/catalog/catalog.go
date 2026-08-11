@@ -178,7 +178,7 @@ func workspaceInUse(tx *sql.Tx, workspace string) (bool, error) {
 func legacyCompatible(workspace, repo string) (bool, error) {
 	control := filepath.Join(workspace, "control.sqlite")
 	if _, err := os.Stat(control); errors.Is(err, os.ErrNotExist) {
-		return true, nil
+		return false, nil
 	} else if err != nil {
 		return false, fmt.Errorf("stat legacy workspace: %w", err)
 	}
@@ -189,17 +189,13 @@ func legacyCompatible(workspace, repo string) (bool, error) {
 	defer db.Close()
 	var conflict int
 	err = db.QueryRow(`SELECT 1 FROM tasks WHERE repo_path <> '' AND repo_path <> ? LIMIT 1`, repo).Scan(&conflict)
-	if errors.Is(err, sql.ErrNoRows) || missingTasks(err) {
+	if errors.Is(err, sql.ErrNoRows) {
 		return true, nil
 	}
 	if err != nil {
-		return false, fmt.Errorf("inspect legacy workspace: %w", err)
+		return false, nil
 	}
 	return false, nil
-}
-
-func missingTasks(err error) bool {
-	return err != nil && (strings.Contains(err.Error(), "no such table") || strings.Contains(err.Error(), "no such column"))
 }
 
 func canonicalPath(path string) (string, error) {

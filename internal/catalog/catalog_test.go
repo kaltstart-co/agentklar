@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"crypto/sha256"
+	"database/sql"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -105,6 +106,43 @@ func TestRegisterKeepsCompatibleLegacyWorkspace(t *testing.T) {
 	}
 }
 
+func TestRegisterUsesHashedWorkspaceWithoutLegacyDatabase(t *testing.T) {
+	c := newTestCatalog(t)
+	root := t.TempDir()
+	legacy := filepath.Join(root, "workspaces", "app")
+
+	p, err := c.Register(filepath.Join(root, "acme", "app"), legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertHashedWorkspace(t, p, legacy)
+}
+
+func TestRegisterUsesHashedWorkspaceWithoutLegacyTasksTable(t *testing.T) {
+	c := newTestCatalog(t)
+	root := t.TempDir()
+	legacy := filepath.Join(root, "workspaces", "app")
+	if err := os.MkdirAll(legacy, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", filepath.Join(legacy, "control.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`CREATE TABLE malformed (id TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	p, err := c.Register(filepath.Join(root, "acme", "app"), legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertHashedWorkspace(t, p, legacy)
+}
+
 func TestListOrdersByLastOpenedAt(t *testing.T) {
 	c := newTestCatalog(t)
 	root := t.TempDir()
@@ -151,5 +189,17 @@ func seedLegacyWorkspace(t *testing.T, workspace, repo string) {
 		VALUES ('legacy', 'app', ?, 'legacy', 'quick', 'Draft', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`, repo)
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func assertHashedWorkspace(t *testing.T, p Project, legacy string) {
+	t.Helper()
+	canonicalLegacy, err := canonicalPath(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(filepath.Dir(canonicalLegacy), "app-"+p.ID)
+	if p.WorkspacePath != want {
+		t.Fatalf("workspace = %q, want %q", p.WorkspacePath, want)
 	}
 }
