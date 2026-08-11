@@ -1,206 +1,372 @@
 # Setup & Usage
 
-Agentklar is one local binary. You bring your own coding agent and (optionally) your
-own Vikunja board. This guide takes you from install to a task moving across the board.
+Agentklar is one local binary with two deliberately different surfaces:
 
-- [1. Install](#1-install)
-- [2. Connect your agent (MCP)](#2-connect-your-agent-mcp)
-- [3. Set up a board](#3-set-up-a-board-new-or-existing-vikunja)
-- [4. Run a task end to end](#4-run-a-task-end-to-end)
-- [5. Everyday commands](#5-everyday-commands)
+- Coding agents use a project-bound MCP server.
+- A human uses one native, multi-project control center.
 
----
+Vikunja is an optional legacy integration, not a requirement.
 
-## 1. Install
+## 1. Install or update
 
-**From a release (recommended)** — the installer downloads the newest archive,
-verifies its SHA-256 checksum, and atomically installs the binary and embedded UI:
+Run this exact command on macOS or Linux:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/kaltstart-co/agentklar/main/install.sh | bash -s --
 ```
 
-Rerun that exact command to update. The project catalog and workspace SQLite
-files under `~/.local/share/agentklar` are preserved. For a custom location,
-use the same directory on every update:
+Rerun it whenever you want to update. The installer:
+
+1. Selects the newest GitHub Release archive for the current OS and CPU.
+2. Requires and verifies the matching SHA-256 entry in `checksums.txt`.
+3. Rejects unexpected archive members and checks the staged binary.
+4. Atomically replaces the installed executable only after those checks pass.
+5. Refreshes the embedded agent skill and command files unless `--no-agents`
+   is passed.
+
+It does not replace the catalog or project SQLite stores under
+`~/.local/share/agentklar`.
+
+Options:
 
 ```bash
+# Binary only
+curl -fsSL https://raw.githubusercontent.com/kaltstart-co/agentklar/main/install.sh | bash -s -- --no-agents
+
+# Use the Go toolchain path instead of a release archive
+curl -fsSL https://raw.githubusercontent.com/kaltstart-co/agentklar/main/install.sh | bash -s -- --with-go
+
+# Use the same custom directory for installs and future updates
 curl -fsSL https://raw.githubusercontent.com/kaltstart-co/agentklar/main/install.sh | AGENTKLAR_INSTALL_DIR=/path/to/bin bash -s --
 ```
 
-Pass installer arguments after `bash -s --`, for example `bash -s -- --no-agents`
-or `bash -s -- --with-go`.
+Make sure the install directory, normally `~/.local/bin`, is on `PATH`.
 
-**From source** (needs Go 1.25+):
+To build a development binary from source:
 
 ```bash
 git clone https://github.com/kaltstart-co/agentklar
 cd agentklar
-go build -o ~/.local/bin/agentklar ./cmd/agentklar
+go build -o agentklar ./cmd/agentklar
 ```
 
-Make sure `~/.local/bin` is on your `PATH`.
+Use `./agentklar` in place of `agentklar` in the examples below.
 
----
+## 2. Register a project
 
-## 2. Connect your agent (MCP)
-
-Your coding agent talks to Agentklar over MCP. Print the config for your client and paste
-it in — Agentklar fills in the absolute binary path for you:
+Run Agentklar inside each repository you want in the control center:
 
 ```bash
-agentklar mcp install                 # prints config for Codex, OpenCode, and generic
-agentklar mcp install --client codex  # just one
+cd /path/to/repository
+agentklar init
 ```
 
-That registers `agentklar mcp` as an MCP server. Your agent can then call
-`list_ready_tasks`, `claim_task`, `submit_for_review`, and record results — but **not**
-approve or finish a task. Completion stays human-only, by design.
+The first command for a repository registers it in the global project catalog
+and creates or reuses its isolated workspace. `init` also proposes
+`.agentklar/quality.toml` when the project does not have one.
 
----
+Review that file before running a gate. Agentklar runs only declared recipes;
+it never invents a command from prose.
 
-## 3. Set up a board (new or existing Vikunja)
+```toml
+[[recipe]]
+name = "unit"
+level = "L1"
+command = "go"
+args = ["test", "./..."]
+timeout_seconds = 300
+```
 
-The board is your UI: a Kanban of your tasks. Agentklar drives [Vikunja](https://vikunja.io);
-it doesn't build its own web app. **You can skip this** and run tracker-less — tasks still
-live in a local database — but the board is where the workflow is easiest to see.
+Repeat `agentklar init` in other repositories. The next control-center session
+will list all of them.
 
-### You already run Vikunja
+## 3. Connect a coding agent
 
-Point Agentklar at it. Use a **separate service account** for the bot (so it can never
-approve its own work), and name the account that approves:
+Print the MCP configuration for your client:
+
+```bash
+agentklar mcp install                 # Codex, OpenCode, and generic snippets
+agentklar mcp install --client codex  # one client only
+```
+
+Add the printed snippet to the client and restart it. The MCP process resolves
+the project from the repository where it is launched, so agent task operations,
+memory, and context remain project-scoped.
+
+The agent can call methods such as `list_ready_tasks`, `claim_task`,
+`heartbeat_task`, `submit_for_review`, `get_context`, `remember`, `recall`, and
+`notify_human`. It cannot approve, reject, acknowledge an alert, forget memory,
+or mark work Done.
+
+## 4. Start the control center
+
+For a human session that can create tasks and make decisions:
+
+```bash
+agentklar ui --open
+```
+
+This starts the loopback-only server and passes a one-use bootstrap capability
+directly to the default browser. The capability is not printed. The browser
+receives an HttpOnly, SameSite=Strict session cookie; mutation requests must
+also come from the exact UI origin.
+
+For a read-only server:
+
+```bash
+agentklar ui
+```
+
+The printed URL is safe to use for viewing, but its mutation controls remain
+disabled. Restart with `agentklar ui --open` when a human decision is needed.
+
+Both commands default to `127.0.0.1:7681` and fall back to a free loopback port
+when that port is busy. A fixed loopback address is also accepted:
+
+```bash
+agentklar ui --addr 127.0.0.1:8765 --open
+```
+
+The server refuses non-loopback listeners. It is a single-user local control
+plane, not a remotely hosted team service. Stop it with Ctrl-C.
+
+### What the UI provides
+
+- **Overview:** every registered project with attention, approval, and alert
+  counts.
+- **Project switcher:** move between repositories without starting another
+  board server.
+- **Board:** create, edit, search, filter, move, reorder, and archive tasks.
+- **Task details:** objective, criteria, verification, planning fields,
+  dependencies, comments, evidence, reviews, and timeline.
+- **Approvals:** one cross-project decision queue. Approve or request changes.
+- **Intelligence:** project knowledge, searchable memory, and context packets.
+- **Alerts:** inspect and acknowledge project alerts.
+
+Drag-and-drop never bypasses workflow rules. A keyboard-accessible **Move to**
+selector provides the same permitted transitions.
+
+### Approval security
+
+The MCP surface has no approval method and never receives an approval nonce.
+The local UI creates an approval form token from the browser session and binds
+it to the selected project, task, live submission, and stored nonce. A stale,
+replayed, cross-project, or wrong-task token is rejected.
+
+Terminal `agentklar approve` and `agentklar reject` commands exist for
+development. They print a warning because a shell-capable agent could invoke
+them. Use the `agentklar ui --open` browser session for the protected local
+human channel.
+
+## 5. Run a task
+
+You can create and edit richer planning metadata in the control center. The
+CLI covers the minimum shape needed to make work Ready:
+
+```bash
+agentklar task new AK-1 "Fix the parser" \
+  --lane standard \
+  --target codex \
+  --criteria "handles empty input;tests pass" \
+  --verify "go test ./..."
+
+agentklar task ready AK-1
+```
+
+`task ready` is rejected unless acceptance criteria and a verification method
+are present.
+
+An agent uses the project-bound MCP server:
+
+```text
+list_ready_tasks
+  → claim_task
+  → heartbeat_task while working
+  → submit_for_review with the commit range
+```
+
+Run the gate from the project repository:
+
+```bash
+agentklar gate AK-1
+```
+
+The gate runs applicable `.agentklar/quality.toml` recipes and records the
+command, working directory, exit code, timestamps, retained log, artifact hash,
+and reviewed commit. Passing review and Auto QA moves the task to User
+Approval; it does not mark the task Done.
+
+Open the Approvals view in the running human UI. Approve to move the live
+submission to Done, or request changes with a reason.
+
+The full lifecycle is:
+
+```text
+Draft → Ready → In Progress → Completion Review → Auto QA
+      → User Approval → Done
+             ↘ Changes Requested
+```
+
+## 6. Plan and inspect work
+
+The board supports these project-scoped planning fields:
+
+- ID, title, objective, acceptance criteria, and verification method
+- priority, assignee, labels, and due date
+- quick, standard, or major lane
+- execution target and isolation strategy
+- task dependencies
+
+Dependency cycles are rejected. Protected execution fields cannot be rewritten
+after submission. Archive is limited to safe terminal or inactive states, and
+archived tasks stay available in **Archived history**.
+
+Useful CLI views:
+
+```bash
+agentklar status
+agentklar task list
+agentklar task list --json
+agentklar task show AK-1
+agentklar doctor
+```
+
+The CLI is always scoped to the current repository. The UI is the cross-project
+view.
+
+## 7. Knowledge, memory, and context
+
+Each project has three transparent intelligence layers:
+
+### Knowledge
+
+Knowledge is Markdown under `.agentklar/knowledge/`, so humans can review it in
+git:
+
+```bash
+agentklar knowledge decide "Use SQLite" \
+  --context "The control plane is local-first" \
+  --decision "Keep one portable database per project"
+agentklar knowledge add convention "Error format" --body "Return typed API errors."
+agentklar knowledge list
+```
+
+### Memory
+
+Memory is stored with its namespace, source task, author, and timestamp in the
+project workspace:
+
+```bash
+agentklar memory remember flaky-auth \
+  --value "TestLogin flakes on a cold cache" \
+  --namespace AK-7 --task AK-7
+agentklar memory search "cold cache"
+agentklar memory list --namespace AK-7
+```
+
+The MCP surface cannot forget a memory row; deletion is exposed only through
+the designated human UI and CLI channels. MCP `remember` writes also update the
+memory projection used by context search.
+
+### Context
+
+Context is a rebuildable FTS5 search index over project knowledge, memory, and
+repository code:
+
+```bash
+agentklar context index
+agentklar context search "authentication cache"
+```
+
+The control center exposes project-scoped search and manual reindexing. A
+context packet returns focused matches rather than copying an entire project
+into an agent prompt.
+
+## 8. Alerts
+
+Agents use `notify_human` for actionable information. Alerts retain their
+project, task, severity, author, and timestamp.
+
+```bash
+agentklar alerts pending
+agentklar alerts list
+agentklar alerts ack 12
+```
+
+The MCP surface cannot acknowledge an alert. Acknowledgement is exposed only
+through the designated human UI and CLI channels.
+
+## 9. Optional Vikunja projection
+
+The native control center requires no external tracker. If an existing setup
+still uses Vikunja, connect it as an optional projection:
 
 ```bash
 agentklar tracker connect \
   --url https://vikunja.example.com/api/v1 \
   --svc-user agentklar-bot --svc-pass '******' \
   --human you
-```
 
-Prefer an API token? Use `--svc-token <token>` instead of `--svc-user/--svc-pass`.
-
-`connect` creates the project if needed, shares it with you, and **creates the eight
-workflow columns** (Draft → Ready → In Progress → Completion Review → Auto QA →
-Changes Requested → User Approval → Done). Running it against a board that already has
-them changes nothing.
-
-### You don't have Vikunja yet
-
-Run it locally — a single container is enough for one person:
-
-```bash
-docker run -p 3456:3456 \
-  -e VIKUNJA_SERVICE_PUBLICURL=http://localhost:3456/ \
-  vikunja/vikunja:latest
-```
-
-Then open `http://localhost:3456`, register your user and a second `agentklar-bot` user,
-and run the `tracker connect` command above with `--url http://localhost:3456/api/v1`.
-(See the [Vikunja install docs](https://vikunja.io/docs/installing/) for native binaries
-and persistent config.)
-
----
-
-## 4. Run a task end to end
-
-```bash
-# once per repo
-agentklar init
-
-# 1. you shape the task — no criteria, no "ready"
-agentklar task new AK-1 Fix the parser \
-  --criteria "handles empty input;tests pass" --verify "go test ./..."
-agentklar task ready AK-1
-
-# 2. your agent claims and does the work (over MCP), then submits the commit range
-
-# 3. run the gate — your checks, kept as machine-attested evidence
-agentklar gate AK-1
-
-# 4. you approve — the agent cannot
-#    - dev shortcut:      agentklar approve AK-1
-#    - trusted (board):   comment "approve <nonce>" on the card as yourself,
-#                         then:  agentklar reconcile
-```
-
-As tasks move, their cards move too. If you ever want to force the board to match the
-current state (for example after bulk changes), run:
-
-```bash
 agentklar tracker sync
 ```
 
----
+Use `--svc-token <token>` instead of `--svc-user` and `--svc-pass` when
+preferred. `connect` creates the project and workflow buckets when needed.
 
-## Native web UI (no external service needed)
-
-The built-in UI is the default — one local page for the board, shared knowledge,
-memory, context search, evidence, and approvals. It binds to `127.0.0.1`, so the
-**Approve** click is your trusted human channel (an agent has no MCP method for it).
-
-```bash
-agentklar open ui            # start the UI server and open it (Ctrl-C to stop)
-agentklar ui --addr 127.0.0.1:7681   # same, with a fixed port
-```
-
-The same data is exposed as JSON (`GET /api/tasks`, `/api/memory?q=`,
-`/api/context?q=`, `/api/approvals`) so a future richer client can reuse it.
-
-### Shared knowledge & memory (for multi-agent work)
+Vikunja owns its card content and comments; `control.sqlite` remains the
+authority for states, leases, evidence, submissions, and approvals. Card moves
+are transition requests, never approvals. Existing nonce-bound comment
+approval can still be reconciled with:
 
 ```bash
-agentklar knowledge decide "Use Postgres" --decision "Already deployed; no SQLite."
-agentklar memory remember flaky-auth --value "TestLogin flakes on cold cache" --task AK-7
-agentklar context index                       # pull knowledge + memory into the index
-agentklar context search "auth cache"
+agentklar reconcile
 ```
 
-Vikunja is **optional** — one board backend behind the tracker interface. The
-core workflow runs fully without it. To use it anyway, see
-[`agentklar tracker connect --help`](#).
+## 10. Storage and backup
 
----
+The global catalog maps repositories to isolated workspaces:
 
-## Menu-bar widget (macOS)
-
-A small menu-bar app shows how many tasks are **awaiting your approval** across all your
-workspaces, lists them (click one to open its tracker card), and carries quick links to
-your boards and the website.
-
-```bash
-scripts/build-bar.sh          # builds dist/Agentklar.app
-open dist/Agentklar.app        # launches the menu-bar widget (✓ N when reviews are waiting)
+```text
+~/.local/share/agentklar/
+  catalog.sqlite
+  workspaces/
+    <project>/control.sqlite
+    <project>/memory.sqlite
+    <project>/context.sqlite
+    <project>/evidence/
 ```
 
-The title shows `✓` when everything's clear and `✓ N` when N tasks need you. To start it
-automatically, add `Agentklar.app` in **System Settings → General → Login Items**.
+Project task IDs are not global; `AK-1` may exist in several repositories
+without collision. Existing compatible workspaces are reused during catalog
+registration.
 
-**Add your own links** (Jira, docs, anything) — they show up in the menu without a rebuild.
-Create `~/.config/agentklar/links.toml`:
+Back up `~/.local/share/agentklar` for local state and commit
+`.agentklar/knowledge/` plus `.agentklar/quality.toml` with each repository.
 
-```toml
-[[link]]
-name = "Team Jira"
-url  = "https://your-org.atlassian.net/jira/software/projects/ABC/boards/1"
-```
+## Command reference
 
-## 5. Everyday commands
-
-| Command | What it does |
+| Command | Purpose |
 |---|---|
-| `agentklar init` | Create a workspace for the current repo, propose the checks to run |
-| `agentklar task new <id> <title> --criteria --verify --lane` | Create a task with acceptance criteria |
-| `agentklar task ready <id>` | Move to Ready (blocked without criteria + a verify method) |
-| `agentklar task list` / `show <id>` | List tasks / show one with its evidence |
-| `agentklar mcp` | Run the agent-facing MCP server (your agent launches this) |
-| `agentklar mcp install [--client]` | Print MCP config to connect your agent |
-| `agentklar gate <id>` | Run the checks and store machine-attested evidence |
-| `agentklar tracker connect …` | Connect a Vikunja board (new or existing) |
-| `agentklar tracker sync` | Place every task's card in its state column |
-| `agentklar reconcile` | Apply a human approval posted on the board |
-| `agentklar approve <id>` / `reject <id> <reason>` | Finish a task (human-only) |
-| `agentklar doctor` | Health: declared checks, missing commands, task counts |
-| `agentklar version` | Version, commit, build date |
+| `agentklar init` | Register the current repo, open its workspace, and propose quality recipes |
+| `agentklar ui --open` | Start the control center with a local human browser session |
+| `agentklar ui` | Start the control center read-only |
+| `agentklar status` | Show current-project workflow counts and pending decisions |
+| `agentklar doctor` | Check current-project recipes, commands, task counts, and MCP surface |
+| `agentklar task new <id> <title> ...` | Create a Draft task |
+| `agentklar task ready <id>` | Enforce Definition of Ready and make a task claimable |
+| `agentklar task list [--json]` | List active tasks in the current project |
+| `agentklar task show <id>` | Show one task with evidence and reviews |
+| `agentklar gate <id>` | Run declared Completion Review and Auto QA recipes |
+| `agentklar mcp` | Run the project-bound MCP server on stdio |
+| `agentklar mcp install [--client ...]` | Print MCP configuration snippets |
+| `agentklar knowledge ...` | Manage in-repo decisions and reference material |
+| `agentklar memory ...` | List, search, write, or human-delete project memory |
+| `agentklar context index` | Rebuild focused project context |
+| `agentklar context search <query>` | Query focused project context |
+| `agentklar alerts list` / `pending` / `ack` | Inspect or human-acknowledge alerts |
+| `agentklar tracker connect ...` | Connect optional Vikunja projection |
+| `agentklar tracker sync` | Re-project task cards into workflow buckets |
+| `agentklar reconcile` | Apply valid human decisions from Vikunja comments |
+| `agentklar version` | Print version, commit, and build date |
 
-Scoping note: Agentklar resolves your workspace from the **current git repo**, so
-`task list` only shows that repo's tasks — one repo, one board.
+Run `agentklar` without arguments for the built-in command summary.
