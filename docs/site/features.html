@@ -126,8 +126,8 @@
     </div></section>
 
     <section class="deploy" aria-labelledby="deploy-title"><div class="shell">
-      <div class="section-head"><div><span class="number">05 / Ownership</span><h2 id="deploy-title">Local by default. Deployable with care.</h2></div><p>One Go binary embeds the UI and uses SQLite for durable state. No frontend runtime, hosted account, or external tracker is required.</p></div>
-      <div class="deploy-grid"><article><span class="label">Personal / local team</span><h3>Run on loopback</h3><p><code>agentklar ui --open</code> starts the control center on your machine. Workspace data stays under the Agentklar data directory.</p></article><article><span class="label">Shared deployment</span><h3>Bring an authenticated proxy</h3><p>Remote binding needs an explicit opt-in. A public team deployment must sit behind authentication; loopback is not an identity system.</p></article></div>
+      <div class="section-head"><div><span class="number">05 / Ownership</span><h2 id="deploy-title">Local by design. Loopback only.</h2></div><p>One Go binary embeds the UI and uses SQLite for durable state. No frontend runtime, hosted account, or external tracker is required.</p></div>
+      <div class="deploy-grid"><article><span class="label">Trusted local UI</span><h3>Run on loopback</h3><p><code>agentklar ui --open</code> starts the control center on your machine and binds it to <code>127.0.0.1</code>.</p></article><article><span class="label">Current release boundary</span><h3>Not a network service</h3><p>The control center does not listen remotely. Shared-network deployment and team identity are outside this release.</p></article></div>
       <p class="note"><strong>Vikunja is optional legacy integration.</strong> Existing users can keep its projected board and reconciliation flow. New setups use Agentklar's native control center.</p>
     </div></section>
 
