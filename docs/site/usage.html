@@ -1,247 +1,151 @@
-<title>Agentklar &mdash; Setup &amp; Usage</title>
-<meta name="description" content="Install Agentklar, connect your coding agent over MCP, set up a Vikunja board (new or existing), and run a task end to end." />
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%232A55D8'/%3E%3Cstop offset='1' stop-color='%2322C3E6'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect x='4' y='4' width='40' height='40' rx='13' fill='url(%23g)'/%3E%3Cpath d='M14 25l7 7L35 14' fill='none' stroke='white' stroke-width='5' stroke-linecap='round' stroke-linejoin='round'/%3E%3Ccircle cx='39' cy='10' r='2.8' fill='white'/%3E%3C/svg%3E" />
-<meta property="og:type" content="website" />
-<meta property="og:title" content="Agentklar &mdash; Setup & Usage" />
-<meta property="og:description" content="Install, connect your agent, set up a board, and run a task end to end." />
-<meta property="og:image" content="https://agentklar.kaltstart.co/og.png" />
-<meta name="twitter:card" content="summary_large_image" />
-<meta name="twitter:image" content="https://agentklar.kaltstart.co/og.png" />
-<style>
-  :root {
-    --bg:#FBFCFD; --ink:#141922; --muted:#586372; --faint:#93A0AE;
-    --line:#E6EAEF; --line-2:#D6DCE3; --code:#0F141B; --code-ink:#D7E0EA;
-    --accent:#2A55D8; --accent-ink:#1E45B4; --attested:#1E845A; --blocked:#C03A2B;
-    --sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
-    --maxw: 820px; --gutter: clamp(1.25rem, 5vw, 2rem);
-  }
-  @media (prefers-color-scheme: dark) {
-    :root { --bg:#0F1318; --ink:#E7ECF2; --muted:#96A2AF; --faint:#5D6976; --line:#212831; --line-2:#2C343E; --code:#090C10; --code-ink:#D7E0EA; --accent:#6E97F8; --accent-ink:#87A9FB; --attested:#46B583; --blocked:#E05B4C; }
-  }
-  :root[data-theme="light"] { --bg:#FBFCFD; --ink:#141922; --muted:#586372; --faint:#93A0AE; --line:#E6EAEF; --line-2:#D6DCE3; --code:#0F141B; --code-ink:#D7E0EA; --accent:#2A55D8; --accent-ink:#1E45B4; --attested:#1E845A; --blocked:#C03A2B; }
-  :root[data-theme="dark"] { --bg:#0F1318; --ink:#E7ECF2; --muted:#96A2AF; --faint:#5D6976; --line:#212831; --line-2:#2C343E; --code:#090C10; --code-ink:#D7E0EA; --accent:#6E97F8; --accent-ink:#87A9FB; --attested:#46B583; --blocked:#E05B4C; }
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Setup — Agentklar</title>
+  <meta name="description" content="Install Agentklar, initialize projects, open the multi-project control center, wire coding agents, create tasks, and update safely.">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Agentklar — Setup">
+  <meta property="og:description" content="From install to a durable people-and-agents workflow in minutes.">
+  <meta property="og:image" content="https://agentklar.kaltstart.co/og.png">
+  <link rel="icon" href="logo.svg" type="image/svg+xml">
+  <style>
+    :root { --paper:#f5f1e8; --paper-2:#ece6d9; --ink:#0a1931; --muted:#5d6470; --line:#cfc8ba; --cobalt:#1648d8; --cobalt-dark:#1038a8; --green:#19724c; --white:#fffdf8; --sans:"Avenir Next",Avenir,"IBM Plex Sans","Segoe UI",sans-serif; --serif:Iowan Old Style,"Palatino Linotype",Palatino,Georgia,serif; --mono:"IBM Plex Mono","SFMono-Regular",Consolas,monospace; --max:1000px; }
+    * { box-sizing:border-box; }
+    html { scroll-behavior:smooth; }
+    body { margin:0; background:var(--paper); color:var(--ink); font:17px/1.6 var(--sans); }
+    a { color:inherit; text-underline-offset:.2em; }
+    a:hover { color:var(--cobalt); }
+    button { font:inherit; }
+    :focus-visible { outline:3px solid var(--cobalt); outline-offset:4px; }
+    .skip { position:absolute; top:-5rem; left:1rem; z-index:20; padding:.7rem 1rem; background:var(--ink); color:#fff; }
+    .skip:focus { top:1rem; }
+    .shell { width:min(var(--max),calc(100% - 40px)); margin:auto; }
+    header { border-bottom:1px solid var(--ink); }
+    .nav { min-height:76px; display:flex; align-items:center; gap:28px; }
+    .brand { display:inline-flex; align-items:center; gap:10px; font:700 .95rem var(--mono); text-decoration:none; }
+    .mark { width:28px; height:28px; display:grid; place-items:center; background:var(--cobalt); color:#fff; transform:rotate(-3deg); }
+    .brand em { color:var(--cobalt); font-style:normal; }
+    .nav-links { margin-left:auto; display:flex; gap:28px; align-items:center; font-size:.88rem; font-weight:650; }
+    .nav-links a { text-decoration:none; }
+    .active { color:var(--cobalt); }
+    .nav-cta { min-height:44px; display:inline-flex; align-items:center; border:1px solid var(--ink); padding:9px 14px; box-shadow:3px 3px 0 var(--ink); }
+    .eyebrow, .step-no, .label { font:700 .7rem var(--mono); text-transform:uppercase; letter-spacing:.13em; }
+    .eyebrow, .step-no { color:var(--cobalt); }
+    .hero { padding:clamp(72px,10vw,128px) 0 76px; border-bottom:1px solid var(--ink); }
+    h1 { max-width:880px; margin:18px 0 26px; font:500 clamp(3.8rem,8vw,7rem)/.89 var(--serif); letter-spacing:-.06em; }
+    .lede { max-width:650px; margin:0; color:var(--muted); font-size:1.14rem; }
+    .steps { counter-reset:setup; }
+    .step { display:grid; grid-template-columns:210px minmax(0,1fr); gap:54px; padding:72px 0; border-bottom:1px solid var(--ink); }
+    .step-side h2 { margin:12px 0 0; font:500 2.3rem/1 var(--serif); }
+    .step-main > p { margin:0 0 18px; max-width:670px; color:var(--muted); }
+    .terminal { position:relative; margin:18px 0; padding:22px; overflow-x:auto; border:1px solid var(--ink); background:var(--ink); box-shadow:6px 6px 0 var(--cobalt); }
+    .terminal pre { margin:0; color:#dfe5ee; font:.78rem/1.9 var(--mono); white-space:pre-wrap; }
+    .prompt { color:#83a2ff; } .comment { color:#8490a2; }
+    .copy { position:absolute; top:10px; right:10px; min-width:44px; min-height:44px; border:1px solid #59667a; background:#13213a; color:#c8d0dd; padding:4px 9px; font:650 .62rem var(--mono); cursor:pointer; }
+    .copy:hover { border-color:#83a2ff; color:#fff; }
+    .copy.copied { border-color:#65c894; color:#65c894; }
+    .note { margin-top:18px; padding:15px 18px; border-left:4px solid var(--cobalt); background:var(--paper-2); color:var(--muted); font-size:.94rem; }
+    .note strong { color:var(--ink); }
+    .checks { display:grid; grid-template-columns:repeat(3,1fr); gap:1px; border:1px solid var(--ink); background:var(--ink); margin-top:20px; }
+    .check { min-height:150px; padding:20px; background:var(--white); }
+    .check strong { display:block; margin:32px 0 7px; font:500 1.25rem var(--serif); }
+    .check p { margin:0; color:var(--muted); font-size:.86rem; }
+    .reference { padding:80px 0; border-bottom:1px solid var(--ink); }
+    .reference h2 { margin:10px 0 30px; font:500 2.8rem var(--serif); }
+    .command { display:grid; grid-template-columns:minmax(250px,.7fr) 1fr; gap:30px; padding:16px 0; border-top:1px solid var(--line); align-items:baseline; }
+    .command:first-of-type { border-top:1px solid var(--ink); }
+    .command code { color:var(--cobalt); font:650 .78rem var(--mono); }
+    .command span { color:var(--muted); font-size:.92rem; }
+    .legacy { padding:70px 0; }
+    .legacy-box { padding:34px; border:1px solid var(--ink); background:var(--paper-2); }
+    .legacy h2 { margin:9px 0 12px; font:500 2rem var(--serif); }
+    .legacy p { margin:0; color:var(--muted); }
+    footer { border-top:1px solid var(--ink); }
+    .foot { min-height:100px; display:flex; align-items:center; gap:24px; color:var(--muted); font-size:.82rem; }
+    .foot-links { margin-left:auto; display:flex; gap:22px; }
+    @media (max-width:750px) { .step { grid-template-columns:1fr; gap:30px; } .checks { grid-template-columns:1fr; } .check { min-height:auto; } .check strong { margin-top:20px; } }
+    @media (max-width:620px) { .shell { width:calc(100% - 28px); } .nav { min-height:64px; } .nav-links a:not(.nav-cta) { display:none; } .nav-cta { box-shadow:none; padding:8px 10px; } h1 { font-size:clamp(3.6rem,17vw,5.2rem); } .hero { padding-top:70px; } .step { padding:58px 0; } .command { grid-template-columns:1fr; gap:5px; } .foot { align-items:flex-start; flex-direction:column; padding:28px 0; } .foot-links { margin:0; flex-wrap:wrap; } }
+    @media (prefers-reduced-motion:reduce) { html { scroll-behavior:auto; } }
+  </style>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <header><nav class="nav shell" aria-label="Primary navigation"><a class="brand" href="index.html"><span class="mark" aria-hidden="true">✓</span>agentklar<em>.</em></a><div class="nav-links"><a href="features.html">Product</a><a class="active" href="usage.html" aria-current="page">Setup</a><a href="https://github.com/kaltstart-co/agentklar">GitHub</a><a class="nav-cta" href="#install">Install →</a></div></nav></header>
 
-  * { box-sizing: border-box; }
-  html { scroll-behavior: smooth; }
-  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
-  body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--sans); font-size: 17px; line-height: 1.65; -webkit-font-smoothing: antialiased; }
-  .wrap { max-width: var(--maxw); margin: 0 auto; padding-inline: var(--gutter); }
-  a { color: var(--accent-ink); text-underline-offset: 3px; text-decoration-thickness: 1px; }
+  <main id="main">
+    <section class="hero"><div class="shell"><span class="eyebrow">Setup / macOS + Linux</span><h1>From repository to control center.</h1><p class="lede">Agentklar is one binary with an embedded web interface. Install it, register each project, then connect the coding agents you already use.</p></div></section>
 
-  header { border-bottom: 1px solid var(--line); position: sticky; top: 0; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(8px); z-index: 20; }
-  .bar { max-width: var(--maxw); margin: 0 auto; padding: .9rem var(--gutter); display: flex; align-items: baseline; gap: .8rem; }
-  .brand { font-family: var(--mono); font-weight: 700; letter-spacing: -.01em; color: var(--ink); text-decoration: none; display: inline-flex; align-items: center; gap: .42rem; }
-  .by { font-family: var(--mono); font-size: .7rem; color: var(--faint); text-decoration: none; }
-  .by:hover { color: var(--accent-ink); }
-  nav { margin-left: auto; display: flex; gap: 1.1rem; align-items: center; }
-  nav a { font-size: .9rem; color: var(--muted); text-decoration: none; }
-  nav a:hover { color: var(--ink); }
-  .theme-btn { font-family: var(--mono); font-size: .72rem; letter-spacing: .08em; text-transform: uppercase; background: none; color: var(--muted); border: 1px solid var(--line-2); border-radius: 6px; padding: .3rem .6rem; cursor: pointer; }
-  .theme-btn:hover { color: var(--ink); border-color: var(--accent); }
-  @media (max-width: 640px) { nav a.hide-sm { display: none; } }
+    <div class="steps shell">
+      <section class="step" id="install" aria-labelledby="install-title"><div class="step-side"><span class="step-no">01 / Install</span><h2 id="install-title">Get the binary.</h2></div><div class="step-main">
+        <p>The installer finds the newest macOS or Linux release, verifies its checksum, stages and validates the binary, then places it in <code>~/.local/bin</code>.</p>
+        <div class="terminal"><button class="copy" type="button" data-copy="curl -fsSL https://raw.githubusercontent.com/kaltstart-co/agentklar/main/install.sh | bash -s --" aria-label="Copy install command">Copy</button><pre><span class="prompt">$</span> curl -fsSL https://raw.githubusercontent.com/kaltstart-co/agentklar/main/install.sh | bash -s --</pre></div>
+        <p>Choose another install directory when needed:</p>
+        <div class="terminal"><button class="copy" type="button" data-copy='curl -fsSL https://raw.githubusercontent.com/kaltstart-co/agentklar/main/install.sh | AGENTKLAR_INSTALL_DIR="$HOME/bin" bash -s --' aria-label="Copy custom install command">Copy</button><pre><span class="prompt">$</span> curl -fsSL https://raw.githubusercontent.com/kaltstart-co/agentklar/main/install.sh \
+  | AGENTKLAR_INSTALL_DIR="$HOME/bin" bash -s --</pre></div>
+      </div></section>
 
-  .eyebrow { font-family: var(--mono); font-size: .72rem; letter-spacing: .16em; text-transform: uppercase; color: var(--accent-ink); font-weight: 600; margin: 0; }
-  .page-hero { padding: clamp(2.4rem,6vw,3.4rem) 0 clamp(1rem,3vw,1.6rem); }
-  h1 { font-size: clamp(2rem, 5vw, 2.7rem); line-height: 1.07; letter-spacing: -.03em; font-weight: 800; margin: .9rem 0 0; text-wrap: balance; }
-  .page-hero p { color: var(--muted); font-size: 1.08rem; margin: 1rem 0 0; max-width: 60ch; }
+      <section class="step" aria-labelledby="project-title"><div class="step-side"><span class="step-no">02 / Project</span><h2 id="project-title">Register your work.</h2></div><div class="step-main">
+        <p>Run <code>init</code> once inside every repository you want in the catalog. It creates or reuses that project's workspace and proposes its quality configuration.</p>
+        <div class="terminal"><button class="copy" type="button" data-copy="cd /path/to/your-project
+agentklar init
+agentklar ui --open" aria-label="Copy project setup commands">Copy</button><pre><span class="prompt">$</span> cd /path/to/your-project
+<span class="prompt">$</span> agentklar init
+<span class="prompt">$</span> agentklar ui --open</pre></div>
+        <p class="note"><strong>The UI is multi-project.</strong> Register projects from their repositories, then switch among all of them from the same control center.</p>
+      </div></section>
 
-  section { border-top: 1px solid var(--line); padding: clamp(2.2rem, 5vw, 3.2rem) 0; }
-  h2 { font-size: clamp(1.4rem, 3.4vw, 1.8rem); letter-spacing: -.02em; font-weight: 750; margin: .5rem 0 0; }
-  .num { font-family: var(--mono); color: var(--accent-ink); font-weight: 700; }
-  .lead { color: var(--muted); margin: .7rem 0 0; max-width: 62ch; }
-  h3.s { font-size: 1.02rem; margin: 1.5rem 0 .3rem; }
-  p.small { color: var(--muted); font-size: .95rem; margin: .5rem 0 0; }
+      <section class="step" aria-labelledby="agent-title"><div class="step-side"><span class="step-no">03 / Agents</span><h2 id="agent-title">Wire your workers.</h2></div><div class="step-main">
+        <p>Install Agentklar's skill and commands for the supported clients. Then print the exact MCP configuration for the agent you want to connect.</p>
+        <div class="terminal"><button class="copy" type="button" data-copy="agentklar install --agents opencode,claude,codex
+agentklar mcp install --client codex" aria-label="Copy agent wiring commands">Copy</button><pre><span class="prompt">$</span> agentklar install --agents opencode,claude,codex
+<span class="prompt">$</span> agentklar mcp install --client codex
 
-  .block { position: relative; background: var(--code); border: 1px solid var(--line-2); border-radius: 9px; padding: .9rem 1.05rem; overflow-x: auto; font-family: var(--mono); font-size: .82rem; line-height: 1.75; color: var(--code-ink); margin-top: 1rem; }
-  .block .cp { position: absolute; top: .5rem; right: .5rem; font-family: var(--mono); font-size: .62rem; letter-spacing: .05em; text-transform: uppercase; background: rgba(255,255,255,.06); border: 1px solid #333c49; border-radius: 5px; color: #8a97a8; padding: .18rem .45rem; cursor: pointer; }
-  .block .cp:hover { border-color: var(--accent); color: var(--accent-ink); }
-  .block .cp.done { border-color: var(--attested); color: var(--attested); }
-  pre { margin: 0; font-family: var(--mono); white-space: pre-wrap; }
-  .c { color: #6d7a8c; } .fl { color: var(--accent-ink); } .ok { color: var(--attested); }
-  .note { margin-top: 1.1rem; border-left: 3px solid var(--accent); padding: .3rem 0 .3rem 1rem; color: var(--muted); font-size: .95rem; }
+<span class="comment"># also supported: opencode, or omit --client for all snippets</span></pre></div>
+        <div class="checks"><article class="check"><span class="label">Can</span><strong>Claim + build</strong><p>The agent works through a project-bound tool surface.</p></article><article class="check"><span class="label">Can</span><strong>Submit + explain</strong><p>Work is attached to a reviewable submission.</p></article><article class="check"><span class="label">Cannot</span><strong>Approve + finish</strong><p>No agent tool can cross the Done boundary.</p></article></div>
+      </div></section>
 
-  .grp { margin-top: 1.2rem; }
-  .rrow { display: grid; grid-template-columns: minmax(0,1.15fr) 1fr; gap: 1rem; padding: .6rem 0; border-top: 1px solid var(--line); align-items: baseline; }
-  .rrow:first-child { border-top: none; }
-  @media (max-width: 640px) { .rrow { grid-template-columns: 1fr; gap: .2rem; } }
-  .rrow code { font-family: var(--mono); font-size: .82rem; color: var(--accent-ink); font-weight: 600; }
-  .rrow .d { color: var(--muted); font-size: .92rem; }
+      <section class="step" aria-labelledby="task-title"><div class="step-side"><span class="step-no">04 / Task</span><h2 id="task-title">Define claimable work.</h2></div><div class="step-main">
+        <p>A task needs acceptance criteria and a verification method before it can become Ready. This is the minimum contract an agent receives.</p>
+        <div class="terminal"><button class="copy" type="button" data-copy='agentklar task new AK-1 "Fix the parser" --criteria "handles empty input;tests pass" --verify "go test ./..."
+agentklar task ready AK-1' aria-label="Copy task commands">Copy</button><pre><span class="prompt">$</span> agentklar task new AK-1 "Fix the parser" \
+  --criteria "handles empty input;tests pass" \
+  --verify "go test ./..."
+<span class="prompt">$</span> agentklar task ready AK-1</pre></div>
+        <p>Let the connected agent claim the task. When it submits, Agentklar runs only the recipes declared by the project and stores the evidence. A person handles the final decision from the Approvals view.</p>
+      </div></section>
 
-  footer { border-top: 1px solid var(--line); padding: 2rem 0 3rem; }
-  .foot { display: flex; flex-wrap: wrap; gap: .8rem 1.4rem; align-items: baseline; }
-  .foot .brand small { font-family: var(--mono); font-weight: 500; font-size: .7rem; color: var(--faint); margin-left: .5rem; }
-  .foot nav { margin-left: auto; }
-  .foot-tag { color: var(--faint); font-size: .78rem; font-family: var(--mono); margin: 1.3rem 0 0; }
-  .foot-tag a { color: var(--muted); text-decoration: none; }
-
-  ::selection { background: color-mix(in srgb, var(--accent) 22%, transparent); }
-  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
-
-  .mk { flex:none; }
-</style>
-
-<header>
-  <div class="bar">
-    <a class="brand" href="index.html"><svg class="mk" viewBox="0 0 48 48" width="22" height="22" aria-hidden="true"><defs><linearGradient id="akg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2A55D8"/><stop offset="1" stop-color="#22C3E6"/></linearGradient></defs><rect x="5" y="5" width="38" height="38" rx="12" fill="url(#akg)" transform="rotate(-5 24 24)"/><path d="M15 25l6.5 6.5L34 15.5" fill="none" stroke="#fff" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round" transform="rotate(-5 24 24)"/><circle cx="38.5" cy="10.5" r="2.4" fill="#fff"/></svg>agentklar<span class="dot" style="color:var(--accent)">.</span></a>
-    <a class="by" href="https://kaltstart.co">by kaltstart.co</a>
-    <nav>
-      <a href="index.html" class="hide-sm">Home</a>
-      <a href="features.html">Features</a>
-      <a href="https://github.com/kaltstart-co/agentklar">GitHub</a>
-      <button class="theme-btn" id="theme" aria-label="Toggle theme">Theme</button>
-    </nav>
-  </div>
-</header>
-
-<main>
-  <section class="page-hero" style="border-top:none">
-    <div class="wrap">
-      <p class="eyebrow">Setup &amp; Usage</p>
-      <h1>From install to a task moving across the board.</h1>
-      <p>Agentklar is one local binary. Bring your own coding agent and (optionally) your own Vikunja board. Here's the whole path.</p>
+      <section class="step" aria-labelledby="update-title"><div class="step-side"><span class="step-no">05 / Update</span><h2 id="update-title">Re-run the installer.</h2></div><div class="step-main">
+        <p>The install command is also the update command. It validates the new binary before replacing the installed one.</p>
+        <div class="terminal"><button class="copy" type="button" data-copy="curl -fsSL https://raw.githubusercontent.com/kaltstart-co/agentklar/main/install.sh | bash -s --" aria-label="Copy update command">Copy</button><pre><span class="prompt">$</span> curl -fsSL https://raw.githubusercontent.com/kaltstart-co/agentklar/main/install.sh | bash -s --</pre></div>
+        <p class="note"><strong>Your project data stays in place.</strong> Updating replaces the binary and its embedded UI. The catalog and per-project SQLite workspaces remain under the Agentklar data directory.</p>
+      </div></section>
     </div>
-  </section>
 
-  <section>
-    <div class="wrap">
-      <p class="eyebrow"><span class="num">1</span> &middot; Install</p>
-      <h2>Get the binary.</h2>
-      <h3 class="s">One line (recommended)</h3>
-      <p class="small">Downloads the newest release archive, verifies its SHA-256 against <span class="mono">checksums.txt</span>, installs to <span class="mono">~/.local/bin</span>, and wires skill + slash commands into OpenCode, Claude Code, and Codex.</p>
-      <div class="block"><button class="cp" data-copy="curl -sSL https://raw.githubusercontent.com/kaltstart-co/agentklar/main/install.sh | bash">Copy</button>
-<pre>curl -sSL https://raw.githubusercontent.com/kaltstart-co/agentklar/main/install.sh | bash
-<span class="c"># skip agent wiring: append --no-agents</span></pre></div>
-      <h3 class="s">With Go (no clone, no manual build)</h3>
-      <div class="block"><button class="cp" data-copy="go install github.com/kaltstart-co/agentklar/cmd/agentklar@latest">Copy</button>
-<pre>go install github.com/kaltstart-co/agentklar/cmd/agentklar@latest
-agentklar install --agents opencode,claude,codex</pre></div>
-      <h3 class="s">From a release archive</h3>
-      <p class="small">Or download your OS/arch archive from the <a href="https://github.com/kaltstart-co/agentklar/releases">Releases page</a>, verify against <span class="mono">checksums.txt</span>, and put it on your PATH.</p>
-      <div class="block"><button class="cp" data-copy="tar xzf agentklar_*_darwin_arm64.tar.gz
-install -m 0755 agentklar ~/.local/bin/agentklar
-agentklar version">Copy</button>
-<pre><span class="c"># example: macOS arm64</span>
-tar xzf agentklar_*_darwin_arm64.tar.gz
-install -m 0755 agentklar ~/.local/bin/agentklar
-agentklar version</pre></div>
-      <h3 class="s">From source (Go 1.25+)</h3>
-      <div class="block"><button class="cp" data-copy="git clone https://github.com/kaltstart-co/agentklar
-cd agentklar && go build -o ~/.local/bin/agentklar ./cmd/agentklar">Copy</button>
-<pre>git clone https://github.com/kaltstart-co/agentklar
-cd agentklar &amp;&amp; go build -o ~/.local/bin/agentklar ./cmd/agentklar</pre></div>
-    </div>
-  </section>
+    <section class="reference" aria-labelledby="reference-title"><div class="shell"><span class="step-no">Reference / Daily commands</span><h2 id="reference-title">The short list.</h2>
+      <div class="command"><code>agentklar ui --open</code><span>Start the native control center and open it in your browser.</span></div>
+      <div class="command"><code>agentklar status</code><span>See task counts, human attention, and the local UI address.</span></div>
+      <div class="command"><code>agentklar task list</code><span>List tasks in the current repository's workspace.</span></div>
+      <div class="command"><code>agentklar task show &lt;id&gt;</code><span>Inspect one task, its reviews, and retained evidence.</span></div>
+      <div class="command"><code>agentklar gate &lt;id&gt;</code><span>Run declared checks and record machine-attested evidence.</span></div>
+      <div class="command"><code>agentklar doctor</code><span>Check workspace health, recipes, commands, and task counts.</span></div>
+    </div></section>
 
-  <section>
-    <div class="wrap">
-      <p class="eyebrow"><span class="num">2</span> &middot; Connect your agent (MCP)</p>
-      <h2>Point your agent at Agentklar.</h2>
-      <p class="lead">Print the config for your client and paste it in &mdash; the absolute binary path is filled in for you.</p>
-      <div class="block"><button class="cp" data-copy="agentklar mcp install">Copy</button>
-<pre>agentklar mcp install                 <span class="c"># Codex, OpenCode, and generic</span>
-agentklar mcp install <span class="fl">--client</span> codex  <span class="c"># just one</span></pre></div>
-      <p class="note">Your agent can then call <span class="mono">list_ready_tasks</span>, <span class="mono">claim_task</span>, <span class="mono">submit_for_review</span> &mdash; but <b>not</b> approve or finish a task. Completion stays human-only.</p>
-    </div>
-  </section>
+    <section class="legacy"><div class="shell legacy-box"><span class="step-no">Optional legacy integration</span><h2>Already use Vikunja?</h2><p>You can keep it as an external board projection with <code>agentklar tracker connect</code> and <code>agentklar tracker sync</code>. It is not required for the native control center, evidence, memory, context, or approval workflow. See <a href="https://github.com/kaltstart-co/agentklar/blob/main/docs/USAGE.md">the full repository guide</a> for migration and service-account details.</p></div></section>
+  </main>
 
-  <section>
-    <div class="wrap">
-      <p class="eyebrow"><span class="num">3</span> &middot; Set up a board</p>
-      <h2>The board is your UI (Vikunja).</h2>
-      <p class="lead">Agentklar drives <a href="https://vikunja.io">Vikunja</a> &mdash; it doesn't build its own web app. You can skip this and run tracker-less, but the board is where the workflow is easiest to see.</p>
+  <footer><div class="shell foot"><a class="brand" href="index.html"><span class="mark" aria-hidden="true">✓</span>agentklar<em>.</em></a><span>A Kaltstart project · MIT licensed</span><div class="foot-links"><a href="index.html">Home</a><a href="features.html">Product</a><a href="https://github.com/kaltstart-co/agentklar">GitHub</a></div></div></footer>
 
-      <h3 class="s">You already run Vikunja</h3>
-      <p class="small">Use a <b>separate service account</b> for the bot (so it can never approve its own work), and name the account that approves. <span class="mono">connect</span> creates the project, shares it, and creates the eight workflow columns.</p>
-      <div class="block"><button class="cp" data-copy="agentklar tracker connect \
-  --url https://vikunja.example.com/api/v1 \
-  --svc-user agentklar-bot --svc-pass '******' \
-  --human you">Copy</button>
-<pre>agentklar tracker connect \
-  <span class="fl">--url</span> https://vikunja.example.com/api/v1 \
-  <span class="fl">--svc-user</span> agentklar-bot <span class="fl">--svc-pass</span> '******' \
-  <span class="fl">--human</span> you</pre></div>
-      <p class="small">Prefer an API token? Use <span class="mono">--svc-token &lt;token&gt;</span> instead of user/pass.</p>
-
-      <h3 class="s">You don't have Vikunja yet</h3>
-      <p class="small">One container is enough for one person. Then register your user and a second <span class="mono">agentklar-bot</span> user, and run the connect command above with <span class="mono">--url http://localhost:3456/api/v1</span>.</p>
-      <div class="block"><button class="cp" data-copy="docker run -p 3456:3456 -e VIKUNJA_SERVICE_PUBLICURL=http://localhost:3456/ vikunja/vikunja:latest">Copy</button>
-<pre>docker run -p 3456:3456 \
-  -e VIKUNJA_SERVICE_PUBLICURL=http://localhost:3456/ \
-  vikunja/vikunja:latest</pre></div>
-    </div>
-  </section>
-
-  <section>
-    <div class="wrap">
-      <p class="eyebrow"><span class="num">4</span> &middot; Run a task</p>
-      <h2>End to end.</h2>
-      <div class="block"><button class="cp" data-copy='agentklar init
-agentklar task new AK-1 Fix the parser --criteria "handles empty input;tests pass" --verify "go test ./..."
-agentklar task ready AK-1
-agentklar gate AK-1
-agentklar approve AK-1'>Copy</button>
-<pre>agentklar init                        <span class="c"># once per repo</span>
-
-<span class="c"># 1. you shape the task &mdash; no criteria, no "ready"</span>
-agentklar task new AK-1 Fix the parser \
-  <span class="fl">--criteria</span> "handles empty input;tests pass" <span class="fl">--verify</span> "go test ./..."
-agentklar task ready AK-1
-
-<span class="c"># 2. your agent claims and does the work over MCP, then submits</span>
-
-agentklar gate AK-1                    <span class="c"># your checks &rarr; machine-attested evidence</span>
-agentklar approve AK-1                 <span class="c"># you finish it &mdash; the agent can't</span></pre></div>
-      <p class="note">Cards move as tasks move. To force the board to match the current state, run <span class="mono">agentklar tracker sync</span>. The trusted approval (vs. the dev shortcut) is a <span class="mono">approve &lt;nonce&gt;</span> comment on the card from your own account, then <span class="mono">agentklar reconcile</span>.</p>
-    </div>
-  </section>
-
-  <section>
-    <div class="wrap">
-      <p class="eyebrow"><span class="num">5</span> &middot; Every command</p>
-      <h2>Reference.</h2>
-      <div class="grp">
-        <div class="rrow"><code>agentklar init</code><span class="d">Create a workspace for the current repo, propose the checks to run</span></div>
-        <div class="rrow"><code>task new / ready / list / show</code><span class="d">Shape and inspect tasks</span></div>
-        <div class="rrow"><code>agentklar mcp</code><span class="d">Run the agent-facing MCP server (your agent launches this)</span></div>
-        <div class="rrow"><code>agentklar mcp install [--client]</code><span class="d">Print MCP config to connect your agent</span></div>
-        <div class="rrow"><code>agentklar gate &lt;id&gt;</code><span class="d">Run the checks, store machine-attested evidence</span></div>
-        <div class="rrow"><code>agentklar tracker connect &hellip;</code><span class="d">Connect a Vikunja board (new or existing)</span></div>
-        <div class="rrow"><code>agentklar tracker sync</code><span class="d">Place every task's card in its state column</span></div>
-        <div class="rrow"><code>agentklar reconcile</code><span class="d">Apply a human approval posted on the board</span></div>
-        <div class="rrow"><code>agentklar approve / reject &lt;id&gt;</code><span class="d">Finish a task (human-only)</span></div>
-        <div class="rrow"><code>agentklar doctor</code><span class="d">Health: declared checks, missing commands, task counts</span></div>
-        <div class="rrow"><code>agentklar version</code><span class="d">Version, commit, build date</span></div>
-      </div>
-      <p class="note">Scoping: Agentklar resolves your workspace from the <b>current git repo</b>, so <span class="mono">task list</span> shows only that repo's tasks &mdash; one repo, one board.</p>
-    </div>
-  </section>
-</main>
-
-<footer>
-  <div class="wrap foot">
-    <a class="brand" href="index.html">agentklar<span class="dot" style="color:var(--accent)">.</span><small>by Kaltstart</small></a>
-    <nav>
-      <a href="index.html">Home</a>
-      <a href="features.html">Features</a>
-      <a href="https://github.com/kaltstart-co/agentklar">GitHub</a>
-    </nav>
-  </div>
-  <div class="wrap"><p class="foot-tag">A Kaltstart project &middot; <a href="https://kaltstart.co">kaltstart.co</a></p></div>
-</footer>
-
-<script>
-  (function () {
-    var root = document.documentElement, btn = document.getElementById('theme');
-    function cur() { return root.getAttribute('data-theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'); }
-    btn.addEventListener('click', function () { var n = cur() === 'dark' ? 'light' : 'dark'; root.setAttribute('data-theme', n); btn.textContent = n === 'dark' ? 'Light' : 'Dark'; });
-    document.querySelectorAll('.cp').forEach(function (b) {
-      b.addEventListener('click', function () {
-        navigator.clipboard.writeText(b.getAttribute('data-copy')).then(function () {
-          var o = b.textContent; b.textContent = 'Copied'; b.classList.add('done');
-          setTimeout(function () { b.textContent = o; b.classList.remove('done'); }, 1500);
+  <script>
+    document.querySelectorAll('.copy').forEach(function (button) {
+      button.addEventListener('click', function () {
+        navigator.clipboard.writeText(button.dataset.copy).then(function () {
+          button.textContent = 'Copied'; button.classList.add('copied');
+          setTimeout(function () { button.textContent = 'Copy'; button.classList.remove('copied'); }, 1400);
         });
       });
     });
-  })();
-</script>
+  </script>
+</body>
+</html>
