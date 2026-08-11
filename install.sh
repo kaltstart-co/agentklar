@@ -110,9 +110,24 @@ install_from_release() {
   color "  verified sha256"
 
   members="$(tar -tzf "$archive")" || { err "could not read release archive"; exit 1; }
-  [[ "$members" == "$BIN" ]] || { err "release archive must contain only the top-level $BIN binary"; exit 1; }
+  license_count=0
+  readme_count=0
+  binary_count=0
+  while IFS= read -r member; do
+    case "$member" in
+      LICENSE) license_count=$((license_count + 1));;
+      README.md) readme_count=$((readme_count + 1));;
+      "$BIN") binary_count=$((binary_count + 1));;
+      *) err "release archive contains an unexpected member: $member"; exit 1;;
+    esac
+  done <<<"$members"
+  [[ "$license_count" == 1 && "$readme_count" == 1 && "$binary_count" == 1 ]] || {
+    err "release archive must contain LICENSE, README.md, and $BIN exactly once"; exit 1;
+  }
   details="$(tar -tvzf "$archive")" || { err "could not inspect release archive"; exit 1; }
-  [[ "${details:0:1}" == "-" ]] || { err "release archive $BIN member is not a regular file"; exit 1; }
+  while IFS= read -r detail; do
+    [[ "${detail:0:1}" == "-" ]] || { err "release archive members must be regular files"; exit 1; }
+  done <<<"$details"
   tar -xzf "$archive" -C "$tmp" "$BIN"
   activate "$tmp/$BIN"
 }

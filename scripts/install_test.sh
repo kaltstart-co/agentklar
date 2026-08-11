@@ -29,24 +29,34 @@ elif [ "${1:-}" = install ]; then
 fi
 SCRIPT
   chmod +x "$dir/payload/agentklar"
+  printf 'license\n' >"$dir/payload/LICENSE"
+  printf 'readme\n' >"$dir/payload/README.md"
   archive="$dir/agentklar_test_linux_amd64.tar.gz"
   case "$mode" in
     symlink)
       cp "$dir/payload/agentklar" "$dir/symlink-target"
       rm "$dir/payload/agentklar"
       ln -s "$dir/symlink-target" "$dir/payload/agentklar"
-      tar -czf "$archive" -C "$dir/payload" agentklar
+      tar -czf "$archive" -C "$dir/payload" LICENSE README.md agentklar
       ;;
     unexpected)
       printf 'surprise\n' >"$dir/payload/extra"
-      tar -czf "$archive" -C "$dir/payload" agentklar extra
+      tar -czf "$archive" -C "$dir/payload" LICENSE README.md agentklar extra
       ;;
     nested)
       mkdir -p "$dir/payload/bin"
       mv "$dir/payload/agentklar" "$dir/payload/bin/agentklar"
-      tar -czf "$archive" -C "$dir/payload" bin/agentklar
+      tar -czf "$archive" -C "$dir/payload" LICENSE README.md bin/agentklar
       ;;
-    *) tar -czf "$archive" -C "$dir/payload" agentklar ;;
+    duplicate)
+      tar -czf "$archive" -C "$dir/payload" LICENSE README.md agentklar agentklar
+      ;;
+    directory)
+      rm "$dir/payload/LICENSE"
+      mkdir "$dir/payload/LICENSE"
+      tar -czf "$archive" -C "$dir/payload" LICENSE README.md agentklar
+      ;;
+    *) tar -czf "$archive" -C "$dir/payload" LICENSE README.md agentklar ;;
   esac
   checksum="$({ command -v shasum >/dev/null && shasum -a 256 "$archive"; } || sha256sum "$archive")"
   case "$mode" in
@@ -161,7 +171,7 @@ run_case missing-sha valid 1 0 0
 grep -qi 'sha256.*required\|required.*sha256' "$CASE_DIR/output" || fail "missing SHA tool error was unclear"
 [ "$(cat "$CASE_DIR/install/agentklar")" = old ] || fail "missing SHA tool replaced existing binary"
 
-for unsafe in symlink unexpected nested; do
+for unsafe in symlink unexpected nested duplicate directory; do
   run_case "$unsafe-archive" "$unsafe" 1 1 0
   [ "$CASE_STATUS" -ne 0 ] || fail "$unsafe archive succeeded"
   [ "$(cat "$CASE_DIR/install/agentklar")" = old ] || fail "$unsafe archive replaced existing binary"
