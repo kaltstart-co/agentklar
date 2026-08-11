@@ -113,9 +113,8 @@ func (e *Engine) CreateTask(t Task) error {
 	if t.Priority == "" {
 		t.Priority = PriorityMedium
 	}
-	if t.Labels == nil {
-		t.Labels = []string{}
-	}
+	t.Criteria = normalizeStrings(t.Criteria)
+	t.Labels = normalizeStrings(t.Labels)
 	crit, _ := json.Marshal(t.Criteria)
 	labels, _ := json.Marshal(t.Labels)
 	now := e.ts()
@@ -286,7 +285,9 @@ func (e *Engine) Heartbeat(taskID string, token int64) error {
 		expiry, e.ts(), taskID); err != nil {
 		return err
 	}
-	tx.Exec(`UPDATE repo_leases SET expires_at = ? WHERE task_id = ?`, expiry, taskID)
+	if _, err := tx.Exec(`UPDATE repo_leases SET expires_at = ? WHERE task_id = ?`, expiry, taskID); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 
@@ -338,7 +339,9 @@ func (e *Engine) SubmitForReview(taskID string, token int64, baseCommit, headCom
 		return 0, err
 	}
 	// Free the exclusive repo lease; keep the task lease frozen for provenance.
-	tx.Exec(`DELETE FROM repo_leases WHERE task_id = ?`, taskID)
+	if _, err := tx.Exec(`DELETE FROM repo_leases WHERE task_id = ?`, taskID); err != nil {
+		return 0, err
+	}
 
 	if _, err := tx.Exec(`INSERT INTO idempotency (key, result, created_at) VALUES (?,?,?)`,
 		idemKey, fmt.Sprintf("%d", subID), e.ts()); err != nil {
@@ -454,12 +457,19 @@ func (e *Engine) PendingApproval(taskID string) (nonce string, submissionID int6
 // approvedBy records the human actor identity; channel records which
 // trusted channel supplied the decision.
 func (e *Engine) ResolveApproval(taskID, nonce string, approve bool, approvedBy, channel string) error {
-	return e.ResolveApprovalWithReason(taskID, nonce, approve, approvedBy, channel, "")
+	return e.resolveApproval(taskID, nonce, approve, approvedBy, channel, "", false)
 }
 
 // ResolveApprovalWithReason records a human rejection reason before moving the
 // task to Changes Requested. ResolveApproval remains for existing callers.
 func (e *Engine) ResolveApprovalWithReason(taskID, nonce string, approve bool, approvedBy, channel, reason string) error {
+	return e.resolveApproval(taskID, nonce, approve, approvedBy, channel, reason, true)
+}
+
+func (e *Engine) resolveApproval(taskID, nonce string, approve bool, approvedBy, channel, reason string, requireReason bool) error {
+	if !approve && requireReason && strings.TrimSpace(reason) == "" {
+		return ErrInvalidTask
+	}
 	tx, err := e.db.Begin()
 	if err != nil {
 		return err
@@ -697,6 +707,17 @@ func (e *Engine) HumanTransition(id string, to contracts.State, reason string) e
 		if strings.TrimSpace(reason) == "" {
 			return ErrInvalidTask
 		}
+		result, err := tx.Exec(`UPDATE approvals SET decided = 1, decision = 'rejected', decided_by = 'human', channel = 'board' WHERE task_id = ? AND decided = 0`, id)
+		if err != nil {
+			return err
+		}
+		updated, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if updated != 1 {
+			return ErrNonceInvalid
+		}
 		if _, err := tx.Exec(`INSERT INTO comments (task_id, actor, ctype, body, created_at) VALUES (?,?,?,?,?)`,
 			id, contracts.ActorHuman, "request_changes", reason, e.ts()); err != nil {
 			return err
@@ -724,10 +745,10 @@ func (e *Engine) ArchiveTask(id string) error {
 	if err != nil {
 		return err
 	}
-	if t.State == contracts.StateInProgress {
-		if err := e.dropLeases(tx, id); err != nil {
-			return err
-		}
+	switch t.State {
+	case contracts.StateDraft, contracts.StateReady, contracts.StateChangesRequested, contracts.StateDone, contracts.StateCancelled:
+	default:
+		return fmt.Errorf("%w: cannot archive state=%s", ErrWrongState, t.State)
 	}
 	if _, err := tx.Exec(`UPDATE tasks SET archived_at = ?, updated_at = ? WHERE id = ?`, e.ts(), e.ts(), id); err != nil {
 		return err
@@ -789,6 +810,8 @@ func scanTask(row taskScanner) (*Task, error) {
 	}
 	json.Unmarshal([]byte(criteria), &t.Criteria)
 	json.Unmarshal([]byte(labels), &t.Labels)
+	t.Criteria = normalizeStrings(t.Criteria)
+	t.Labels = normalizeStrings(t.Labels)
 	return &t, nil
 }
 
@@ -858,6 +881,8 @@ func (e *Engine) dropLeases(tx *sql.Tx, taskID string) error {
 }
 
 func validateTaskUpdate(u *TaskUpdate) error {
+	u.Criteria = normalizeStrings(u.Criteria)
+	u.Labels = normalizeStrings(u.Labels)
 	if strings.TrimSpace(u.Title) == "" {
 		return ErrInvalidTask
 	}
@@ -888,7 +913,14 @@ func validateTaskUpdate(u *TaskUpdate) error {
 func sameProtectedFields(t *Task, u TaskUpdate) bool {
 	return t.Title == u.Title && t.Objective == u.Objective && t.Verification == u.Verification &&
 		t.Lane == u.Lane && t.Isolation == u.Isolation && t.Target == u.Target &&
-		reflect.DeepEqual(t.Criteria, u.Criteria)
+		reflect.DeepEqual(normalizeStrings(t.Criteria), normalizeStrings(u.Criteria))
+}
+
+func normalizeStrings(values []string) []string {
+	if values == nil {
+		return []string{}
+	}
+	return values
 }
 
 func newNonce() (string, error) {

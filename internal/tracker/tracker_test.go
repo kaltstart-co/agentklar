@@ -83,6 +83,12 @@ func TestRejectionParsed(t *testing.T) {
 	}
 }
 
+func TestRejectionRequiresReason(t *testing.T) {
+	if _, err := ParseApproval(comment("u-divyansh", "reject "+nonce), nonce, policy()); err == nil {
+		t.Fatal("rejection without a reason was accepted")
+	}
+}
+
 // An empty author (e.g. a webhook missing actor identity) is never trusted.
 func TestMissingAuthorRejected(t *testing.T) {
 	if _, err := ParseApproval(comment("", "approve "+nonce), nonce, policy()); err != ErrNotHumanActor {

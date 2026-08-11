@@ -284,6 +284,22 @@ func TestResolveApprovalWithReasonAppendsHumanRequestChangesComment(t *testing.T
 	}
 }
 
+func TestResolveApprovalWithReasonRejectsBlankReasonWithoutSpendingNonce(t *testing.T) {
+	e := newEngine(t)
+	readyTask(t, e, "T1", contracts.LaneQuick, "")
+	c, _ := e.ClaimTask("T1", "agent-a", contracts.StateReady)
+	sub, _ := e.SubmitForReview("T1", c.FencingToken, "base", "head", "s")
+	e.RecordReview("T1", sub, "completion", contracts.ResultPass, "det", "[]")
+	e.RecordReview("T1", sub, "qa", contracts.ResultPass, "det", "[]")
+	nonce, _, _ := e.PendingApproval("T1")
+	if err := e.ResolveApprovalWithReason("T1", nonce, false, "divyansh", "tracker_comment", " \t "); err != ErrInvalidTask {
+		t.Fatalf("blank rejection reason = %v", err)
+	}
+	if got, _, err := e.PendingApproval("T1"); err != nil || got != nonce {
+		t.Fatalf("blank rejection spent nonce: %q, %v", got, err)
+	}
+}
+
 func TestReadyRejectsWhitespaceOnlyVerification(t *testing.T) {
 	e := newEngine(t)
 	if err := e.CreateTask(Task{ID: "T1", Project: "p", Title: "task", Criteria: []string{"c"}, Verification: " \t\n "}); err != nil {
@@ -309,16 +325,19 @@ func TestCancellingInProgressTaskDropsLeases(t *testing.T) {
 	assertNoTaskLeases(t, e, "T1")
 }
 
-func TestArchivingInProgressTaskDropsLeases(t *testing.T) {
+func TestArchiveTaskRejectsInProgressWork(t *testing.T) {
 	e := newEngine(t)
 	readyTask(t, e, "T1", contracts.LaneQuick, "/tmp/archive-lease")
 	if _, err := e.ClaimTask("T1", "agent", contracts.StateReady); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.ArchiveTask("T1"); err != nil {
-		t.Fatal(err)
+	if err := e.ArchiveTask("T1"); err == nil {
+		t.Fatal("archived active In Progress task")
 	}
-	assertNoTaskLeases(t, e, "T1")
+	got, err := e.GetTask("T1")
+	if err != nil || got.ArchivedAt != "" {
+		t.Fatalf("active task archive changed state: %+v, %v", got, err)
+	}
 }
 
 func assertNoTaskLeases(t *testing.T, e *Engine, taskID string) {
@@ -332,6 +351,99 @@ func assertNoTaskLeases(t *testing.T, e *Engine, taskID string) {
 			t.Fatalf("%s retained %d lease rows for %s", table, count, taskID)
 		}
 	}
+}
+
+func TestArchiveTaskRejectsEveryActiveWorkflowState(t *testing.T) {
+	for _, state := range []contracts.State{
+		contracts.StateInProgress, contracts.StateWaiting, contracts.StateBlocked,
+		contracts.StateCompletionReview, contracts.StateAutoQA, contracts.StateUserApproval,
+	} {
+		t.Run(string(state), func(t *testing.T) {
+			e := newEngine(t)
+			if err := e.CreateTask(Task{ID: "T1", Project: "p", Title: "active"}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := e.DB().Exec(`UPDATE tasks SET state = ? WHERE id = ?`, state, "T1"); err != nil {
+				t.Fatal(err)
+			}
+			if err := e.ArchiveTask("T1"); err == nil {
+				t.Fatalf("archived active %s task", state)
+			}
+		})
+	}
+}
+
+func TestHumanRequestChangesSpendsPendingApproval(t *testing.T) {
+	e := newEngine(t)
+	readyTask(t, e, "T1", contracts.LaneQuick, "")
+	c, _ := e.ClaimTask("T1", "agent-a", contracts.StateReady)
+	sub, _ := e.SubmitForReview("T1", c.FencingToken, "base", "head", "s")
+	e.RecordReview("T1", sub, "completion", contracts.ResultPass, "det", "[]")
+	e.RecordReview("T1", sub, "qa", contracts.ResultPass, "det", "[]")
+	if err := e.HumanTransition("T1", contracts.StateChangesRequested, "add coverage"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := e.PendingApproval("T1"); err != ErrNotFound {
+		t.Fatalf("request changes left approval pending: %v", err)
+	}
+	var decision string
+	if err := e.DB().QueryRow(`SELECT decision FROM approvals WHERE task_id = ?`, "T1").Scan(&decision); err != nil || decision != "rejected" {
+		t.Fatalf("approval decision = %q, %v", decision, err)
+	}
+}
+
+func TestNilCriteriaAndLabelsNormalizeToEmptyArrays(t *testing.T) {
+	e := newEngine(t)
+	if err := e.CreateTask(Task{ID: "T1", Project: "p", Title: "empty"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := e.GetTask("T1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Criteria == nil || got.Labels == nil || len(got.Criteria) != 0 || len(got.Labels) != 0 {
+		t.Fatalf("nil slices were not normalized: %+v", got)
+	}
+	u := updateFor(got)
+	u.Criteria, u.Labels = nil, nil
+	if err := e.UpdateTask("T1", u); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = e.GetTask("T1")
+	if got.Criteria == nil || got.Labels == nil {
+		t.Fatalf("update stored nil slices: %+v", got)
+	}
+}
+
+func TestHeartbeatAndSubmitReturnRepositoryLeaseErrors(t *testing.T) {
+	t.Run("heartbeat", func(t *testing.T) {
+		e := newEngine(t)
+		readyTask(t, e, "T1", contracts.LaneQuick, "/tmp/heartbeat-error")
+		c, err := e.ClaimTask("T1", "agent", contracts.StateReady)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := e.DB().Exec(`DROP TABLE repo_leases`); err != nil {
+			t.Fatal(err)
+		}
+		if err := e.Heartbeat("T1", c.FencingToken); err == nil {
+			t.Fatal("heartbeat ignored repo lease update error")
+		}
+	})
+	t.Run("submit", func(t *testing.T) {
+		e := newEngine(t)
+		readyTask(t, e, "T1", contracts.LaneQuick, "/tmp/submit-error")
+		c, err := e.ClaimTask("T1", "agent", contracts.StateReady)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := e.DB().Exec(`DROP TABLE repo_leases`); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := e.SubmitForReview("T1", c.FencingToken, "base", "head", "summary"); err == nil {
+			t.Fatal("submit ignored repo lease delete error")
+		}
+	})
 }
 
 // Auto QA failure routes to Changes Requested and never to User Approval.
