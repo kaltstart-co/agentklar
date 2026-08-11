@@ -13,16 +13,23 @@ own Vikunja board. This guide takes you from install to a task moving across the
 
 ## 1. Install
 
-**From a release (recommended)** — download the archive for your OS/arch from the
-[Releases page](https://github.com/kaltstart-co/agentklar/releases), verify it against
-`checksums.txt`, and put the binary on your `PATH`:
+**From a release (recommended)** — the installer downloads the newest archive,
+verifies its SHA-256 checksum, and atomically installs the binary and embedded UI:
 
 ```bash
-# example: macOS arm64
-tar xzf agentklar_*_darwin_arm64.tar.gz
-install -m 0755 agentklar ~/.local/bin/agentklar
-agentklar version
+curl -sSL https://raw.githubusercontent.com/kaltstart-co/agentklar/main/install.sh | bash
 ```
+
+Rerun that exact command to update. The project catalog and workspace SQLite
+files under `~/.local/share/agentklar` are preserved. For a custom location,
+use the same directory on every update:
+
+```bash
+curl -sSL https://raw.githubusercontent.com/kaltstart-co/agentklar/main/install.sh | AGENTKLAR_INSTALL_DIR=/path/to/bin bash
+```
+
+Pass installer arguments after `bash -s --`, for example `bash -s -- --no-agents`
+or `bash -s -- --with-go`.
 
 **From source** (needs Go 1.25+):
 

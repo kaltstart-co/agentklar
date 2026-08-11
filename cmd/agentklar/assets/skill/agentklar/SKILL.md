@@ -110,7 +110,13 @@ Everything an agent knows, the human can see (Transparency). Never claim a fact 
 ```bash
 # one line (macOS/Linux):
 curl -sSL https://raw.githubusercontent.com/kaltstart-co/agentklar/main/install.sh | bash
+# custom install directory:
+curl -sSL https://raw.githubusercontent.com/kaltstart-co/agentklar/main/install.sh | AGENTKLAR_INSTALL_DIR=/path/to/bin bash
 # or with Go:
-go install github.com/kaltstart-co/agentklar/cmd/agentklar@latest
+curl -sSL https://raw.githubusercontent.com/kaltstart-co/agentklar/main/install.sh | bash -s -- --with-go
 agentklar install --agents opencode,claude,codex   # skill + slash commands + MCP
 ```
+
+To update Agentklar and its embedded UI, rerun the one-line installer. The
+project catalog and workspace SQLite files in `~/.local/share/agentklar` are
+preserved. Use `bash -s -- --no-agents` to skip rewiring agent integrations.

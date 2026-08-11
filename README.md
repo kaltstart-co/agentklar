@@ -27,9 +27,27 @@ slash commands into OpenCode, Claude Code, and Codex:
 curl -sSL https://raw.githubusercontent.com/kaltstart-co/agentklar/main/install.sh | bash
 ```
 
-Skip agent wiring with `--no-agents`; change the install location with
-`AGENTKLAR_INSTALL_DIR=/path`. If no prebuilt binary matches your platform and
-Go is installed, the script falls back to `go install`.
+Skip agent wiring with `curl -sSL https://raw.githubusercontent.com/kaltstart-co/agentklar/main/install.sh | bash -s -- --no-agents`.
+Use a custom install location with:
+
+```bash
+curl -sSL https://raw.githubusercontent.com/kaltstart-co/agentklar/main/install.sh | AGENTKLAR_INSTALL_DIR=/path/to/bin bash
+```
+
+If no prebuilt binary matches your platform and Go is installed, the script
+falls back to `go install`; pass `--with-go` to request that path explicitly.
+
+### Update
+
+Rerun the same one-line installer. It verifies and stages the new binary before
+atomically replacing the old binary, which also updates the embedded UI:
+
+```bash
+curl -sSL https://raw.githubusercontent.com/kaltstart-co/agentklar/main/install.sh | bash
+```
+
+The project catalog and workspace SQLite files under
+`~/.local/share/agentklar` are not modified by installation or updates.
 
 **With Go** (no clone, no manual build):
 

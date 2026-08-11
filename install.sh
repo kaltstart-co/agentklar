@@ -10,7 +10,7 @@
 #   2. Installs the `agentklar` binary to ~/.local/bin (and tells you if that
 #      is not on your PATH).
 #   3. Falls back to `go install ...@latest` if no matching binary exists and
-#      Go is installed.
+#      Go is installed (or when requested with --with-go).
 #   4. Optionally wires skill + slash commands + MCP into OpenCode, Claude
 #      Code, and Codex via `agentklar install` (skip with --no-agents).
 #
@@ -69,31 +69,49 @@ fi
 
 mkdir -p "$INSTALL_DIR"
 
+tmp=""
+staged_install=""
+cleanup() {
+  [[ -z "$staged_install" ]] || rm -f "$staged_install"
+  [[ -z "$tmp" ]] || rm -rf "$tmp"
+}
+trap cleanup EXIT
+
+activate() {
+  local candidate="$1"
+  if ! "$candidate" version >/dev/null 2>&1; then
+    err "downloaded binary failed its version check; existing installation preserved"
+    exit 1
+  fi
+  staged_install="$(mktemp "$INSTALL_DIR/.agentklar.XXXXXX")"
+  install -m 0755 "$candidate" "$staged_install"
+  mv -f "$staged_install" "$INSTALL_DIR/$BIN"
+  staged_install=""
+}
+
 install_from_release() {
   color "Installing Agentklar $tag ($os/$arch) from GitHub Releases"
   tmp="$(mktemp -d)"
-  trap 'rm -rf "$tmp"' EXIT
 
   archive="$tmp/${BIN}.tar.gz"
   color "  downloading $asset_url"
   curl -fsSL -o "$archive" "$asset_url"
 
-  if [[ -n "$checksum_url" ]]; then
-    curl -fsSL -o "$tmp/checksums.txt" "$checksum_url"
-    expected="$(grep -E "_${os}_${arch}\.tar\.gz\$" "$tmp/checksums.txt" | awk '{print $1}' || true)"
-    if [[ -n "$expected" ]]; then
-      actual="$($SHA "$archive" | awk '{print $1}')"
-      if [[ "$expected" != "$actual" ]]; then
-        err "checksum mismatch (expected $expected, got $actual)"; exit 1
-      fi
-      color "  verified sha256"
-    else
-      note "no checksum entry for this archive; skipping verification"
-    fi
+  [[ -n "$checksum_url" ]] || { err "release has no checksums.txt; refusing unverified archive"; exit 1; }
+  [[ -n "$SHA" ]] || { err "a sha256 tool is required to verify release archives"; exit 1; }
+  curl -fsSL -o "$tmp/checksums.txt" "$checksum_url"
+  asset_name="${asset_url##*/}"
+  expected="$(awk -v name="$asset_name" '$2 == name { print $1; exit }' "$tmp/checksums.txt")"
+  [[ "$expected" =~ ^[[:xdigit:]]{64}$ ]] || { err "checksums.txt has no valid entry for $asset_name"; exit 1; }
+  actual="$($SHA "$archive" | awk '{print $1}')"
+  if [[ "$expected" != "$actual" ]]; then
+    err "checksum mismatch (expected $expected, got $actual)"; exit 1
   fi
+  color "  verified sha256"
 
   tar -xzf "$archive" -C "$tmp"
-  install -m 0755 "$tmp/$BIN" "$INSTALL_DIR/$BIN"
+  [[ -f "$tmp/$BIN" ]] || { err "release archive does not contain $BIN"; exit 1; }
+  activate "$tmp/$BIN"
 }
 
 install_from_go() {
@@ -104,13 +122,15 @@ install_from_go() {
     exit 1
   fi
   color "Installing Agentklar via go install (builds from latest main)"
-  GOBIN="$INSTALL_DIR" go install "github.com/$OWNER/$REPO/cmd/$BIN@latest"
+  tmp="$(mktemp -d)"
+  GOBIN="$tmp" go install "github.com/$OWNER/$REPO/cmd/$BIN@latest"
+  activate "$tmp/$BIN"
 }
 
 # Pick a sha256 tool once.
 if command -v shasum >/dev/null 2>&1; then SHA="shasum -a 256"
 elif command -v sha256sum >/dev/null 2>&1; then SHA="sha256sum"
-else SHA=""; note "no sha256 tool found; archive will not be verified"; fi
+else SHA=""; fi
 
 if [[ -n "$asset_url" ]]; then
   install_from_release
