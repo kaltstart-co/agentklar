@@ -1,15 +1,17 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
-	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
+	"github.com/kaltstart-co/agentklar/internal/catalog"
 	"github.com/kaltstart-co/agentklar/internal/ui"
 )
 
@@ -25,20 +27,36 @@ func cmdUI(args []string) error {
 		return err
 	}
 
-	_, dir, err := openEngine()
+	dataRoot, err := agentklarDataRoot()
 	if err != nil {
 		return err
 	}
-	srv, err := ui.New(dir, repoRoot())
+	c, err := catalog.Open(dataRoot)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	repo := repoRoot()
+	project, err := c.Register(repo, filepath.Join(dataRoot, "workspaces", sanitize(filepath.Base(repo))))
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Join(project.WorkspacePath, "evidence"), 0o755); err != nil {
+		return err
+	}
+	srv, err := ui.NewControlCenter(c, project.ID)
 	if err != nil {
 		return err
 	}
 	defer srv.Close()
 
-	ln, err := net.Listen("tcp", *addr)
+	ln, err := srv.Listen(*addr)
 	if err != nil {
+		if errors.Is(err, ui.ErrNonLoopback) {
+			return err
+		}
 		// Fixed port busy? Fall back to a free one so `ui` always starts.
-		ln, err = net.Listen("tcp", "127.0.0.1:0")
+		ln, err = srv.Listen("")
 		if err != nil {
 			return err
 		}

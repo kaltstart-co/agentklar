@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 
@@ -20,7 +21,13 @@ var errNotPending = errors.New("task is not pending user approval")
 // --- HTML pages ---
 
 func (s *Server) handleBoard(w http.ResponseWriter, r *http.Request) {
-	tasks, err := s.engine.ListAll()
+	engine, closeFn, err := s.currentEngine()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+	defer closeFn()
+	tasks, err := engine.ListAll()
 	if err != nil {
 		s.render(w, "board", viewData{Title: "Board", Section: "board", Error: err.Error()})
 		return
@@ -37,14 +44,23 @@ func (s *Server) handleBoard(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleTask(w http.ResponseWriter, r *http.Request) {
+	engine, closeFn, err := s.currentEngine()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+	defer closeFn()
 	id := r.PathValue("id")
-	t, err := s.engine.GetTask(id)
+	if id == "" {
+		id = r.PathValue("task")
+	}
+	t, err := engine.GetTask(id)
 	if err != nil {
 		http.Error(w, "task not found", http.StatusNotFound)
 		return
 	}
-	ev, _ := s.engine.ListEvidence(id)
-	comments, _ := s.listComments(id)
+	ev, _ := engine.ListEvidence(id)
+	comments, _ := listEngineComments(engine, id)
 	s.render(w, "task", viewData{
 		Title:      t.Title,
 		Section:    "board",
@@ -112,7 +128,7 @@ func (s *Server) handleContext(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleApprovals(w http.ResponseWriter, r *http.Request) {
-	apps, _ := s.pendingApprovals()
+	apps, _ := s.allPendingApprovals()
 	s.render(w, "approvals", viewData{Title: "Approvals", Section: "approvals", Approvals: apps})
 }
 
@@ -120,8 +136,13 @@ func (s *Server) handleApprovals(w http.ResponseWriter, r *http.Request) {
 // It resolves the pending nonce via the engine and advances the task to Done.
 // On any error the protected state is unchanged and a 409 is returned.
 func (s *Server) handleApproveHTML(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBody)
+	if err := r.ParseForm(); err != nil || r.PostForm.Get("csrf_token") != s.csrfToken {
+		http.Error(w, "invalid form token", http.StatusForbidden)
+		return
+	}
 	id := r.PathValue("id")
-	if err := s.approve(id); err != nil {
+	if err := s.approve(r.PathValue("project"), id); err != nil {
 		http.Error(w, err.Error(), approvalErrorStatus(err))
 		return
 	}
@@ -197,7 +218,13 @@ func (s *Server) handleAPIAckAlert(w http.ResponseWriter, r *http.Request) {
 // --- JSON API ---
 
 func (s *Server) handleAPITasks(w http.ResponseWriter, r *http.Request) {
-	tasks, err := s.engine.ListAll()
+	engine, closeFn, err := s.currentEngine()
+	if err != nil {
+		writeWorkflowError(w, err)
+		return
+	}
+	defer closeFn()
+	tasks, err := engine.ListAll()
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -209,17 +236,23 @@ func (s *Server) handleAPITasks(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAPITask(w http.ResponseWriter, r *http.Request) {
+	engine, closeFn, err := s.currentEngine()
+	if err != nil {
+		writeWorkflowError(w, err)
+		return
+	}
+	defer closeFn()
 	id := r.PathValue("id")
-	t, err := s.engine.GetTask(id)
+	t, err := engine.GetTask(id)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "task not found"})
 		return
 	}
-	ev, _ := s.engine.ListEvidence(id)
+	ev, _ := engine.ListEvidence(id)
 	if ev == nil {
 		ev = []workflow.Evidence{}
 	}
-	comments, _ := s.listComments(id)
+	comments, _ := listEngineComments(engine, id)
 	if comments == nil {
 		comments = []comment{}
 	}
@@ -264,24 +297,16 @@ func (s *Server) handleAPIContext(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAPIApprovals(w http.ResponseWriter, r *http.Request) {
-	apps, _ := s.pendingApprovals()
-	out := make([]approvalJSON, 0, len(apps))
-	for _, a := range apps {
-		out = append(out, approvalJSON{Task: a.Task, Nonce: a.Nonce, SubmissionID: a.SubmissionID})
-	}
-	writeJSON(w, http.StatusOK, out)
-}
-
-// handleAPIApprove is the JSON twin of the trusted approve POST. It performs
-// the identical engine path as the HTML form; the boundary is preserved because
-// no agent MCP method can call it and the server binds to loopback.
-func (s *Server) handleAPIApprove(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	if err := s.approve(id); err != nil {
-		writeJSON(w, approvalErrorStatus(err), map[string]string{"ok": "false", "error": err.Error()})
+	apps, err := s.allPendingApprovals()
+	if err != nil {
+		writeWorkflowError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"ok": "true", "id": id, "state": string(contracts.StateDone)})
+	out := make([]approvalJSON, 0, len(apps))
+	for _, a := range apps {
+		out = append(out, approvalJSON{Task: a.Task, SubmissionID: a.SubmissionID, ProjectID: a.ProjectID})
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // --- shared internals ---
@@ -296,15 +321,15 @@ type taskDetail struct {
 
 type approvalJSON struct {
 	Task         workflow.Task `json:"Task"`
-	Nonce        string        `json:"Nonce"`
 	SubmissionID int64         `json:"SubmissionID"`
+	ProjectID    string        `json:"ProjectID,omitempty"`
 }
 
 // pendingApprovals lists every task currently in user_approval along with its
 // pending nonce. The nonce stays server-side; the HTML form never embeds it —
 // the server re-resolves it from its own store at click time.
-func (s *Server) pendingApprovals() ([]approvalView, error) {
-	tasks, err := s.engine.ListAll()
+func pendingApprovals(engine *workflow.Engine, projectID string) ([]approvalView, error) {
+	tasks, err := engine.ListAll()
 	if err != nil {
 		return nil, err
 	}
@@ -313,11 +338,15 @@ func (s *Server) pendingApprovals() ([]approvalView, error) {
 		if t.State != contracts.StateUserApproval {
 			continue
 		}
-		nonce, subID, err := s.engine.PendingApproval(t.ID)
+		_, subID, err := engine.PendingApproval(t.ID)
 		if err != nil {
 			continue
 		}
-		out = append(out, approvalView{Task: t, Nonce: nonce, SubmissionID: subID})
+		action := "/approvals/" + url.PathEscape(t.ID)
+		if projectID != "" {
+			action = "/projects/" + url.PathEscape(projectID) + action
+		}
+		out = append(out, approvalView{Task: t, SubmissionID: subID, ProjectID: projectID, Action: action})
 	}
 	return out, nil
 }
@@ -327,19 +356,68 @@ func (s *Server) pendingApprovals() ([]approvalView, error) {
 // human-only in practice because an agent has no MCP method for it and the UI
 // binds to 127.0.0.1. A task not in user_approval yields errNotPending and
 // leaves protected state untouched.
-func (s *Server) approve(taskID string) error {
-	t, err := s.engine.GetTask(taskID)
+func (s *Server) approve(projectID, taskID string) error {
+	engine := s.engine
+	closeFn := func() {}
+	if s.catalog != nil {
+		if projectID == "" {
+			projectID = s.currentProjectID
+		}
+		rt, err := s.openProject(projectID)
+		if err != nil {
+			return err
+		}
+		engine = rt.engine
+		closeFn = func() { _ = rt.Close() }
+	}
+	defer closeFn()
+	t, err := engine.GetTask(taskID)
 	if err != nil {
 		return fmt.Errorf("load task: %w", err)
 	}
 	if t.State != contracts.StateUserApproval {
 		return fmt.Errorf("%w: state=%s", errNotPending, t.State)
 	}
-	nonce, _, err := s.engine.PendingApproval(taskID)
+	nonce, _, err := engine.PendingApproval(taskID)
 	if err != nil {
 		return fmt.Errorf("load pending approval: %w", err)
 	}
-	return s.engine.ResolveApproval(taskID, nonce, true, "local-ui", "ui")
+	return engine.ResolveApproval(taskID, nonce, true, "local-ui", "ui")
+}
+
+func (s *Server) currentEngine() (*workflow.Engine, func(), error) {
+	if s.catalog == nil {
+		return s.engine, func() {}, nil
+	}
+	rt, err := s.openProject(s.currentProjectID)
+	if err != nil {
+		return nil, func() {}, err
+	}
+	return rt.engine, func() { _ = rt.Close() }, nil
+}
+
+func (s *Server) allPendingApprovals() ([]approvalView, error) {
+	if s.catalog == nil {
+		return pendingApprovals(s.engine, "")
+	}
+	projects, err := s.catalog.List()
+	if err != nil {
+		return nil, err
+	}
+	var out []approvalView
+	for _, project := range projects {
+		rt, err := s.openProject(project.ID)
+		if err != nil {
+			return nil, err
+		}
+		apps, err := pendingApprovals(rt.engine, project.ID)
+		rt.Close()
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, apps...)
+	}
+	return out, nil
 }
 
 // approvalErrorStatus maps an approve error to an HTTP status: a missing task

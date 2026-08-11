@@ -15,15 +15,20 @@
 package ui
 
 import (
+	"crypto/rand"
 	"embed"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"html/template"
 	"io/fs"
 	"net"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"strings"
 
+	"github.com/kaltstart-co/agentklar/internal/catalog"
 	akctx "github.com/kaltstart-co/agentklar/internal/context"
 	"github.com/kaltstart-co/agentklar/internal/contracts"
 	"github.com/kaltstart-co/agentklar/internal/knowledge"
@@ -53,11 +58,14 @@ type Server struct {
 	workspaceDir string
 	repoRoot     string
 
-	engine    *workflow.Engine // protected workflow state (control.sqlite)
-	knowledge *knowledge.Store // optional; nil if open failed
-	memory    *memory.Store    // optional; nil if open failed
-	context   *akctx.Store     // optional; nil if open failed
-	alerts    *notify.Store    // optional; nil if open failed
+	engine           *workflow.Engine // protected workflow state (control.sqlite)
+	knowledge        *knowledge.Store // optional; nil if open failed
+	memory           *memory.Store    // optional; nil if open failed
+	context          *akctx.Store     // optional; nil if open failed
+	alerts           *notify.Store    // optional; nil if open failed
+	catalog          *catalog.Catalog
+	currentProjectID string
+	csrfToken        string
 
 	pages  map[string]*template.Template // file basename -> layout+page set
 	router http.Handler
@@ -81,10 +89,46 @@ func New(workspaceDir, repoRoot string) (*Server, error) {
 	cStore, _ := akctx.New(workspaceDir)
 	aStore, _ := notify.New(workspaceDir)
 
+	s, err := newServer()
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
+	s.workspaceDir = workspaceDir
+	s.repoRoot = repoRoot
+	s.engine = engine
+	s.knowledge = kStore
+	s.memory = mStore
+	s.context = cStore
+	s.alerts = aStore
+	s.router = s.routes()
+	return s, nil
+}
+
+// NewControlCenter serves every catalog project while keeping each protected
+// database isolated. Project databases are opened only for the request using
+// them and closed before the response handler returns.
+func NewControlCenter(c *catalog.Catalog, currentProjectID string) (*Server, error) {
+	if c == nil {
+		return nil, errors.New("ui: project catalog is required")
+	}
+	if _, err := c.Get(currentProjectID); err != nil {
+		return nil, fmt.Errorf("ui: current project: %w", err)
+	}
+	s, err := newServer()
+	if err != nil {
+		return nil, err
+	}
+	s.catalog = c
+	s.currentProjectID = currentProjectID
+	s.router = s.routes()
+	return s, nil
+}
+
+func newServer() (*Server, error) {
 	// Validate that every template parses. This is the registration call from
 	// the spec; it is not used for rendering (per-page sets below are).
 	if _, err := template.New("").ParseFS(assetsFS, "assets/*.html"); err != nil {
-		db.Close()
 		return nil, fmt.Errorf("ui: parse templates: %w", err)
 	}
 
@@ -95,24 +139,16 @@ func New(workspaceDir, repoRoot string) (*Server, error) {
 	for _, name := range pageFiles {
 		t, err := template.New("").ParseFS(assetsFS, "assets/layout.html", "assets/"+name+".html")
 		if err != nil {
-			db.Close()
 			return nil, fmt.Errorf("ui: parse template %q: %w", name, err)
 		}
 		pages[name] = t
 	}
 
-	s := &Server{
-		workspaceDir: workspaceDir,
-		repoRoot:     repoRoot,
-		engine:       engine,
-		knowledge:    kStore,
-		memory:       mStore,
-		context:      cStore,
-		alerts:       aStore,
-		pages:        pages,
+	token := make([]byte, 32)
+	if _, err := rand.Read(token); err != nil {
+		return nil, fmt.Errorf("ui: csrf token: %w", err)
 	}
-	s.router = s.routes()
-	return s, nil
+	return &Server{pages: pages, csrfToken: hex.EncodeToString(token)}, nil
 }
 
 // Handler returns the routed http.Handler (a *http.ServeMux). Exported so the
@@ -127,8 +163,21 @@ func (s *Server) Listen(addr string) (net.Listener, error) {
 	if addr == "" {
 		addr = "127.0.0.1:0"
 	}
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, err
+	}
+	if host != "localhost" {
+		ip := net.ParseIP(host)
+		if ip == nil || !ip.IsLoopback() {
+			return nil, fmt.Errorf("%w: %s", ErrNonLoopback, addr)
+		}
+	}
 	return net.Listen("tcp", addr)
 }
+
+// ErrNonLoopback protects the browser approval channel from remote binding.
+var ErrNonLoopback = errors.New("agentklar UI only listens on loopback")
 
 // Close releases the underlying database handles. Optional; useful for tests.
 func (s *Server) Close() error {
@@ -176,6 +225,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /approvals/{id}", s.handleApproveHTML)
 	mux.HandleFunc("GET /alerts", s.handleAlerts)
 	mux.HandleFunc("POST /alerts/{id}/ack", s.handleAckAlertHTML)
+	mux.HandleFunc("POST /projects/{project}/approvals/{id}", s.handleApproveHTML)
 
 	// JSON API (same data; the stable contract for future clients).
 	mux.HandleFunc("GET /api/tasks", s.handleAPITasks)
@@ -183,11 +233,51 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /api/memory", s.handleAPIMemory)
 	mux.HandleFunc("GET /api/context", s.handleAPIContext)
 	mux.HandleFunc("GET /api/approvals", s.handleAPIApprovals)
-	mux.HandleFunc("POST /api/approvals/{id}", s.handleAPIApprove)
 	mux.HandleFunc("GET /api/alerts", s.handleAPIAlerts)
 	mux.HandleFunc("POST /api/alerts/{id}/ack", s.handleAPIAckAlert)
+	if s.catalog != nil {
+		mux.HandleFunc("GET /api/projects", s.handleAPIProjects)
+		mux.HandleFunc("GET /api/overview", s.handleAPIOverview)
+		mux.HandleFunc("GET /api/projects/{project}/tasks", s.handleProjectTasks)
+		mux.HandleFunc("POST /api/projects/{project}/tasks", s.handleProjectTasks)
+		mux.HandleFunc("GET /api/projects/{project}/tasks/{task}", s.handleProjectTask)
+		mux.HandleFunc("PATCH /api/projects/{project}/tasks/{task}", s.handleProjectTask)
+		mux.HandleFunc("POST /api/projects/{project}/tasks/{task}/comments", s.handleProjectComment)
+		mux.HandleFunc("POST /api/projects/{project}/tasks/{task}/transition", s.handleProjectTransition)
+		mux.HandleFunc("POST /api/projects/{project}/tasks/{task}/request-changes", s.handleProjectRequestChanges)
+		mux.HandleFunc("POST /api/projects/{project}/tasks/{task}/position", s.handleProjectPosition)
+	}
 
-	return mux
+	return s.rejectCrossOrigin(mux)
+}
+
+func (s *Server) rejectCrossOrigin(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodOptions {
+			if r.Header.Get("Sec-Fetch-Site") == "cross-site" || !sameOrigin(r) {
+				if strings.HasPrefix(r.URL.Path, "/api/") {
+					writeAPIError(w, http.StatusForbidden, "cross_origin", "cross-origin mutation rejected")
+				} else {
+					http.Error(w, "cross-origin mutation rejected", http.StatusForbidden)
+				}
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func sameOrigin(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true
+	}
+	u, err := url.Parse(origin)
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	return err == nil && u.Scheme == scheme && strings.EqualFold(u.Host, r.Host)
 }
 
 // render executes the named page inside the shared layout. The layout receives
@@ -200,6 +290,7 @@ func (s *Server) render(w http.ResponseWriter, page string, d viewData) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	d.CSRFToken = s.csrfToken
 	if err := t.ExecuteTemplate(w, "layout", d); err != nil {
 		// The header is already written on a successful Execute; fall back to a
 		// plain error only if execution failed before any bytes were flushed.
@@ -217,6 +308,7 @@ type viewData struct {
 	StateLabel string // human-readable task state, for the detail page badge
 	Q          string // current search query (memory/context)
 	Error      string
+	CSRFToken  string
 
 	// Board
 	Columns []columnView
@@ -254,8 +346,9 @@ type columnView struct {
 
 type approvalView struct {
 	Task         workflow.Task
-	Nonce        string
 	SubmissionID int64
+	ProjectID    string
+	Action       string
 }
 
 // comment mirrors the append-only comments table. There is no public
@@ -271,7 +364,11 @@ type comment struct {
 
 // listComments returns the timeline comments for a task in append order.
 func (s *Server) listComments(taskID string) ([]comment, error) {
-	rows, err := s.engine.DB().Query(
+	return listEngineComments(s.engine, taskID)
+}
+
+func listEngineComments(engine *workflow.Engine, taskID string) ([]comment, error) {
+	rows, err := engine.DB().Query(
 		`SELECT id, actor, ctype, body, created_at FROM comments WHERE task_id = ? ORDER BY id`,
 		taskID)
 	if err != nil {
@@ -295,11 +392,14 @@ func boardOrder() []contracts.State {
 		contracts.StateDraft,
 		contracts.StateReady,
 		contracts.StateInProgress,
+		contracts.StateWaiting,
+		contracts.StateBlocked,
 		contracts.StateCompletionReview,
 		contracts.StateAutoQA,
 		contracts.StateChangesRequested,
 		contracts.StateUserApproval,
 		contracts.StateDone,
+		contracts.StateCancelled,
 	}
 }
 

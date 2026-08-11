@@ -80,6 +80,15 @@ func do(t *testing.T, h http.Handler, method, target string, body io.Reader) *ht
 	return rec
 }
 
+func approveDo(t *testing.T, s *Server, target string) *httptest.ResponseRecorder {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, target, strings.NewReader("csrf_token="+s.csrfToken))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	s.Handler().ServeHTTP(rec, req)
+	return rec
+}
+
 // GET / renders the board and lists the seeded task.
 func TestBoardHTMLListsTask(t *testing.T) {
 	dir := t.TempDir()
@@ -130,7 +139,7 @@ func TestApprovalsListPendingBeforeDecision(t *testing.T) {
 
 	rec := do(t, s.Handler(), "GET", "/approvals", nil)
 	if rec.Code != http.StatusOK {
-		t.Fatalf("GET /approvals status = %d", rec.Code)
+		t.Fatalf("GET /approvals status = %d body=%s", rec.Code, rec.Body.String())
 	}
 	if !strings.Contains(rec.Body.String(), "Build the native UI") {
 		t.Fatalf("approvals page missing pending task title")
@@ -147,8 +156,8 @@ func TestApprovalsListPendingBeforeDecision(t *testing.T) {
 	if len(apps) != 1 || apps[0].Task.ID != "T-1" {
 		t.Fatalf("want 1 pending approval for T-1, got %+v", apps)
 	}
-	if apps[0].Nonce == "" {
-		t.Fatal("approval JSON missing nonce")
+	if strings.Contains(strings.ToLower(api.Body.String()), "nonce") {
+		t.Fatal("approval JSON leaked nonce")
 	}
 }
 
@@ -159,7 +168,7 @@ func TestApprovePendingHTML(t *testing.T) {
 	s, _ := New(dir, dir)
 	t.Cleanup(func() { s.Close() })
 
-	rec := do(t, s.Handler(), "POST", "/approvals/T-1", nil)
+	rec := approveDo(t, s, "/approvals/T-1")
 	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("POST /approvals/T-1 status = %d, want 303 (SeeOther)", rec.Code)
 	}
@@ -199,7 +208,7 @@ func TestApproveNonPendingIs409AndIdempotent(t *testing.T) {
 	t.Cleanup(func() { s.Close() })
 
 	// (1) A Draft task: 409, stays draft.
-	rec := do(t, s.Handler(), "POST", "/approvals/"+other, nil)
+	rec := approveDo(t, s, "/approvals/"+other)
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("approve draft status = %d, want 409", rec.Code)
 	}
@@ -208,18 +217,18 @@ func TestApproveNonPendingIs409AndIdempotent(t *testing.T) {
 		t.Fatalf("draft task state changed to %s", tk.State)
 	}
 
-	// (2) JSON twin also 409.
+	// (2) There is no generic JSON approval endpoint.
 	rec = do(t, s.Handler(), "POST", "/api/approvals/"+other, nil)
-	if rec.Code != http.StatusConflict {
-		t.Fatalf("api approve draft status = %d, want 409", rec.Code)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("api approve status = %d, want 404", rec.Code)
 	}
 
 	// (3) Approve the pending one, then approve AGAIN: second attempt 409,
 	//     state stays Done (nonce single-use boundary holds).
-	if rec := do(t, s.Handler(), "POST", "/approvals/"+pending, nil); rec.Code != http.StatusSeeOther {
+	if rec := approveDo(t, s, "/approvals/"+pending); rec.Code != http.StatusSeeOther {
 		t.Fatalf("first approve status = %d, want 303", rec.Code)
 	}
-	again := do(t, s.Handler(), "POST", "/approvals/"+pending, nil)
+	again := approveDo(t, s, "/approvals/"+pending)
 	if again.Code != http.StatusConflict {
 		t.Fatalf("second approve status = %d, want 409", again.Code)
 	}

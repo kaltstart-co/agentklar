@@ -12,7 +12,8 @@
   {{if .Task.Criteria}}<h2>Acceptance criteria</h2>
   <ul class="criteria">{{range .Task.Criteria}}<li>{{.}}</li>{{end}}</ul>{{end}}
   {{if .Task.Verification}}<h2>Verification</h2><pre>{{.Task.Verification}}</pre>{{end}}
-  <form method="post" action="/approvals/{{.Task.ID}}">
+  <form method="post" action="{{.Action}}">
+    <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
     <button class="btn good" type="submit">Approve &amp; mark Done</button>
   </form>
   <p class="muted" style="margin:.5rem 0 0;font-size:.78rem">Trusted local channel (127.0.0.1). The server resolves its own stored nonce; nothing is exposed to agents.</p>
