@@ -948,3 +948,37 @@ func TestCreateTaskRejectsAmbiguousPathIDs(t *testing.T) {
 		})
 	}
 }
+
+func TestCreateTaskWithDependenciesRollsBackInvalidDependency(t *testing.T) {
+	e := newEngine(t)
+	err := e.CreateTaskWithDependencies(Task{ID: "new", Project: "p", Title: "new"}, []string{"missing"})
+	if !errors.Is(err, ErrDependency) {
+		t.Fatalf("error = %v, want ErrDependency", err)
+	}
+	if _, err := e.GetTask("new"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("task persisted after failed dependencies: %v", err)
+	}
+}
+
+func TestUpdateTaskWithDependenciesRollsBackBothChanges(t *testing.T) {
+	e := newEngine(t)
+	for _, id := range []string{"task", "dep"} {
+		if err := e.CreateTask(Task{ID: id, Project: "p", Title: id}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := e.SetDependencies("task", []string{"dep"}); err != nil {
+		t.Fatal(err)
+	}
+	task, _ := e.GetTask("task")
+	u := updateFor(task)
+	u.Title = "changed"
+	if err := e.UpdateTaskWithDependencies("task", u, []string{"missing"}); !errors.Is(err, ErrDependency) {
+		t.Fatalf("error = %v, want ErrDependency", err)
+	}
+	got, _ := e.GetTask("task")
+	deps, _ := e.Dependencies("task")
+	if got.Title != "task" || !reflect.DeepEqual(deps, []string{"dep"}) {
+		t.Fatalf("partial update persisted: title=%q deps=%v", got.Title, deps)
+	}
+}

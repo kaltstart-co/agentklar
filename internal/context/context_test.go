@@ -226,6 +226,53 @@ func TestSearchReturnsDocsAcrossAllSources(t *testing.T) {
 	}
 }
 
+func TestReplaceSourcesRemovesStaleDocsAndPreservesOtherSources(t *testing.T) {
+	s, err := New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	if _, err := s.Index([]Doc{
+		{Source: SourceKnowledge, Ref: "old", Title: "old-knowledge-needle", Body: "old"},
+		{Source: SourceMemory, Ref: "old", Title: "old-memory-needle", Body: "old"},
+		{Source: SourceCode, Ref: "old", Title: "old-code-needle", Body: "old"},
+		{Source: SourceTicket, Ref: "ticket", Title: "ticket-needle", Body: "keep"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := s.ReplaceSources([]Doc{{Source: SourceKnowledge, Ref: "new", Title: "new-needle", Body: "new"}}, SourceKnowledge, SourceMemory, SourceCode); err != nil || n != 1 {
+		t.Fatalf("replace n=%d err=%v", n, err)
+	}
+	for _, query := range []string{"old-knowledge-needle", "old-memory-needle", "old-code-needle"} {
+		if got, _ := s.Search(query, 10); len(got) != 0 {
+			t.Fatalf("stale %q remained: %#v", query, got)
+		}
+	}
+	if got, _ := s.Search("ticket-needle", 10); len(got) != 1 || got[0].Source != SourceTicket {
+		t.Fatalf("unreplaced ticket lost: %#v", got)
+	}
+}
+
+func TestReplaceSourcesRollsBackOnWriteFailure(t *testing.T) {
+	s, err := New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	if _, err := s.Index([]Doc{{Source: SourceCode, Ref: "old", Title: "preserved-needle", Body: "old"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`CREATE TRIGGER fail_rebuild BEFORE INSERT ON docs WHEN NEW.ref = 'fail' BEGIN SELECT RAISE(FAIL, 'stop'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ReplaceSources([]Doc{{Source: SourceCode, Ref: "fail", Title: "new", Body: "new"}}, SourceCode); err == nil {
+		t.Fatal("replace unexpectedly succeeded")
+	}
+	if got, _ := s.Search("preserved-needle", 10); len(got) != 1 {
+		t.Fatalf("failed rebuild erased previous index: %#v", got)
+	}
+}
+
 func sortedKeys(m map[Source]bool) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {

@@ -205,13 +205,16 @@ func (s *Server) overview() ([]projectOverview, error) {
 				approvals++
 			}
 		}
-		pendingAlerts := 0
-		if alerts, closeFn, err := s.alertsForProject(p.ID); err == nil {
-			if rows, err := alerts.Pending(); err == nil {
-				pendingAlerts = len(rows)
-			}
-			closeFn()
+		alerts, closeFn, err := s.alertsForProject(p.ID)
+		if err != nil {
+			return nil, err
 		}
+		rows, err := alerts.Pending()
+		closeFn()
+		if err != nil {
+			return nil, err
+		}
+		pendingAlerts := len(rows)
 		out = append(out, projectOverview{Project: p, Counts: counts, Attention: attention, Approvals: approvals, Alerts: pendingAlerts})
 	}
 	return out, nil
@@ -262,11 +265,13 @@ func (s *Server) handleProjectTasks(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
-	if err := rt.engine.CreateTask(task); err != nil {
+	if err := rt.engine.CreateTaskWithDependencies(task, in.Dependencies); err != nil {
 		if isUniqueConstraint(err) {
 			writeAPIError(w, http.StatusConflict, "task_exists", "task already exists")
+		} else if errors.Is(err, workflow.ErrNotFound) {
+			writeAPIError(w, http.StatusInternalServerError, "internal_error", "task create transaction lost its inserted task")
 		} else {
-			writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
+			writeWorkflowError(w, err)
 		}
 		return
 	}
@@ -359,7 +364,12 @@ func (s *Server) handleProjectTask(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, "invalid_input", err.Error())
 		return
 	}
-	if err := rt.engine.UpdateTask(id, u); err != nil {
+	if patch.Dependencies != nil {
+		err = rt.engine.UpdateTaskWithDependencies(id, u, *patch.Dependencies)
+	} else {
+		err = rt.engine.UpdateTask(id, u)
+	}
+	if err != nil {
 		writeWorkflowError(w, err)
 		return
 	}
@@ -478,11 +488,21 @@ func (s *Server) handleProjectMemory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer closeFn()
+	namespace := strings.TrimSpace(r.URL.Query().Get("namespace"))
 	var rows []memory.Entry
 	if q := strings.TrimSpace(r.URL.Query().Get("q")); q != "" {
 		rows, err = store.Recall(q, 50)
+		if namespace != "" {
+			filtered := rows[:0]
+			for _, entry := range rows {
+				if entry.Namespace == namespace {
+					filtered = append(filtered, entry)
+				}
+			}
+			rows = filtered
+		}
 	} else {
-		rows, err = store.List("")
+		rows, err = store.List(namespace)
 	}
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
@@ -560,39 +580,52 @@ func (s *Server) handleProjectContextReindex(w http.ResponseWriter, r *http.Requ
 		writeAPIError(w, http.StatusNotFound, "not_found", "project not found")
 		return
 	}
-	var docs []akctx.Doc
-	if ks, err := knowledge.New(p.RepoPath); err == nil {
-		if entries, err := ks.List(); err == nil {
-			for _, e := range entries {
-				docs = append(docs, akctx.Doc{Source: akctx.SourceKnowledge, Ref: string(e.Kind) + "/" + e.Slug, Title: e.Title, Body: e.Body})
-			}
-		}
+	codeDocs, err := akctx.CollectCode(p.RepoPath)
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
 	}
-	if ms, err := memory.New(p.WorkspacePath); err == nil {
-		if rows, err := ms.List(""); err == nil {
-			for _, m := range rows {
-				docs = append(docs, akctx.Doc{Source: akctx.SourceMemory, Ref: akctx.MemoryRef(m.ID), Title: strings.TrimSpace(m.Namespace + " " + m.Key), Body: m.Value})
-			}
-		}
-		_ = ms.Close()
+	ks, err := knowledge.New(p.RepoPath)
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
 	}
+	entries, err := ks.List()
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	docs := make([]akctx.Doc, 0, len(entries)+len(codeDocs))
+	for _, e := range entries {
+		docs = append(docs, akctx.Doc{Source: akctx.SourceKnowledge, Ref: string(e.Kind) + "/" + e.Slug, Title: e.Title, Body: e.Body})
+	}
+	ms, err := memory.New(p.WorkspacePath)
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	rows, err := ms.List("")
+	_ = ms.Close()
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	for _, m := range rows {
+		docs = append(docs, akctx.Doc{Source: akctx.SourceMemory, Ref: akctx.MemoryRef(m.ID), Title: strings.TrimSpace(m.Namespace + " " + m.Key), Body: m.Value})
+	}
+	docs = append(docs, codeDocs...)
 	ctx, err := akctx.New(p.WorkspacePath)
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
 	defer ctx.Close()
-	n, err := ctx.Index(docs)
+	n, err := ctx.ReplaceSources(docs, akctx.SourceKnowledge, akctx.SourceMemory, akctx.SourceCode)
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
-	codeN, codeErr := ctx.IndexCode(p.RepoPath)
-	status := "indexed"
-	if codeErr != nil {
-		status = "partial"
-	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"status": status, "documents": n, "code_files": codeN, "indexed_at": time.Now().UTC().Format(time.RFC3339)})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"status": "indexed", "documents": n, "code_files": len(codeDocs), "indexed_at": time.Now().UTC().Format(time.RFC3339)})
 }
 
 type taskCreate struct {
@@ -608,6 +641,7 @@ type taskCreate struct {
 	Priority     workflow.Priority         `json:"priority"`
 	Criteria     []string                  `json:"criteria"`
 	Labels       []string                  `json:"labels"`
+	Dependencies []string                  `json:"dependencies"`
 }
 
 func (in taskCreate) task(p catalog.Project) workflow.Task {
@@ -640,6 +674,7 @@ type taskPatch struct {
 	Priority     *workflow.Priority         `json:"priority"`
 	Criteria     *[]string                  `json:"criteria"`
 	Labels       *[]string                  `json:"labels"`
+	Dependencies *[]string                  `json:"dependencies"`
 }
 
 func (p taskPatch) apply(t workflow.Task) workflow.TaskUpdate {
@@ -764,9 +799,21 @@ func writeProjectTaskDetail(w http.ResponseWriter, engine *workflow.Engine, id s
 		writeWorkflowError(w, err)
 		return
 	}
-	evidence, _ := engine.ListEvidence(id)
-	comments, _ := listEngineComments(engine, id)
-	dependencies, _ := engine.Dependencies(id)
+	evidence, err := engine.ListEvidence(id)
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	comments, err := listEngineComments(engine, id)
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	dependencies, err := engine.Dependencies(id)
+	if err != nil {
+		writeWorkflowError(w, err)
+		return
+	}
 	if evidence == nil {
 		evidence = []workflow.Evidence{}
 	}

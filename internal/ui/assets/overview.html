@@ -3,6 +3,11 @@
   <div><p class="eyebrow">Company control plane</p><h1>Overview</h1><p class="lede">Every project, one evidence-backed operating view.</p></div>
 </header>
 {{if .Error}}<p class="empty">{{.Error}}</p>{{else}}
+<section class="attention-section" aria-labelledby="attention-heading">
+  <div class="section-heading"><div><p class="eyebrow">Action queue</p><h2 id="attention-heading">Needs attention</h2></div><small>Blocked, waiting, approval, and pending-alert work.</small></div>
+  <div class="attention-list">{{range .Attention}}<a href="/projects/{{.Project.ID}}/board"><strong>{{.Project.Name}}</strong><span>{{.Attention}} workflow{{if .Alerts}} · {{.Alerts}} alert{{end}}</span></a>{{else}}<p class="empty">No projects currently need attention.</p>{{end}}</div>
+</section>
+<div class="section-heading recent-heading"><div><p class="eyebrow">Workspace history</p><h2>Recent projects</h2></div><small>Ordered by last opened.</small></div>
 <section class="overview-grid" aria-label="Project overview">
 {{range .Overview}}
   <a class="project-row" href="/projects/{{.Project.ID}}/board">

@@ -141,3 +141,9 @@ func TestIndexCodeEmptyRepoReturnsZero(t *testing.T) {
 		t.Fatalf("IndexCode empty repo indexed %d, want 0", n)
 	}
 }
+
+func TestCollectCodeFailsWhenRepoIsUnavailable(t *testing.T) {
+	if _, err := CollectCode(filepath.Join(t.TempDir(), "missing")); err == nil {
+		t.Fatal("missing repository collection unexpectedly succeeded")
+	}
+}

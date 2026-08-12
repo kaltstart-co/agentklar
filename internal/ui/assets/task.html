@@ -24,7 +24,7 @@
     <button role="tab" aria-selected="false" aria-controls="panel-timeline" id="tab-timeline">Timeline</button>
   </div>
   <div role="tabpanel" id="panel-evidence" aria-labelledby="tab-evidence">
-    {{if $.Evidence}}<div class="records">{{range $.Evidence}}<article><header><span class="state-badge">{{.Provenance}}</span><strong>{{.Criterion}}</strong></header><code>{{.Command}}</code><p>{{.Note}}</p><small>{{.LogPath}}</small></article>{{end}}</div>{{else}}<p class="empty">No machine-attested evidence recorded.</p>{{end}}
+    {{if $.Evidence}}<div class="records evidence-records">{{range $.Evidence}}<article><header><span class="state-badge">{{.Provenance}}</span><strong class="outcome outcome-{{evidenceOutcomeClass .}}">{{evidenceOutcome .}}</strong></header><dl><dt>Criterion</dt><dd>{{if .Criterion}}{{.Criterion}}{{else}}—{{end}}</dd><dt>Command</dt><dd><code>{{if .Command}}{{.Command}}{{else}}—{{end}}</code></dd><dt>Log</dt><dd>{{if .LogPath}}<code>{{.LogPath}}</code>{{else}}—{{end}}</dd><dt>Hash</dt><dd><code>{{if .Hash}}{{.Hash}}{{else}}—{{end}}</code></dd><dt>Recorded</dt><dd>{{.CreatedAt}}</dd><dt>Note</dt><dd>{{if .Note}}{{.Note}}{{else}}—{{end}}</dd></dl></article>{{end}}</div>{{else}}<p class="empty">No machine-attested evidence recorded.</p>{{end}}
   </div>
   <div role="tabpanel" id="panel-reviews" aria-labelledby="tab-reviews" hidden>
     {{if $.Reviews}}<div class="records">{{range $.Reviews}}<article><header><strong>{{.Kind}} · {{.Result}}</strong><span>{{.Provider}}</span></header><pre>{{.Findings}}</pre><small>{{.CreatedAt}}</small></article>{{end}}</div>{{else}}<p class="empty">No completion or QA reviews recorded.</p>{{end}}
@@ -41,7 +41,7 @@
 </section>{{end}}
 
 <dialog id="edit-task-dialog" class="task-dialog" aria-labelledby="edit-task-title">
-  <form method="dialog" data-task-form data-method="PATCH" data-api="/api/projects/{{$.ProjectID}}/tasks/{{.ID}}" data-deps-api="/api/projects/{{$.ProjectID}}/tasks/{{.ID}}/dependencies">
+  <form method="dialog" data-task-form data-method="PATCH" data-api="/api/projects/{{$.ProjectID}}/tasks/{{.ID}}">
     <header><div><p class="eyebrow">Planning metadata</p><h2 id="edit-task-title">Edit task</h2></div><button class="icon-button" value="cancel" aria-label="Close edit task dialog">×</button></header>
     <div class="form-grid">
       <label class="wide"><span>Title</span><input name="title" value="{{.Title}}" required></label>
@@ -55,7 +55,7 @@
       <label class="wide"><span>Labels <small>comma separated</small></span><input name="labels" value="{{range .Labels}}{{.}},{{end}}"></label>
       <label class="wide"><span>Acceptance criteria <small>one per line</small></span><textarea name="criteria" rows="4">{{range .Criteria}}{{.}}&#10;{{end}}</textarea></label>
       <label class="wide"><span>Verification</span><textarea name="verification" rows="3">{{.Verification}}</textarea></label>
-      <label class="wide"><span>Dependencies</span><select name="dependencies" multiple size="5">{{range $.AllTasks}}{{if ne .ID $.Task.ID}}<option value="{{.ID}}">{{.ID}} — {{.Title}}</option>{{end}}{{end}}</select></label>
+      <label class="wide"><span>Dependencies</span><select name="dependencies" multiple size="5">{{range $.AllTasks}}{{if ne .ID $.Task.ID}}<option value="{{.ID}}" {{if containsString $.Dependencies .ID}}selected{{end}}>{{.ID}} — {{.Title}}</option>{{end}}{{end}}</select></label>
     </div>
     <footer><button class="button secondary" value="cancel">Cancel</button><button class="button primary" type="submit" value="default">Save changes</button></footer>
   </form>

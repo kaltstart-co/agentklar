@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/kaltstart-co/agentklar/internal/contracts"
@@ -30,7 +31,13 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	overview, err := s.overview()
-	d := viewData{Title: "Overview", Section: "overview", Overview: overview}
+	attention := make([]projectOverview, 0, len(overview))
+	for _, project := range overview {
+		if project.Attention > 0 || project.Alerts > 0 {
+			attention = append(attention, project)
+		}
+	}
+	d := viewData{Title: "Overview", Section: "overview", Overview: overview, Attention: attention}
 	if err != nil {
 		d.Error = err.Error()
 	}
@@ -91,11 +98,31 @@ func (s *Server) handleTask(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "task not found", http.StatusNotFound)
 		return
 	}
-	ev, _ := engine.ListEvidence(id)
-	comments, _ := listEngineComments(engine, id)
-	reviews, _ := listEngineReviews(engine, id)
-	deps, _ := engine.Dependencies(id)
-	allTasks, _ := engine.ListAll()
+	ev, err := engine.ListEvidence(id)
+	if err != nil {
+		http.Error(w, "evidence unavailable: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	comments, err := listEngineComments(engine, id)
+	if err != nil {
+		http.Error(w, "timeline unavailable: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	reviews, err := listEngineReviews(engine, id)
+	if err != nil {
+		http.Error(w, "reviews unavailable: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	deps, err := engine.Dependencies(id)
+	if err != nil {
+		http.Error(w, "dependencies unavailable: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	allTasks, err := engine.ListAll()
+	if err != nil {
+		http.Error(w, "tasks unavailable: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
 	s.renderRequest(w, r, "task", viewData{
 		Title:        t.Title,
 		Section:      "board",
@@ -143,7 +170,8 @@ func (s *Server) handleKnowledge(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleMemory(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query().Get("q")
-	d := viewData{Title: "Memory", Section: "intelligence", Q: q}
+	namespace := strings.TrimSpace(r.URL.Query().Get("namespace"))
+	d := viewData{Title: "Memory", Section: "intelligence", Q: q, Namespace: namespace}
 	store, closeFn, err := s.memoryForProject(r.PathValue("project"))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -156,10 +184,36 @@ func (s *Server) handleMemory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d.MemOK = true
+	all, err := store.List("")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	seen := make(map[string]bool)
+	for _, entry := range all {
+		if entry.Namespace != "" && !seen[entry.Namespace] {
+			seen[entry.Namespace] = true
+			d.MemoryNamespaces = append(d.MemoryNamespaces, entry.Namespace)
+		}
+	}
+	sort.Strings(d.MemoryNamespaces)
 	if q != "" {
-		d.Memory, _ = store.Recall(q, 50)
+		d.Memory, err = store.Recall(q, 50)
+		if namespace != "" {
+			filtered := d.Memory[:0]
+			for _, entry := range d.Memory {
+				if entry.Namespace == namespace {
+					filtered = append(filtered, entry)
+				}
+			}
+			d.Memory = filtered
+		}
 	} else {
-		d.Memory, _ = store.List("")
+		d.Memory, err = store.List(namespace)
+	}
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
 	s.renderRequest(w, r, "memory", d)
 }
@@ -237,7 +291,11 @@ func (s *Server) handleAlerts(w http.ResponseWriter, r *http.Request) {
 	defer closeFn()
 	if store != nil {
 		ok = true
-		alerts, _ = store.List("")
+		alerts, err = store.List("")
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 	}
 	s.renderRequest(w, r, "alerts", viewData{Title: "Alerts", Section: "alerts", Alerts: alerts, AlertOK: ok})
 }
@@ -264,7 +322,11 @@ func (s *Server) handleAckAlertHTML(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
-	http.Redirect(w, r, "/alerts", http.StatusSeeOther)
+	redirect := "/alerts"
+	if projectID := r.PathValue("project"); projectID != "" {
+		redirect = "/projects/" + url.PathEscape(projectID) + "/alerts"
+	}
+	http.Redirect(w, r, redirect, http.StatusSeeOther)
 }
 
 func (s *Server) handleAPIAlerts(w http.ResponseWriter, r *http.Request) {
@@ -345,11 +407,19 @@ func (s *Server) handleAPITask(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "task not found"})
 		return
 	}
-	ev, _ := engine.ListEvidence(id)
+	ev, err := engine.ListEvidence(id)
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
 	if ev == nil {
 		ev = []workflow.Evidence{}
 	}
-	comments, _ := listEngineComments(engine, id)
+	comments, err := listEngineComments(engine, id)
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
 	if comments == nil {
 		comments = []comment{}
 	}
@@ -462,8 +532,14 @@ func (s *Server) pendingApprovals(engine *workflow.Engine, projectID string, hum
 		if human {
 			token = s.approvalToken(projectID, t.ID, subID, nonce)
 		}
-		evidence, _ := engine.ListEvidence(t.ID)
-		reviews, _ := listEngineReviews(engine, t.ID)
+		evidence, err := engine.ListEvidence(t.ID)
+		if err != nil {
+			return nil, err
+		}
+		reviews, err := listEngineReviews(engine, t.ID)
+		if err != nil {
+			return nil, err
+		}
 		out = append(out, approvalView{Task: t, Evidence: evidence, Reviews: reviews, SubmissionID: subID, ProjectID: projectID, Action: action, TaskURL: taskURL, CSRFToken: token})
 	}
 	return out, nil

@@ -113,26 +113,65 @@ func (s *Store) Index(docs []Doc) (int, error) {
 		return 0, fmt.Errorf("begin index tx: %w", err)
 	}
 	defer tx.Rollback() // safe to commit later; a no-op post-commit
+	if err := indexDocsTx(tx, docs); err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("commit index tx: %w", err)
+	}
+	return len(docs), nil
+}
 
+func indexDocsTx(tx *sql.Tx, docs []Doc) error {
 	for _, d := range docs {
 		// Drop any stale FTS rows for this key first so the index never
 		// holds duplicates of a (source, ref) across re-indexes.
 		if _, err := tx.Exec(`DELETE FROM docs_fts WHERE source = ? AND ref = ?`, d.Source, d.Ref); err != nil {
-			return 0, fmt.Errorf("delete docs_fts %s:%s: %w", d.Source, d.Ref, err)
+			return fmt.Errorf("delete docs_fts %s:%s: %w", d.Source, d.Ref, err)
 		}
 		if _, err := tx.Exec(`INSERT INTO docs (source, ref, title, body) VALUES (?, ?, ?, ?)
 			ON CONFLICT(source, ref) DO UPDATE SET title = excluded.title, body = excluded.body`,
 			d.Source, d.Ref, d.Title, d.Body); err != nil {
-			return 0, fmt.Errorf("upsert docs %s:%s: %w", d.Source, d.Ref, err)
+			return fmt.Errorf("upsert docs %s:%s: %w", d.Source, d.Ref, err)
 		}
 		if _, err := tx.Exec(`INSERT INTO docs_fts (title, body, source, ref) VALUES (?, ?, ?, ?)`,
 			d.Title, d.Body, d.Source, d.Ref); err != nil {
-			return 0, fmt.Errorf("insert docs_fts %s:%s: %w", d.Source, d.Ref, err)
+			return fmt.Errorf("insert docs_fts %s:%s: %w", d.Source, d.Ref, err)
 		}
 	}
+	return nil
+}
 
+// ReplaceSources atomically replaces every indexed document for the named
+// derived sources while leaving unrelated sources, such as tickets, intact.
+func (s *Store) ReplaceSources(docs []Doc, sources ...Source) (int, error) {
+	selected := make(map[Source]bool, len(sources))
+	for _, source := range sources {
+		selected[source] = true
+	}
+	for _, doc := range docs {
+		if !selected[doc.Source] {
+			return 0, fmt.Errorf("context source %q is not selected for replacement", doc.Source)
+		}
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, fmt.Errorf("begin replace tx: %w", err)
+	}
+	defer tx.Rollback()
+	for source := range selected {
+		if _, err := tx.Exec(`DELETE FROM docs_fts WHERE source = ?`, source); err != nil {
+			return 0, fmt.Errorf("clear docs_fts %s: %w", source, err)
+		}
+		if _, err := tx.Exec(`DELETE FROM docs WHERE source = ?`, source); err != nil {
+			return 0, fmt.Errorf("clear docs %s: %w", source, err)
+		}
+	}
+	if err := indexDocsTx(tx, docs); err != nil {
+		return 0, err
+	}
 	if err := tx.Commit(); err != nil {
-		return 0, fmt.Errorf("commit index tx: %w", err)
+		return 0, fmt.Errorf("commit replace tx: %w", err)
 	}
 	return len(docs), nil
 }

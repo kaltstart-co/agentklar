@@ -141,6 +141,32 @@ func newServer() (*Server, error) {
 			return states
 		},
 		"stateLabel": stateLabel,
+		"evidenceOutcome": func(ev workflow.Evidence) string {
+			if ev.ExitCode == nil {
+				return "No machine result"
+			}
+			if *ev.ExitCode == 0 {
+				return "Passed · exit 0"
+			}
+			return fmt.Sprintf("Failed · exit %d", *ev.ExitCode)
+		},
+		"evidenceOutcomeClass": func(ev workflow.Evidence) string {
+			if ev.ExitCode == nil {
+				return "unverified"
+			}
+			if *ev.ExitCode == 0 {
+				return "pass"
+			}
+			return "fail"
+		},
+		"containsString": func(values []string, value string) bool {
+			for _, candidate := range values {
+				if candidate == value {
+					return true
+				}
+			}
+			return false
+		},
 		"canArchive": func(state contracts.State) bool {
 			switch state {
 			case contracts.StateDraft, contracts.StateReady, contracts.StateChangesRequested, contracts.StateDone, contracts.StateCancelled:
@@ -439,6 +465,7 @@ type viewData struct {
 	ProjectName      string
 	ProjectRepo      string
 	Overview         []projectOverview
+	Attention        []projectOverview
 	Archived         bool
 	Dependencies     []string
 	AllTasks         []workflow.Task
@@ -458,8 +485,10 @@ type viewData struct {
 	KnowOK    bool
 
 	// Memory
-	Memory []memory.Entry
-	MemOK  bool
+	Memory           []memory.Entry
+	MemOK            bool
+	Namespace        string
+	MemoryNamespaces []string
 
 	// Context
 	ContextPkt akctx.Packet

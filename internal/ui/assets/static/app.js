@@ -26,10 +26,36 @@
 
   const rail = document.querySelector("[data-rail]");
   const navToggle = document.querySelector("[data-nav-toggle]");
-  navToggle?.addEventListener("click", () => {
-    const open = rail.classList.toggle("open");
-    navToggle.setAttribute("aria-expanded", String(open));
+  const mobileNav = matchMedia("(max-width: 840px)");
+  function syncRail(open = rail?.classList.contains("open")) {
+    if (!rail || !navToggle) return;
+    if (!mobileNav.matches) {
+      rail.classList.remove("open");
+      rail.inert = false;
+      rail.removeAttribute("inert");
+      navToggle.setAttribute("aria-expanded", "false");
+      navToggle.setAttribute("aria-label", "Open primary navigation");
+      return;
+    }
+    rail.classList.toggle("open", !!open);
+    rail.inert = !open;
+    rail.toggleAttribute("inert", !open);
+    navToggle.setAttribute("aria-expanded", String(!!open));
     navToggle.setAttribute("aria-label", open ? "Close primary navigation" : "Open primary navigation");
+  }
+  navToggle?.addEventListener("click", () => {
+    syncRail(!rail.classList.contains("open"));
+  });
+  mobileNav.addEventListener?.("change", () => syncRail(false));
+  syncRail(false);
+
+  document.addEventListener("keydown", event => {
+    if (event.key !== "Escape") return;
+    if (rail?.classList.contains("open")) {
+      syncRail(false);
+      navToggle?.focus();
+    }
+    document.querySelector("dialog[open]")?.close();
   });
 
   document.querySelector("[data-project-switcher]")?.addEventListener("change", (event) => {
@@ -45,14 +71,30 @@
 
   document.querySelectorAll("[data-tabs]").forEach(tabs => {
     const buttons = [...tabs.querySelectorAll('[role="tab"]')];
-    buttons.forEach(button => button.addEventListener("click", () => {
-      buttons.forEach(item => {
-        const selected = item === button;
-        item.setAttribute("aria-selected", String(selected));
-        document.getElementById(item.getAttribute("aria-controls")).hidden = !selected;
+    buttons.forEach((button, index) => {
+      button.tabIndex = button.getAttribute("aria-selected") === "true" ? 0 : -1;
+      button.addEventListener("click", () => {
+        buttons.forEach(item => {
+          const selected = item === button;
+          item.setAttribute("aria-selected", String(selected));
+          item.tabIndex = selected ? 0 : -1;
+          document.getElementById(item.getAttribute("aria-controls")).hidden = !selected;
+        });
+        button.focus();
       });
-      button.focus();
-    }));
+      button.addEventListener("keydown", event => {
+        let next = index;
+        switch (event.key) {
+          case "ArrowRight": next = (index + 1) % buttons.length; break;
+          case "ArrowLeft": next = (index - 1 + buttons.length) % buttons.length; break;
+          case "Home": next = 0; break;
+          case "End": next = buttons.length - 1; break;
+          default: return;
+        }
+        event.preventDefault();
+        buttons[next].click();
+      });
+    });
   });
 
   function values(form) {
@@ -67,23 +109,13 @@
     if (event.submitter?.value === "cancel") return;
     event.preventDefault();
     const body = values(form);
-    const dependencies = body.dependencies;
-    delete body.dependencies;
-    try {
-      const task = await api(form.dataset.api, { method: form.dataset.method || "POST", body: JSON.stringify(body) });
-      const id = task.Task?.ID || task.ID || body.id;
-      if (form.querySelector('[name="dependencies"]')) await api(`/api/projects/${encodeURIComponent(projectID)}/tasks/${encodeURIComponent(id)}/dependencies`, { method: "PUT", body: JSON.stringify({ dependencies }) });
-      notify("Task saved. Reloading authoritative state.");
-      location.assign(`/projects/${encodeURIComponent(projectID)}/tasks/${encodeURIComponent(id)}`);
-    } catch (error) { notify(error.message, true); }
-  }));
-  document.querySelectorAll("[data-deps-api]").forEach(async form => {
-    try {
-      const result = await api(form.dataset.depsApi);
-      const selected = new Set(result.dependencies || []);
-      form.querySelectorAll('[name="dependencies"] option').forEach(option => { option.selected = selected.has(option.value); });
-    } catch (_) { /* The detail page still renders when derived controls are unavailable. */ }
-  });
+	  try {
+	    const task = await api(form.dataset.api, { method: form.dataset.method || "POST", body: JSON.stringify(body) });
+	    const id = task.Task?.ID || task.ID || body.id;
+	    notify("Task saved. Reloading authoritative state.");
+	    location.assign(`/projects/${encodeURIComponent(projectID)}/tasks/${encodeURIComponent(id)}`);
+	  } catch (error) { notify(error.message, true); }
+	}));
 
   const cards = [...document.querySelectorAll(".task-card")];
   const filters = [...document.querySelectorAll("[data-filter]")];
@@ -102,14 +134,23 @@
   filters.forEach(input => input.addEventListener("input", applyFilters));
   document.querySelector("[data-clear-filters]")?.addEventListener("click", () => { filters.forEach(input => { input.value = ""; }); applyFilters(); });
 
+  function scheduleReload(delay = 900) {
+    setTimeout(() => location.reload(), delay);
+  }
+  async function transitionTask(id, state) {
+    return api(`/api/projects/${encodeURIComponent(projectID)}/tasks/${encodeURIComponent(id)}/transition`, { method: "POST", body: JSON.stringify({ state }) });
+  }
+  async function reorderTask(id, state, orderedIds) {
+    return api(`/api/projects/${encodeURIComponent(projectID)}/tasks/${encodeURIComponent(id)}/position`, { method: "POST", body: JSON.stringify({ state, ordered_ids: orderedIds }) });
+  }
   async function moveTask(id, state) {
-    await api(`/api/projects/${encodeURIComponent(projectID)}/tasks/${encodeURIComponent(id)}/transition`, { method: "POST", body: JSON.stringify({ state }) });
+    await transitionTask(id, state);
     notify("Task moved. Reloading authoritative state.");
-    location.reload();
+    scheduleReload();
   }
   document.querySelectorAll("[data-move-task]").forEach(select => select.addEventListener("change", async () => {
     if (!select.value) return;
-    try { await moveTask(select.dataset.moveTask, select.value); } catch (error) { notify(error.message, true); select.value = ""; location.reload(); }
+    try { await moveTask(select.dataset.moveTask, select.value); } catch (error) { notify(error.message, true); select.value = ""; scheduleReload(1800); }
   }));
 
   let dragged = null;
@@ -127,15 +168,23 @@
     zone.addEventListener("drop", async event => {
       event.preventDefault();
       if (!dragged) return;
-      const id = dragged.dataset.taskId;
+      const card = dragged;
+      const id = card.dataset.taskId;
       const state = zone.dataset.dropzone;
       try {
-        if (dragged.dataset.state !== state) await api(`/api/projects/${encodeURIComponent(projectID)}/tasks/${encodeURIComponent(id)}/transition`, { method: "POST", body: JSON.stringify({ state }) });
-        const orderedIds = [...zone.querySelectorAll(".task-card")].map(card => card.dataset.taskId);
-        await api(`/api/projects/${encodeURIComponent(projectID)}/tasks/${encodeURIComponent(id)}/position`, { method: "POST", body: JSON.stringify({ state, ordered_ids: orderedIds }) });
-        notify("Order saved. Reloading authoritative state.");
-      } catch (error) { notify(error.message, true); }
-      location.reload();
+        if (card.dataset.state !== state) {
+          await transitionTask(id, state);
+          notify("Task moved. Reloading authoritative state.");
+        } else {
+          const orderedIds = [...zone.querySelectorAll(".task-card")].map(item => item.dataset.taskId);
+          await reorderTask(id, state, orderedIds);
+          notify("Order saved. Reloading authoritative state.");
+        }
+        scheduleReload();
+      } catch (error) {
+        notify(error.message, true);
+        scheduleReload(1800);
+      }
     });
   });
 

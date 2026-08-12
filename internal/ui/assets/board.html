@@ -3,7 +3,7 @@
   <div><p class="eyebrow">Delivery</p><h1>{{if .Archived}}Archived history{{else}}Board{{end}}</h1><p class="lede">Protected workflow state, ordered for the work at hand.</p></div>
   <div class="head-actions">
     {{if .Archived}}<a class="button secondary" href="{{.BasePath}}/board">Active board</a>{{else}}<a class="button secondary" href="{{.BasePath}}/board?archived=true">Archived history</a>{{end}}
-    <button class="button primary" type="button" data-open-dialog="task-dialog" {{if not .Human}}disabled title="restart with agentklar ui --open"{{end}}>New task</button>
+    {{if not .Archived}}<button class="button primary" type="button" data-open-dialog="task-dialog" {{if not .Human}}disabled title="restart with agentklar ui --open"{{end}}>New task</button>{{end}}
   </div>
 </header>
 {{if .Error}}<p class="empty">{{.Error}}</p>{{else}}
@@ -20,9 +20,9 @@
 {{range .Columns}}
   <section class="column state-{{.State}}" data-column="{{.State}}" aria-labelledby="col-{{.State}}">
     <header><h2 id="col-{{.State}}">{{.Label}}</h2><span>{{len .Tasks}}</span></header>
-    <div class="card-stack" data-dropzone="{{.State}}">
+    <div class="card-stack" {{if not $.Archived}}data-dropzone="{{.State}}"{{end}}>
     {{range .Tasks}}{{$task := .}}
-      <article class="task-card" draggable="{{if $.Human}}true{{else}}false{{end}}" tabindex="0" data-task-id="{{.ID}}" data-state="{{.State}}" data-priority="{{.Priority}}" data-assignee="{{.Assignee}}" data-labels="{{range .Labels}}{{.}} {{end}}">
+      <article class="task-card" draggable="{{if and $.Human (not $.Archived)}}true{{else}}false{{end}}" tabindex="0" data-task-id="{{.ID}}" data-state="{{.State}}" data-priority="{{.Priority}}" data-assignee="{{.Assignee}}" data-labels="{{range .Labels}}{{.}} {{end}}">
         <div class="card-top"><span class="task-id">{{.ID}}</span><span class="priority priority-{{.Priority}}">{{.Priority}}</span></div>
         <a class="task-title" href="{{$.TaskPrefix}}/tasks/{{.ID}}">{{.Title}}</a>
         {{if .Objective}}<p>{{.Objective}}</p>{{end}}
@@ -37,7 +37,7 @@
 </div>
 {{end}}
 
-<dialog id="task-dialog" class="task-dialog" aria-labelledby="new-task-title">
+{{if not .Archived}}<dialog id="task-dialog" class="task-dialog" aria-labelledby="new-task-title">
   <form method="dialog" data-task-form data-api="/api/projects/{{.ProjectID}}/tasks">
     <header><div><p class="eyebrow">Plan work</p><h2 id="new-task-title">New task</h2></div><button class="icon-button" value="cancel" aria-label="Close new task dialog">×</button></header>
     <div class="form-grid">
@@ -57,5 +57,5 @@
     </div>
     <footer><button class="button secondary" value="cancel">Cancel</button><button class="button primary" type="submit" value="default" {{if not .Human}}disabled{{end}}>Create task</button></footer>
   </form>
-</dialog>
+</dialog>{{end}}
 {{end}}

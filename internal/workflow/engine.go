@@ -101,6 +101,11 @@ type Claim struct {
 
 // CreateTask inserts a Draft task.
 func (e *Engine) CreateTask(t Task) error {
+	return e.CreateTaskWithDependencies(t, nil)
+}
+
+// CreateTaskWithDependencies inserts a Draft task and its prerequisites atomically.
+func (e *Engine) CreateTaskWithDependencies(t Task, deps []string) error {
 	if t.ID == "." || t.ID == ".." || strings.Contains(t.ID, "/") {
 		return ErrInvalidTask
 	}
@@ -121,14 +126,24 @@ func (e *Engine) CreateTask(t Task) error {
 	crit, _ := json.Marshal(t.Criteria)
 	labels, _ := json.Marshal(t.Labels)
 	now := e.ts()
-	_, err := e.db.Exec(`INSERT INTO tasks
+	tx, err := e.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`INSERT INTO tasks
 		(id, project, repo_path, title, lane, isolation, target, state, objective, criteria, verification, tracker_id,
 		 priority, assignee, labels, due_date, position, archived_at, created_at, updated_at)
 		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		t.ID, t.Project, t.RepoPath, t.Title, t.Lane, t.Isolation, t.Target,
 		contracts.StateDraft, t.Objective, string(crit), t.Verification, t.TrackerID,
-		t.Priority, t.Assignee, string(labels), t.DueDate, t.Position, t.ArchivedAt, now, now)
-	return err
+		t.Priority, t.Assignee, string(labels), t.DueDate, t.Position, t.ArchivedAt, now, now); err != nil {
+		return err
+	}
+	if err := e.setDependenciesTx(tx, t.ID, deps); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (e *Engine) GetTask(id string) (*Task, error) {
@@ -574,6 +589,40 @@ func (e *Engine) UpdateTask(id string, u TaskUpdate) error {
 		return err
 	}
 	defer tx.Rollback()
+	if err := e.updateTaskTx(tx, id, u, string(criteria), string(labels)); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// UpdateTaskWithDependencies changes task metadata and prerequisites in one transaction.
+func (e *Engine) UpdateTaskWithDependencies(id string, u TaskUpdate, deps []string) error {
+	if err := validateTaskUpdate(&u); err != nil {
+		return err
+	}
+	criteria, err := json.Marshal(u.Criteria)
+	if err != nil {
+		return err
+	}
+	labels, err := json.Marshal(u.Labels)
+	if err != nil {
+		return err
+	}
+	tx, err := e.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := e.updateTaskTx(tx, id, u, string(criteria), string(labels)); err != nil {
+		return err
+	}
+	if err := e.setDependenciesTx(tx, id, deps); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (e *Engine) updateTaskTx(tx *sql.Tx, id string, u TaskUpdate, criteria, labels string) error {
 	t, err := e.getForUpdate(tx, id)
 	if err != nil {
 		return err
@@ -589,12 +638,9 @@ func (e *Engine) UpdateTask(id string, u TaskUpdate) error {
 	}
 	_, err = tx.Exec(`UPDATE tasks SET title=?, lane=?, isolation=?, target=?, objective=?, criteria=?, verification=?,
 		priority=?, assignee=?, labels=?, due_date=?, updated_at=? WHERE id=?`,
-		u.Title, u.Lane, u.Isolation, u.Target, u.Objective, string(criteria), u.Verification,
-		u.Priority, u.Assignee, string(labels), u.DueDate, e.ts(), id)
-	if err != nil {
-		return err
-	}
-	return tx.Commit()
+		u.Title, u.Lane, u.Isolation, u.Target, u.Objective, criteria, u.Verification,
+		u.Priority, u.Assignee, labels, u.DueDate, e.ts(), id)
+	return err
 }
 
 // SetDependencies replaces a task's prerequisites after rejecting missing,
@@ -605,6 +651,13 @@ func (e *Engine) SetDependencies(id string, deps []string) error {
 		return err
 	}
 	defer tx.Rollback()
+	if err := e.setDependenciesTx(tx, id, deps); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (e *Engine) setDependenciesTx(tx *sql.Tx, id string, deps []string) error {
 	if _, err := e.getForUpdate(tx, id); err != nil {
 		return err
 	}
@@ -634,7 +687,7 @@ func (e *Engine) SetDependencies(id string, deps []string) error {
 		}
 	}
 	var cycle int
-	err = tx.QueryRow(`WITH RECURSIVE reachable(task_id) AS (
+	err := tx.QueryRow(`WITH RECURSIVE reachable(task_id) AS (
 		SELECT depends_on_task_id FROM task_dependencies WHERE task_id = ?
 		UNION
 		SELECT d.depends_on_task_id FROM task_dependencies d JOIN reachable r ON d.task_id = r.task_id
@@ -645,7 +698,7 @@ func (e *Engine) SetDependencies(id string, deps []string) error {
 	if !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
-	return tx.Commit()
+	return nil
 }
 
 // Reorder assigns stable positions to exactly the active tasks in one state.

@@ -126,6 +126,40 @@ func TestTaskMutationsStayInsideProject(t *testing.T) {
 	}
 }
 
+func TestTaskCreateAndUpdateKeepDependenciesAtomic(t *testing.T) {
+	c, alpha, _ := seedProjects(t)
+	db, _ := store.Open(filepath.Join(alpha.WorkspacePath, "control.sqlite"))
+	if err := workflow.New(db).CreateTask(workflow.Task{ID: "DEP", Project: "alpha", Title: "dependency"}); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+	s, _ := NewControlCenter(c, alpha.ID)
+	t.Cleanup(func() { _ = s.Close() })
+	cookie := bootstrapHuman(t, s)
+	base := "/api/projects/" + alpha.ID + "/tasks"
+
+	badCreate := humanRequest(t, s, cookie, http.MethodPost, base, `{"id":"ATOMIC","title":"atomic","dependencies":["MISSING"]}`)
+	if badCreate.Code != http.StatusConflict {
+		t.Fatalf("bad create status=%d body=%s", badCreate.Code, badCreate.Body.String())
+	}
+	if got := apiRequest(t, s.Handler(), http.MethodGet, base+"/ATOMIC", ""); got.Code != http.StatusNotFound {
+		t.Fatalf("failed create persisted: status=%d body=%s", got.Code, got.Body.String())
+	}
+
+	created := humanRequest(t, s, cookie, http.MethodPost, base, `{"id":"ATOMIC","title":"original","dependencies":["DEP"]}`)
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create status=%d body=%s", created.Code, created.Body.String())
+	}
+	badEdit := humanRequest(t, s, cookie, http.MethodPatch, base+"/ATOMIC", `{"title":"changed","dependencies":["MISSING"]}`)
+	if badEdit.Code != http.StatusConflict {
+		t.Fatalf("bad edit status=%d body=%s", badEdit.Code, badEdit.Body.String())
+	}
+	detail := apiRequest(t, s.Handler(), http.MethodGet, base+"/ATOMIC", "")
+	if !strings.Contains(detail.Body.String(), `"Title":"original"`) || !strings.Contains(detail.Body.String(), `"dependencies":["DEP"]`) {
+		t.Fatalf("partial edit persisted: %s", detail.Body.String())
+	}
+}
+
 func TestTaskAPIValidatesInputAndKeepsTerminalStatesVisible(t *testing.T) {
 	c, alpha, _ := seedProjects(t)
 	db, _ := store.Open(filepath.Join(alpha.WorkspacePath, "control.sqlite"))
