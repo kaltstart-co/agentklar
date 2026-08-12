@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -56,6 +57,8 @@ type Store struct {
 	db *sql.DB
 }
 
+var migrateMu sync.Mutex
+
 // schema is applied verbatim on open. WAL + busy_timeout match the rest of
 // Agentklar's SQLite usage; foreign_keys is intentionally off — this index
 // has no relational integrity to enforce beyond its own composite key.
@@ -66,8 +69,8 @@ type Store struct {
 // A standalone table (rather than external-content) avoids the fragility of
 // wiring triggers against a composite primary key.
 const schema = `
-PRAGMA journal_mode = WAL;
 PRAGMA busy_timeout = 5000;
+PRAGMA journal_mode = WAL;
 
 CREATE TABLE IF NOT EXISTS docs (
     source TEXT NOT NULL,
@@ -101,6 +104,8 @@ func New(workspaceDir string) (*Store, error) {
 	// modernc/sqlite serializes writes; a single connection avoids
 	// SQLITE_BUSY between our own transactions.
 	db.SetMaxOpenConns(1)
+	migrateMu.Lock()
+	defer migrateMu.Unlock()
 	if _, err := db.Exec(schema); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("migrate context.sqlite: %w", err)

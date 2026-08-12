@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"path/filepath"
 	"sort"
+	"sync"
 	"testing"
 )
 
@@ -28,6 +29,41 @@ func TestNewMigratesLegacyDocsForTaskScope(t *testing.T) {
 	got, err := s.SearchScoped("legacy", "TASK-1", 10)
 	if err != nil || len(got) != 1 || got[0].TaskID != "TASK-1" {
 		t.Fatalf("migrated search=%#v err=%v", got, err)
+	}
+}
+
+func TestNewMigratesLegacyDocsConcurrently(t *testing.T) {
+	dir := t.TempDir()
+	db, err := sql.Open("sqlite", filepath.Join(dir, "context.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`CREATE TABLE docs (source TEXT NOT NULL, ref TEXT NOT NULL, title TEXT NOT NULL DEFAULT '', body TEXT NOT NULL, PRIMARY KEY (source, ref))`); err != nil {
+		t.Fatal(err)
+	}
+	_ = db.Close()
+	start := make(chan struct{})
+	errs := make(chan error, 12)
+	var wg sync.WaitGroup
+	for i := 0; i < cap(errs); i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			store, err := New(dir)
+			if err == nil {
+				err = store.Close()
+			}
+			errs <- err
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent migration: %v", err)
+		}
 	}
 }
 
