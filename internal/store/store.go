@@ -4,8 +4,11 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
+	"strings"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -135,6 +138,42 @@ CREATE TABLE IF NOT EXISTS outbox (
 CREATE INDEX IF NOT EXISTS outbox_fp ON outbox(fingerprint, acked);
 `
 
+type migration struct {
+	version int
+	apply   func(context.Context, *sql.Conn) error
+}
+
+var migrations = []migration{
+	{
+		version: 1,
+		apply:   func(context.Context, *sql.Conn) error { return nil },
+	},
+	{
+		version: 2,
+		apply: func(ctx context.Context, conn *sql.Conn) error {
+			for _, statement := range []string{
+				"ALTER TABLE tasks ADD COLUMN priority TEXT NOT NULL DEFAULT 'medium'",
+				"ALTER TABLE tasks ADD COLUMN assignee TEXT NOT NULL DEFAULT ''",
+				"ALTER TABLE tasks ADD COLUMN labels TEXT NOT NULL DEFAULT '[]'",
+				"ALTER TABLE tasks ADD COLUMN due_date TEXT NOT NULL DEFAULT ''",
+				"ALTER TABLE tasks ADD COLUMN position INTEGER NOT NULL DEFAULT 0",
+				"ALTER TABLE tasks ADD COLUMN archived_at TEXT NOT NULL DEFAULT ''",
+				`CREATE TABLE IF NOT EXISTS task_dependencies (
+                    task_id TEXT NOT NULL REFERENCES tasks(id),
+                    depends_on_task_id TEXT NOT NULL REFERENCES tasks(id),
+                    PRIMARY KEY (task_id, depends_on_task_id),
+                    CHECK(task_id <> depends_on_task_id)
+                )`,
+			} {
+				if _, err := conn.ExecContext(ctx, statement); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	},
+}
+
 // Open opens (creating if needed) a control database at path.
 func Open(path string) (*sql.DB, error) {
 	db, err := sql.Open("sqlite", path)
@@ -144,9 +183,74 @@ func Open(path string) (*sql.DB, error) {
 	// modernc/sqlite serializes writes; a single connection avoids
 	// SQLITE_BUSY between our own transactions.
 	db.SetMaxOpenConns(1)
-	if _, err := db.Exec(schema); err != nil {
+	if err := retryBusy(func() error {
+		_, err := db.Exec(schema)
+		return err
+	}); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate control.sqlite: %w", err)
+	}
+	if err := migrate(db); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("migrate control.sqlite: %w", err)
 	}
 	return db, nil
+}
+
+func migrate(db *sql.DB) error {
+	ctx := context.Background()
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	if err := beginMigration(ctx, conn); err != nil {
+		return err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_, _ = conn.ExecContext(ctx, "ROLLBACK")
+		}
+	}()
+
+	var version int
+	if err := conn.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
+		return err
+	}
+	for _, migration := range migrations {
+		if version >= migration.version {
+			continue
+		}
+		if err := migration.apply(ctx, conn); err != nil {
+			return err
+		}
+		if _, err := conn.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", migration.version)); err != nil {
+			return err
+		}
+		version = migration.version
+	}
+	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
+		return err
+	}
+	committed = true
+	return nil
+}
+
+func beginMigration(ctx context.Context, conn *sql.Conn) error {
+	return retryBusy(func() error {
+		_, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE")
+		return err
+	})
+}
+
+func retryBusy(exec func() error) error {
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		err := exec()
+		if err == nil || !strings.Contains(err.Error(), "SQLITE_BUSY") || time.Now().After(deadline) {
+			return err
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }

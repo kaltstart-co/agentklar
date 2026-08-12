@@ -78,6 +78,15 @@ func TestRejectionParsed(t *testing.T) {
 	if d.Approve {
 		t.Fatal("rejection parsed as approval")
 	}
+	if d.Reason != "the retry loop is unbounded" {
+		t.Fatalf("rejection reason = %q", d.Reason)
+	}
+}
+
+func TestRejectionRequiresReason(t *testing.T) {
+	if _, err := ParseApproval(comment("u-divyansh", "reject "+nonce), nonce, policy()); err == nil {
+		t.Fatal("rejection without a reason was accepted")
+	}
 }
 
 // An empty author (e.g. a webhook missing actor identity) is never trusted.

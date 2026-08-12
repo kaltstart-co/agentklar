@@ -1,22 +1,9 @@
 {{define "content"}}
-<h1>User Approvals</h1>
-{{if not .Approvals}}<p class="empty">No tasks awaiting approval.</p>
-{{else}}
-{{range .Approvals}}
-<div class="panel">
-  <div class="row" style="justify-content:space-between">
-    <h2 style="margin:0"><a href="/tasks/{{.Task.ID}}">{{.Task.Title}}</a></h2>
-    <span class="badge user_approval">awaiting approval</span>
-  </div>
-  <div class="muted id" style="margin:.2rem 0 .6rem">{{.Task.ID}}</div>
-  {{if .Task.Criteria}}<h2>Acceptance criteria</h2>
-  <ul class="criteria">{{range .Task.Criteria}}<li>{{.}}</li>{{end}}</ul>{{end}}
-  {{if .Task.Verification}}<h2>Verification</h2><pre>{{.Task.Verification}}</pre>{{end}}
-  <form method="post" action="/approvals/{{.Task.ID}}">
-    <button class="btn good" type="submit">Approve &amp; mark Done</button>
-  </form>
-  <p class="muted" style="margin:.5rem 0 0;font-size:.78rem">Trusted local channel (127.0.0.1). The server resolves its own stored nonce; nothing is exposed to agents.</p>
-</div>
-{{end}}
-{{end}}
+<header class="page-head editorial-head"><div><p class="eyebrow">Human-only completion boundary</p><h1>Approvals</h1><p class="lede">Review frozen criteria and recorded evidence before work reaches Done.</p></div><span class="count-mark">{{len .Approvals}}</span></header>
+{{if not .Approvals}}<p class="empty">No tasks await human approval.</p>{{else}}<div class="approval-list">{{range .Approvals}}<article>
+  <header><div><span class="task-id">{{.ProjectID}} · {{.Task.ID}}</span><h2><a href="{{.TaskURL}}">{{.Task.Title}}</a></h2></div><span class="state-badge state-user_approval">Awaiting decision</span></header>
+  <div class="approval-body"><div><h3>Acceptance criteria</h3>{{if .Task.Criteria}}<ul class="criteria">{{range .Task.Criteria}}<li>{{.}}</li>{{end}}</ul>{{else}}<p class="muted">No criteria recorded.</p>{{end}}</div><div><h3>Verification method</h3><pre>{{.Task.Verification}}</pre></div></div>
+  <section class="approval-evidence"><h3>Recorded evidence</h3>{{if .Evidence}}<div class="evidence-strip">{{range .Evidence}}<article><header><span class="state-badge">{{.Provenance}}</span><strong class="outcome outcome-{{evidenceOutcomeClass .}}">{{evidenceOutcome .}}</strong></header><dl><dt>Command</dt><dd><code>{{if .Command}}{{.Command}}{{else}}—{{end}}</code></dd><dt>Log</dt><dd><code>{{if .LogPath}}{{.LogPath}}{{else}}—{{end}}</code></dd><dt>Hash</dt><dd><code>{{if .Hash}}{{.Hash}}{{else}}—{{end}}</code></dd><dt>Recorded</dt><dd>{{.CreatedAt}}</dd><dt>Note</dt><dd>{{if .Note}}{{.Note}}{{else}}—{{end}}</dd></dl></article>{{end}}</div>{{else}}<p class="muted">No evidence is recorded. Open the task before deciding.</p>{{end}}{{if .Reviews}}<div class="review-line" aria-label="Recorded reviews">{{range .Reviews}}<span><b>{{.Kind}}</b> · <strong>{{.Result}}</strong> · {{.Provider}} · {{.CreatedAt}}{{if .Findings}}<small>{{.Findings}}</small>{{end}}</span>{{end}}</div>{{end}}</section>
+  <footer>{{if .CSRFToken}}<button class="button danger" type="button" data-request-changes="{{.Task.ID}}" data-project="{{.ProjectID}}">Request changes</button><form method="post" action="{{.Action}}"><input type="hidden" name="csrf_token" value="{{.CSRFToken}}"><button class="button primary" type="submit">Approve and mark Done</button></form>{{else}}<span class="muted">Read-only: restart with <code>agentklar ui --open</code> to decide.</span>{{end}}</footer>
+</article>{{end}}</div>{{end}}
 {{end}}

@@ -1,224 +1,241 @@
 # Agentklar
 
-**Agents that know what done means.**
+**One control center for AI-assisted software delivery.**
 
 [![CI](https://github.com/kaltstart-co/agentklar/actions/workflows/ci.yml/badge.svg)](https://github.com/kaltstart-co/agentklar/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Site](https://img.shields.io/badge/site-agentklar.kaltstart.co-2A55D8.svg)](https://agentklar.kaltstart.co)
 
-A local-first, agent-neutral toolkit that adds durable work tracking, machine-attested
-evidence, and a human-controlled completion boundary to AI-assisted development. You keep
-your own coding agent — Codex, OpenCode, Gemini CLI, and Cursor. Agentklar supplies the
-workflow contracts those agents lack.
+Agentklar is a local-first control plane for Codex, Claude Code, OpenCode,
+Gemini CLI, Cursor, and other MCP clients. It gives a human one native,
+multi-project view of work while keeping each project's workflow state,
+evidence, memory, and context isolated.
+
+Agents can plan, claim, implement, review, and run declared checks. Only a
+human can move work to Done.
 
 Website: **[agentklar.kaltstart.co](https://agentklar.kaltstart.co)** · a
 [Kaltstart](https://kaltstart.co) project.
 
-**New here?** The full **[Setup & Usage guide](docs/USAGE.md)** takes you from install →
-connect your agent (MCP) → set up a board (new or existing Vikunja) → run a task.
+## Install or update
 
-## Install
-
-**One line** (macOS, Linux) — downloads the newest Release binary, verifies its
-SHA-256 against `checksums.txt`, installs to `~/.local/bin`, and wires skill +
-slash commands into OpenCode, Claude Code, and Codex:
+Run the same command for a first install or an update on macOS and Linux:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/kaltstart-co/agentklar/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/kaltstart-co/agentklar/main/install.sh | bash -s --
 ```
 
-Skip agent wiring with `--no-agents`; change the install location with
-`AGENTKLAR_INSTALL_DIR=/path`. If no prebuilt binary matches your platform and
-Go is installed, the script falls back to `go install`.
+The installer downloads the newest GitHub Release for your platform, verifies
+its SHA-256 checksum, checks the binary, stages it, and atomically replaces the
+installed executable. Existing project data under `~/.local/share/agentklar`
+is not modified. Agent integration runs afterward as a best-effort step: it
+copies supported skill and command assets and registers MCP where the host CLI
+supports it. Other clients still use `agentklar mcp install`; an integration
+failure does not roll back the installed binary.
 
-**With Go** (no clone, no manual build):
+Useful options:
 
 ```bash
-go install github.com/kaltstart-co/agentklar/cmd/agentklar@latest
-agentklar install --agents opencode,claude,codex
+# Install the binary without wiring agent skills or MCP instructions
+curl -fsSL https://raw.githubusercontent.com/kaltstart-co/agentklar/main/install.sh | bash -s -- --no-agents
+
+# Use the Go toolchain path instead of a release archive
+curl -fsSL https://raw.githubusercontent.com/kaltstart-co/agentklar/main/install.sh | bash -s -- --with-go
 ```
 
-Then, once per repo:
+For a custom binary directory, set `AGENTKLAR_INSTALL_DIR` before `bash`:
 
 ```bash
-agentklar init        # create a workspace + propose .agentklar/quality.toml
-agentklar status      # one-glance overview
+curl -fsSL https://raw.githubusercontent.com/kaltstart-co/agentklar/main/install.sh | AGENTKLAR_INSTALL_DIR=/path/to/bin bash -s --
 ```
 
-Build from source is still supported — see [CONTRIBUTING.md](CONTRIBUTING.md).
-
-> **Status: Phase 0/1 development slice.** The workflow is real and tested end
-> to end, including a live Vikunja adapter with nonce-bound human approval.
-> Pre-release binaries are published on the
-> [Releases page](https://github.com/kaltstart-co/agentklar/releases) and
-> fetched by `install.sh`; they are not yet signed. Per the delivery plan,
-> hardening continues after the workflow survives a dogfood pilot.
-
-## What works today
-
-The complete Quick-lane workflow, end to end:
-
-```
-Draft → Ready → In Progress → Completion Review → Auto QA → User Approval → Done
-```
-
-- **Definition of Ready** — a task without acceptance criteria and a verification method
-  cannot become Ready, so an agent can never claim underspecified work.
-- **Atomic claims with fencing** — concurrent claims produce exactly one winner. A
-  superseded worker cannot mutate protected state after another has claimed.
-- **Repository isolation** — Quick tasks may use the primary worktree under an *exclusive*
-  repository lease; a second concurrent code claim is rejected. Standard/Major tasks get
-  dedicated worktrees.
-- **Machine-attested evidence** — Agentklar itself executes declared recipes and records
-  command, working directory, exit code, timestamps, and a SHA-256 of the retained log.
-  Model claims are never mistaken for verified results.
-- **Deterministic completion gate** — project recipes plus objective Slop Guard rules
-  (placeholder code, silenced errors, skipped tests, bypassed checks). Quick work uses one
-  runner invocation for both Completion Review and Auto QA — zero extra model calls.
-- **Human-only Done** — the agent-facing MCP surface exposes no approve, reject, or done
-  method. Approval requires a nonce bound to the exact review snapshot, and the nonce is
-  never returned to the model.
-
-## The completion boundary
-
-This is the property the whole design exists to protect. An agent asking to approve gets:
-
-```json
-{"error":{"code":-32601,"message":"approval and completion are not agent-callable;
-  a human must approve through a trusted channel"}}
-```
-
-An agent may ask Agentklar to *surface* a pending approval, but receives only an
-instruction to ask the user — never the nonce.
-
-The shipped trusted channel is a nonce-bound comment written by a human tracker account
-whose credentials Agentklar never stores and never exposes to agent processes. The dev CLI
-`approve` command is **not** agent-proof (an agent with shell access could invoke it) and
-prints that warning on every use.
-
-## Quick start (development)
+## Five-minute setup
 
 ```bash
-go build -o agentklar ./cmd/agentklar
-./agentklar init                 # creates the workspace and proposes quality.toml
+cd /path/to/your/repository
 
-./agentklar task new AK-1 Fix the parser \
-    --lane quick \
-    --criteria "parser handles empty input;tests pass" \
-    --verify "go test ./..."
-./agentklar task ready AK-1
+agentklar init
+# Review .agentklar/quality.toml. Agentklar runs only recipes declared there.
 
-# An agent claims and submits over MCP stdio:
-echo '{"jsonrpc":"2.0","id":1,"method":"claim_task",
-       "params":{"task_id":"AK-1","expected_state":"ready","holder":"codex"}}' \
-  | ./agentklar mcp
+agentklar mcp install --client codex
+# Add the printed snippet to your MCP client, then restart that client.
 
-./agentklar gate AK-1             # runs recipes, records evidence, advances state
-./agentklar approve AK-1          # human channel (dev only)
-./agentklar doctor                # health, declared recipes, missing commands
+agentklar ui --open
 ```
 
-### With a live Vikunja board (optional)
+`agentklar ui --open` opens a human browser session for the control center.
+Keep that terminal running and press Ctrl-C to stop it.
 
-Connect a local [Vikunja](https://vikunja.io) instance so tasks project onto a real
-Kanban board and approval happens as a comment from your own account — the shipped
-trusted channel, not the dev `approve` shortcut.
+Create and shape work in the UI, or use the CLI:
 
 ```bash
-# one dedicated service account writes the board; you approve as yourself
-./agentklar tracker connect \
-    --url http://localhost:3456/api/v1 \
-    --svc-user agentklar-svc --svc-pass '******' \
-    --human you
-
-# after the gate posts its prompt, comment "approve <nonce>" in Vikunja as yourself,
-# then apply the decision:
-./agentklar reconcile             # reads comments, applies a valid human approval → done
+agentklar task new AK-1 "Fix the parser" \
+  --lane standard \
+  --criteria "handles empty input;tests pass" \
+  --verify "go test ./..."
+agentklar task ready AK-1
 ```
 
-Agentklar writes projections through the service account and can **never** approve with
-it. Only a comment authored by your human account, carrying the task's live nonce, moves a
-task to `done`. This path is covered by live integration tests
-(`internal/tracker/vikunja/integration_test.go`) that run against a real Vikunja server.
+The agent then follows the MCP workflow:
 
-Quality recipes are declared by the project in `.agentklar/quality.toml`. Agentklar runs
-only what is declared — it never infers that an absent command exists, and never turns
-acceptance-criteria prose into shell commands.
-
-```toml
-[[recipe]]
-name = "unit"
-level = "L1"                 # L0 inspect, L1 unit, L2 integration, L3 system
-command = "go"
-args = ["test", "./..."]
-timeout_seconds = 300
-scopes = ["internal/"]       # changed-path prefixes this recipe covers
+```text
+list_ready_tasks → claim_task → work → submit_for_review
 ```
+
+Run the declared gate and make the final decision in the local UI:
+
+```bash
+agentklar gate AK-1
+```
+
+See the complete [Setup & Usage guide](docs/USAGE.md).
+
+## The control center
+
+One server shows every repository registered by `agentklar init`:
+
+- **Overview** — project-level attention, approval, and alert counts.
+- **Board** — create, edit, filter, move, reorder, and archive tasks. Planning
+  fields include priority, assignee, labels, due date, lane, isolation target,
+  acceptance criteria, verification, and dependencies.
+- **Task record** — objective, evidence, reviews, timeline, dependencies, and
+  human comments.
+- **Approvals** — one cross-project queue for approving or requesting changes.
+- **Intelligence** — project knowledge, shared memory, and focused context
+  search, with provenance kept visible.
+- **Alerts** — agent-raised events with acknowledgement absent from the MCP
+  surface.
+
+State changes do not require drag-and-drop: every permitted column move also
+has a keyboard-accessible **Move to** control. Same-column ordering currently
+uses drag-and-drop. The server always validates the workflow transition; the
+browser cannot bypass protected state.
+
+### Local trust boundary
+
+The UI listens on loopback only. Starting it without `--open` creates a
+read-only server:
+
+```bash
+agentklar ui
+```
+
+`agentklar ui --open` sends an unprinted, one-use bootstrap capability directly
+to the browser. The server exchanges it for an HttpOnly, SameSite=Strict human
+session cookie. Mutations also require an exact-origin request. An approval
+form token is bound to the project, task, live submission, and current approval
+nonce.
+
+Agentklar does not promise a remotely hosted or multi-user trust boundary. Do
+not expose the local UI through a tunnel or public listener.
+
+## Workflow guarantees
+
+Happy path:
+
+```text
+Draft → Ready → In Progress → Completion Review → Auto QA
+      → User Approval → Done
+```
+
+An In Progress task may enter Waiting or Blocked and return to In Progress.
+Failed review, failed QA, or human rejection enters Changes Requested; an agent
+then reclaims it into In Progress. A human may cancel tasks from Draft, Ready,
+In Progress, Blocked, or Changes Requested.
+
+- **Definition of Ready** — Ready requires acceptance criteria and a
+  verification method.
+- **Atomic claims with fencing** — one worker wins a claim; a stale worker
+  cannot mutate protected state.
+- **Machine-attested evidence** — Agentklar records the command, working
+  directory, exit code, timestamps, retained log, and artifact hash for each
+  declared recipe it runs.
+- **Human-only Done** — the agent MCP surface has no approve, reject, or done
+  method. A valid human decision is bound to the current review snapshot.
+- **Declared checks only** — acceptance-criteria prose is never translated into
+  shell commands. The gate runs only `.agentklar/quality.toml` recipes.
+
+The terminal commands `agentklar approve` and `agentklar reject` remain
+development conveniences. They warn that a shell-capable agent could invoke
+them; use the `agentklar ui --open` browser session for the protected local
+human channel. The designated human CLI commands `agentklar memory forget` and
+`agentklar alerts ack` have the same shell-access limitation.
+
+## Data model
+
+Agentklar uses a small global catalog and federated project stores:
+
+```text
+~/.local/share/agentklar/catalog.sqlite
+  ├── project A → workspace A/control.sqlite, memory.sqlite, context.sqlite
+  ├── project B → workspace B/control.sqlite, memory.sqlite, context.sqlite
+  └── project C → workspace C/control.sqlite, memory.sqlite, context.sqlite
+```
+
+The catalog maps a stable project ID to its repository and workspace. It does
+not merge task databases, so task IDs may repeat safely across projects.
+Agents remain project-bound: each MCP server resolves the repository from the
+working directory in which it was launched. The human control center can read
+all registered projects.
+
+In-repo knowledge lives at `.agentklar/knowledge/` so it can be reviewed and
+versioned with the code. Protected workflow state stays in `control.sqlite`;
+memory and context are separate project-scoped stores.
 
 ## Architecture
 
-One Go control-plane binary. It composes existing tools rather than replacing them.
+One Go binary, the standard library, and SQLite provide the product surface.
 
 | Package | Responsibility |
 |---|---|
-| `internal/contracts` | Frozen state machine, transition table, MCP method list, evidence provenance |
-| `internal/store` | `control.sqlite` — protected workflow state only |
-| `internal/workflow` | Claims, leases, fencing, idempotency, stale-commit invalidation, approvals |
-| `internal/quality` | Recipe parsing and execution with attestation |
-| `internal/gate` | Completion Review + Auto QA pipeline, Slop Guard |
-| `internal/tracker` | Field authority, nonce-bound approval parsing, echo suppression |
-| `internal/tracker/vikunja` | Live Vikunja REST adapter + approval reconciliation |
-| `internal/mcp` | Agent-facing JSON-RPC surface (no approval method) |
+| `internal/catalog` | Global project registry and collision-safe workspace lookup |
+| `internal/contracts` | State machine, transition table, MCP method allowlist, evidence provenance |
+| `internal/store` | Per-project `control.sqlite` protected workflow state |
+| `internal/workflow` | Tasks, planning metadata, dependencies, claims, leases, fencing, submissions, approvals |
+| `internal/quality` | Declared recipe parsing and machine-attested execution |
+| `internal/gate` | Completion Review, Auto QA, and Slop Guard |
+| `internal/ui` | Embedded multi-project control center, local human session, HTML and JSON APIs |
+| `internal/knowledge` | Git-versioned project decisions, conventions, glossary, and runbook |
+| `internal/memory` | Project-scoped, provenance-bearing FTS5 memory |
+| `internal/context` | Rebuildable FTS5 projection of knowledge, memory, and code |
+| `internal/notify` | Project alert log and best-effort local delivery |
+| `internal/mcp` | Project-bound agent JSON-RPC surface with no approval method |
+| `internal/tracker/vikunja` | Optional legacy Vikunja projection and comment reconciliation |
 
-**Field authority is split, never duplicated.** The tracker owns task content, assignees,
-comments, and attachments. `control.sqlite` owns protected workflow state, leases,
-evidence attestations, review snapshots, and approvals. Tracker buckets are a *projection*
-of protected state — moving a card is a transition *request*, never an approval.
+## Optional Vikunja integration
 
-## Tests
-
-Every guarantee above is an executable test, not a claim in a document:
+The native control center needs no external service. Existing Vikunja users may
+keep a board as an optional projection:
 
 ```bash
-go test ./...
+agentklar tracker connect \
+  --url http://localhost:3456/api/v1 \
+  --svc-user agentklar-bot --svc-pass '******' \
+  --human you
+agentklar tracker sync
 ```
 
-Notable cases: `TestConcurrentClaimsExactlyOneWinner`, `TestStaleFencingTokenRejected`,
-`TestQuickAutoExclusiveRepositoryLease`, `TestStaleSubmissionCannotBeReviewed`,
-`TestHumanOnlyDoneRequiresValidNonce`, `TestNoAgentTransitionIntoDone`,
-`TestNoApprovalMethodOnAgentSurface`, `TestApprovalPresentationWithholdsNonce`,
-`TestServiceAccountCannotApprove`, `TestSlopGuardIgnoresOrdinaryCode`.
+Agentklar projects cards and workflow buckets outward to Vikunja; it does not
+import Vikunja card moves as state transitions. Vikunja may also supply
+human-authored approval or rejection comments. `agentklar reconcile` checks a
+comment against the live submission and nonce before applying the decision.
 
-## Not yet built
+## Verify and contribute
 
-Webhook push reconciliation (polling + `reconcile` works today); cross-provider reviewer
-adapters and disposable review snapshots; FTS5 context indexing and work packets;
-established-project onboarding; mdBook catalogue; the community pack library; installer,
-signed releases, and staged updates.
-
-See `docs/superpowers/specs/` for the design and `docs/superpowers/plans/` for the phased
-delivery plan.
-
-## Contributing
-
-Contributions are welcome — Agentklar is early, so good PRs have real leverage. Start with
-[CONTRIBUTING.md](CONTRIBUTING.md) for setup, the quality bar, and where help is wanted.
-Please read the [Code of Conduct](CODE_OF_CONDUCT.md), and report security issues privately
-via [SECURITY.md](SECURITY.md) rather than a public issue.
+Tests are the executable specification for the completion boundary:
 
 ```bash
 go build ./...
 go test ./...
 ```
 
-Good first areas: cross-provider reviewer adapters, FTS5 context indexing,
-established-project onboarding, and the [community pack library](docs/superpowers/plans/2026-07-21-agentklar-community-library-plan.md).
+Start with [CONTRIBUTING.md](CONTRIBUTING.md), follow the
+[Code of Conduct](CODE_OF_CONDUCT.md), and report vulnerabilities through
+[SECURITY.md](SECURITY.md).
 
-## Design documents
-
-- [Design spec](docs/superpowers/specs/2026-07-15-agentic-sdlc-quality-toolkit-design.md)
-- [Master delivery plan](docs/superpowers/plans/2026-07-17-agentklar-master-delivery-plan.md)
-- [Community library plan](docs/superpowers/plans/2026-07-21-agentklar-community-library-plan.md)
+Design records live under [`docs/superpowers/specs/`](docs/superpowers/specs/)
+and implementation plans under
+[`docs/superpowers/plans/`](docs/superpowers/plans/).
 
 ## License
 

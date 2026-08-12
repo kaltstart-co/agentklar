@@ -122,6 +122,11 @@ func (s *Store) Remember(namespace, key, value, sourceTask, holder string) (int6
 // of prefix terms so partial word matches work; a malformed FTS expression
 // yields an empty result rather than an error.
 func (s *Store) Recall(query string, limit int) ([]Entry, error) {
+	return s.RecallScoped(query, "", "", limit)
+}
+
+// RecallScoped searches memory after applying namespace and source-task scope.
+func (s *Store) RecallScoped(query, namespace, sourceTask string, limit int) ([]Entry, error) {
 	fts := ftsQuery(query)
 	if fts == "" {
 		return nil, nil
@@ -134,9 +139,11 @@ func (s *Store) Recall(query string, limit int) ([]Entry, error) {
         FROM memory_fts
         JOIN memory m ON m.id = memory_fts.rowid
         WHERE memory_fts MATCH ?
+		  AND (? = '' OR m.namespace = ?)
+		  AND (? = '' OR m.source_task = ?)
         ORDER BY bm25(memory_fts) ASC
         LIMIT ?`,
-		fts, limit)
+		fts, namespace, namespace, sourceTask, sourceTask, limit)
 	if err != nil {
 		if isFTSSyntaxError(err) {
 			return nil, nil
@@ -150,22 +157,17 @@ func (s *Store) Recall(query string, limit int) ([]Entry, error) {
 // List returns all entries, optionally filtered by namespace ("" = all),
 // newest first.
 func (s *Store) List(namespace string) ([]Entry, error) {
-	var (
-		rows *sql.Rows
-		err  error
-	)
-	if namespace == "" {
-		rows, err = s.db.Query(`
-            SELECT id, namespace, key, value, source_task, holder, created_at
-            FROM memory
-            ORDER BY created_at DESC, id DESC`)
-	} else {
-		rows, err = s.db.Query(`
-            SELECT id, namespace, key, value, source_task, holder, created_at
-            FROM memory
-            WHERE namespace = ?
-            ORDER BY created_at DESC, id DESC`, namespace)
-	}
+	return s.ListScoped(namespace, "")
+}
+
+// ListScoped lists memory after applying namespace and source-task scope.
+func (s *Store) ListScoped(namespace, sourceTask string) ([]Entry, error) {
+	rows, err := s.db.Query(`
+		SELECT id, namespace, key, value, source_task, holder, created_at
+		FROM memory
+		WHERE (? = '' OR namespace = ?)
+		  AND (? = '' OR source_task = ?)
+		ORDER BY created_at DESC, id DESC`, namespace, namespace, sourceTask, sourceTask)
 	if err != nil {
 		return nil, fmt.Errorf("list: %w", err)
 	}

@@ -1,41 +1,8 @@
 {{define "content"}}
-<h1>Shared Memory</h1>
-{{if not .MemOK}}<p class="empty">Memory store not available.</p>
-{{else}}
-<form method="get" action="/memory" class="row" style="margin-bottom:1rem">
-  <input type="search" id="mem-q" name="q" value="{{.Q}}" placeholder="search memory (FTS)&hellip;" autocomplete="off">
-  <button class="btn" type="submit">Search</button>
-</form>
-<table>
-<thead><tr><th>Namespace</th><th>Key</th><th>Value</th><th>Holder</th><th>When</th></tr></thead>
-<tbody id="mem-results">
-{{range .Memory}}<tr><td><code>{{.Namespace}}</code></td><td><code>{{.Key}}</code></td><td>{{.Value}}</td><td>{{.Holder}}</td><td class="muted">{{.CreatedAt}}</td></tr>
-{{else}}<tr><td colspan="5" class="empty">no entries</td></tr>{{end}}
-</tbody>
-</table>
-<script>
-(function(){
-  var input=document.getElementById('mem-q'); var out=document.getElementById('mem-results');
-  if(!input||!out) return;
-  var timer=null;
-  function esc(s){return (s==null?'':String(s)).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
-  function render(rows){
-    if(!rows||!rows.length){out.innerHTML='<tr><td colspan="5" class="empty">no entries</td></tr>';return;}
-    out.innerHTML=rows.map(function(e){
-      return '<tr><td><code>'+esc(e.Namespace)+'</code></td><td><code>'+esc(e.Key)+'</code></td><td>'+esc(e.Value)+'</td><td>'+esc(e.Holder)+'</td><td class="muted">'+esc(e.CreatedAt)+'</td></tr>';
-    }).join('');
-  }
-  input.addEventListener('input',function(){
-    clearTimeout(timer);
-    var q=input.value.trim();
-    timer=setTimeout(function(){
-      fetch('/api/memory'+(q?('?q='+encodeURIComponent(q)):''),{headers:{'Accept':'application/json'}})
-        .then(function(r){return r.json();})
-        .then(render)
-        .catch(function(){});
-    },150);
-  });
-})();
-</script>
+<header class="page-head"><div><p class="eyebrow">Agent learnings with provenance</p><h1>Memory</h1><p class="lede">Project-scoped facts agents can recall. Only a human can forget.</p></div></header>
+<nav class="subnav" aria-label="Intelligence sections"><a href="{{.BasePath}}/knowledge">Knowledge</a><a class="active" href="{{.BasePath}}/memory">Memory</a><a href="{{.BasePath}}/context">Context</a></nav>
+{{if not .MemOK}}<p class="empty">Memory is not available for this project.</p>{{else}}
+<form method="get" action="{{.BasePath}}/memory" class="searchbar memory-search"><label for="mem-q">Search memory</label><input type="search" id="mem-q" name="q" value="{{.Q}}" placeholder="Search facts and patterns" autocomplete="off"><label for="mem-namespace">Namespace</label><select id="mem-namespace" name="namespace"><option value="">All namespaces</option>{{range .MemoryNamespaces}}<option value="{{.}}" {{if eq . $.Namespace}}selected{{end}}>{{.}}</option>{{end}}</select><label for="mem-task">Source task</label><input id="mem-task" name="task" value="{{.TaskScope}}" placeholder="Any task"><button class="button secondary" type="submit">Search</button></form>
+<div class="memory-list" data-memory-list data-api="/api/projects/{{.ProjectID}}/memory">{{range .Memory}}<article data-memory-id="{{.ID}}"><header><div><span class="task-id">{{.Namespace}} / {{.Key}}</span><h2>{{.Value}}</h2></div>{{if $.Human}}<button class="text-button danger-text" type="button" data-forget-memory="{{.ID}}">Forget</button>{{end}}</header><footer><span>Source task: {{if .SourceTask}}{{.SourceTask}}{{else}}—{{end}}</span><span>Holder: {{.Holder}}</span><time>{{.CreatedAt}}</time></footer></article>{{else}}<p class="empty">No memory entries.</p>{{end}}</div>
 {{end}}
 {{end}}

@@ -41,9 +41,10 @@ func (Noop) PlaceCard(string, contracts.State) error { return nil }
 func (Noop) Configured() bool                        { return false }
 
 var (
-	ErrNotHumanActor  = errors.New("approval comment was not authored by an allowed human account")
-	ErrServiceAccount = errors.New("approval attempted by the agentklar service account")
-	ErrNoDirective    = errors.New("comment contains no approve/reject directive with a valid nonce")
+	ErrNotHumanActor   = errors.New("approval comment was not authored by an allowed human account")
+	ErrServiceAccount  = errors.New("approval attempted by the agentklar service account")
+	ErrNoDirective     = errors.New("comment contains no approve/reject directive with a valid nonce")
+	ErrRejectionReason = errors.New("rejection directive requires a reason")
 )
 
 // Comment is a tracker comment as delivered by webhook or polling.
@@ -61,6 +62,7 @@ type Decision struct {
 	TaskID  string
 	Nonce   string
 	Approve bool
+	Reason  string
 	Actor   string
 	Channel string // "tracker_comment" | "elicitation"
 }
@@ -111,17 +113,23 @@ func ParseApproval(c Comment, expectedNonce string, policy ApprovalPolicy) (*Dec
 	if err := policy.allows(c.AuthorID); err != nil {
 		return nil, err
 	}
-	m := directive.FindStringSubmatch(c.Body)
+	m := directive.FindStringSubmatchIndex(c.Body)
 	if m == nil {
 		return nil, ErrNoDirective
 	}
-	if !strings.EqualFold(m[2], expectedNonce) {
+	if !strings.EqualFold(c.Body[m[4]:m[5]], expectedNonce) {
 		return nil, ErrNoDirective
+	}
+	approve := strings.EqualFold(c.Body[m[2]:m[3]], "approve")
+	reason := strings.TrimLeft(strings.TrimSpace(c.Body[m[1]:]), "—-:;,. ")
+	if !approve && reason == "" {
+		return nil, ErrRejectionReason
 	}
 	return &Decision{
 		TaskID:  c.TaskID,
-		Nonce:   strings.ToLower(m[2]),
-		Approve: strings.EqualFold(m[1], "approve"),
+		Nonce:   strings.ToLower(c.Body[m[4]:m[5]]),
+		Approve: approve,
+		Reason:  reason,
 		Actor:   c.Author,
 		Channel: "tracker_comment",
 	}, nil

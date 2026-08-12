@@ -1,19 +1,5 @@
 {{define "content"}}
-<h1>Project Knowledge</h1>
-{{if .Error}}<p class="empty">{{.Error}}</p>
-{{else if not .KnowOK}}<p class="empty">Knowledge store not available.</p>
-{{else if not .Knowledge}}<p class="empty">No knowledge entries yet.</p>
-{{else}}
-{{range .Knowledge}}
-<div class="panel">
-  <div class="row" style="justify-content:space-between">
-    <h2 style="margin:0">{{.Title}}</h2>
-    <span class="badge">{{.Kind}}</span>
-  </div>
-  <div class="muted id" style="margin:.2rem 0 .5rem">{{.Slug}}</div>
-  <pre>{{.Body}}</pre>
-  {{if .Path}}<div class="muted" style="font-size:.78rem">{{.Path}}</div>{{end}}
-</div>
-{{end}}
-{{end}}
+<header class="page-head"><div><p class="eyebrow">Human-reviewable intelligence</p><h1>Knowledge</h1><p class="lede">Checked-in decisions, conventions, glossary, and runbook.</p></div></header>
+<nav class="subnav" aria-label="Intelligence sections"><a class="active" href="{{.BasePath}}/knowledge">Knowledge</a><a href="{{.BasePath}}/memory">Memory</a><a href="{{.BasePath}}/context">Context</a></nav>
+{{if .Error}}<p class="empty">{{.Error}}</p>{{else if not .KnowOK}}<p class="empty">Knowledge is not available for this project.</p>{{else if not .Knowledge}}<p class="empty">No knowledge entries yet.</p>{{else}}<div class="intelligence-list">{{range .Knowledge}}<article><header><span class="state-badge">{{.Kind}}</span><h2>{{.Title}}</h2></header><p class="task-id">{{.Slug}}</p><pre>{{.Body}}</pre><small>{{.Path}}</small></article>{{end}}</div>{{end}}
 {{end}}

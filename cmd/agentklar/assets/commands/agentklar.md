@@ -9,4 +9,4 @@ Run `agentklar status` and show me the result. Then, in 4 lines or fewer:
 4. An agent can never approve or finish a task — only I can.
 
 If `agentklar` is not on PATH, give the one-line install:
-`curl -sSL https://raw.githubusercontent.com/kaltstart-co/agentklar/main/install.sh | bash`
+`curl -fsSL https://raw.githubusercontent.com/kaltstart-co/agentklar/main/install.sh | bash -s --`

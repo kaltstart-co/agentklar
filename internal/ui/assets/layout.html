@@ -1,28 +1,39 @@
 {{define "layout"}}
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-human="{{.Human}}" data-project="{{.ProjectID}}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="color-scheme" content="dark light">
-  <title>{{.Title}} &mdash; agentklar</title>
+  <meta name="color-scheme" content="light">
+  <title>{{.Title}} — Agentklar</title>
   <link rel="stylesheet" href="/static/app.css">
+  <script src="/static/app.js" defer></script>
 </head>
 <body>
-<header class="topnav">
-  <div class="brand">agentklar</div>
-  <nav>
-    <a href="/" {{if eq .Section "board"}}class="active"{{end}}>Board</a>
-    <a href="/knowledge" {{if eq .Section "knowledge"}}class="active"{{end}}>Knowledge</a>
-    <a href="/memory" {{if eq .Section "memory"}}class="active"{{end}}>Memory</a>
-    <a href="/context" {{if eq .Section "context"}}class="active"{{end}}>Context</a>
-    <a href="/approvals" {{if eq .Section "approvals"}}class="active"{{end}}>Approvals</a>
-    <a href="/alerts" {{if eq .Section "alerts"}}class="active"{{end}}>Alerts</a>
+<button class="nav-toggle" type="button" aria-label="Open primary navigation" aria-expanded="false" data-nav-toggle>☰</button>
+<aside class="rail" data-rail inert>
+  <a class="brand" href="/" aria-label="Agentklar overview"><span>AK</span><strong>agentklar</strong></a>
+  {{if .Projects}}
+  <label class="project-picker-label" for="project-switcher">Project switcher</label>
+  <select id="project-switcher" class="project-picker" data-project-switcher>
+    {{range .Projects}}<option value="{{.ID}}" {{if eq .ID $.ProjectID}}selected{{end}}>{{.Name}}</option>{{end}}
+  </select>
+  {{end}}
+  <nav class="primary-nav" aria-label="Primary navigation">
+    <a href="/" {{if eq .Section "overview"}}class="active" aria-current="page"{{end}}><span>⌂</span>Overview</a>
+    <a href="{{.BasePath}}/board" {{if eq .Section "board"}}class="active" aria-current="page"{{end}}><span>▦</span>Board</a>
+    <a href="/approvals" {{if eq .Section "approvals"}}class="active" aria-current="page"{{end}}><span>✓</span>Approvals</a>
+    <a href="{{.BasePath}}/knowledge" {{if eq .Section "intelligence"}}class="active" aria-current="page"{{end}}><span>◫</span>Intelligence</a>
+    <a href="/alerts" {{if eq .Section "alerts"}}class="active" aria-current="page"{{end}}><span>!</span>Alerts</a>
   </nav>
-</header>
-<main class="container">
-{{block "content" .}}{{end}}
-</main>
+  <div class="rail-foot"><span class="status-dot"></span>Local control plane</div>
+</aside>
+<div class="app-shell">
+  {{if not .Human}}<div class="session-banner" role="status"><strong>Read-only session.</strong> Mutation controls are disabled; restart with <code>agentklar ui --open</code> to make human decisions.</div>{{end}}
+  {{if .ProjectName}}<header class="project-bar"><div><strong>{{.ProjectName}}</strong><span>{{.ProjectRepo}}</span></div><a href="/">All projects</a></header>{{end}}
+  <main class="content" id="main-content">{{block "content" .}}{{end}}</main>
+</div>
+<div class="toast" role="status" aria-live="polite" aria-atomic="true" data-toast></div>
 </body>
 </html>
 {{end}}

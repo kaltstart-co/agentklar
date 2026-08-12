@@ -19,35 +19,78 @@ type Submission struct {
 
 // Evidence is one append-only evidence row with explicit provenance.
 type Evidence struct {
-	ID         int64
-	Provenance string
-	Criterion  string
-	Command    string
-	ExitCode   *int
-	LogPath    string
-	Hash       string
-	Note       string
-	CreatedAt  string
+	ID           int64
+	SubmissionID *int64
+	Provenance   string
+	Criterion    string
+	Command      string
+	ExitCode     *int
+	LogPath      string
+	Hash         string
+	Note         string
+	CreatedAt    string
 }
 
 // ListAll returns every task in the workspace.
 func (e *Engine) ListAll() ([]Task, error) {
-	rows, err := e.db.Query(`SELECT id, project, repo_path, title, lane, isolation, target, state,
-		objective, criteria, verification, tracker_id, review_cycles FROM tasks ORDER BY created_at`)
+	rows, err := e.db.Query(`SELECT ` + taskColumns + ` FROM tasks
+		WHERE archived_at = '' ORDER BY state, position, created_at, id`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var out []Task
 	for rows.Next() {
-		var t Task
-		var crit string
-		if err := rows.Scan(&t.ID, &t.Project, &t.RepoPath, &t.Title, &t.Lane, &t.Isolation, &t.Target,
-			&t.State, &t.Objective, &crit, &t.Verification, &t.TrackerID, &t.ReviewCycles); err != nil {
+		t, err := scanTask(rows)
+		if err != nil {
 			return nil, err
 		}
-		json.Unmarshal([]byte(crit), &t.Criteria)
-		out = append(out, t)
+		out = append(out, *t)
+	}
+	return out, rows.Err()
+}
+
+// ListArchived returns hidden task history without changing active board
+// listings. Archived rows remain fully addressable through GetTask.
+func (e *Engine) ListArchived() ([]Task, error) {
+	rows, err := e.db.Query(`SELECT ` + taskColumns + ` FROM tasks
+		WHERE archived_at <> '' ORDER BY archived_at DESC, id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Task
+	for rows.Next() {
+		t, err := scanTask(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *t)
+	}
+	return out, rows.Err()
+}
+
+// Dependencies returns prerequisite task IDs in stable lexical order.
+func (e *Engine) Dependencies(taskID string) ([]string, error) {
+	var exists int
+	if err := e.db.QueryRow(`SELECT 1 FROM tasks WHERE id = ?`, taskID).Scan(&exists); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	rows, err := e.db.Query(`SELECT depends_on_task_id FROM task_dependencies WHERE task_id = ? ORDER BY depends_on_task_id`, taskID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
 	}
 	return out, rows.Err()
 }
@@ -73,7 +116,7 @@ func (e *Engine) LatestSubmission(taskID string) (*Submission, error) {
 
 // ListEvidence returns append-only evidence for a task, newest last.
 func (e *Engine) ListEvidence(taskID string) ([]Evidence, error) {
-	rows, err := e.db.Query(`SELECT id, provenance, criterion, command, exit_code, log_path,
+	rows, err := e.db.Query(`SELECT id, submission_id, provenance, criterion, command, exit_code, log_path,
 		artifact_hash, note, created_at FROM evidence WHERE task_id = ? ORDER BY id`, taskID)
 	if err != nil {
 		return nil, err
@@ -82,7 +125,7 @@ func (e *Engine) ListEvidence(taskID string) ([]Evidence, error) {
 	var out []Evidence
 	for rows.Next() {
 		var ev Evidence
-		if err := rows.Scan(&ev.ID, &ev.Provenance, &ev.Criterion, &ev.Command, &ev.ExitCode,
+		if err := rows.Scan(&ev.ID, &ev.SubmissionID, &ev.Provenance, &ev.Criterion, &ev.Command, &ev.ExitCode,
 			&ev.LogPath, &ev.Hash, &ev.Note, &ev.CreatedAt); err != nil {
 			return nil, err
 		}

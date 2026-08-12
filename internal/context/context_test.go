@@ -1,9 +1,135 @@
 package ctx
 
 import (
+	"bytes"
+	"database/sql"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"sort"
+	"sync"
 	"testing"
+	"time"
 )
+
+func TestNewMigratesLegacyDocsForTaskScope(t *testing.T) {
+	dir := t.TempDir()
+	db, err := sql.Open("sqlite", filepath.Join(dir, "context.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`CREATE TABLE docs (source TEXT NOT NULL, ref TEXT NOT NULL, title TEXT NOT NULL DEFAULT '', body TEXT NOT NULL, PRIMARY KEY (source, ref))`); err != nil {
+		t.Fatal(err)
+	}
+	_ = db.Close()
+	s, err := New(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	if _, err := s.Index([]Doc{{Source: SourceMemory, Ref: "memory/1", Body: "legacy migration needle", TaskID: "TASK-1"}}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.SearchScoped("legacy", "TASK-1", 10)
+	if err != nil || len(got) != 1 || got[0].TaskID != "TASK-1" {
+		t.Fatalf("migrated search=%#v err=%v", got, err)
+	}
+}
+
+func TestNewMigratesLegacyDocsConcurrently(t *testing.T) {
+	dir := t.TempDir()
+	db, err := sql.Open("sqlite", filepath.Join(dir, "context.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`CREATE TABLE docs (source TEXT NOT NULL, ref TEXT NOT NULL, title TEXT NOT NULL DEFAULT '', body TEXT NOT NULL, PRIMARY KEY (source, ref))`); err != nil {
+		t.Fatal(err)
+	}
+	_ = db.Close()
+	start := make(chan struct{})
+	errs := make(chan error, 12)
+	var wg sync.WaitGroup
+	for i := 0; i < cap(errs); i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			store, err := New(dir)
+			if err == nil {
+				err = store.Close()
+			}
+			errs <- err
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent migration: %v", err)
+		}
+	}
+}
+
+func TestNewMigratesLegacyDocsAcrossProcesses(t *testing.T) {
+	dir := t.TempDir()
+	db, err := sql.Open("sqlite", filepath.Join(dir, "context.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`CREATE TABLE docs (source TEXT NOT NULL, ref TEXT NOT NULL, title TEXT NOT NULL DEFAULT '', body TEXT NOT NULL, PRIMARY KEY (source, ref))`); err != nil {
+		t.Fatal(err)
+	}
+	_ = db.Close()
+	start := filepath.Join(dir, "start")
+	type child struct {
+		cmd *exec.Cmd
+		out bytes.Buffer
+	}
+	children := make([]child, 8)
+	for i := range children {
+		children[i].cmd = exec.Command(os.Args[0], "-test.run=^TestContextMigrationSubprocessHelper$")
+		children[i].cmd.Env = append(os.Environ(), "AGENTKLAR_CONTEXT_MIGRATION_DIR="+dir, "AGENTKLAR_CONTEXT_MIGRATION_START="+start)
+		children[i].cmd.Stdout = &children[i].out
+		children[i].cmd.Stderr = &children[i].out
+		if err := children[i].cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(start, []byte("go"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for i := range children {
+		if err := children[i].cmd.Wait(); err != nil {
+			t.Fatalf("subprocess %d: %v\n%s", i, err, children[i].out.String())
+		}
+	}
+}
+
+func TestContextMigrationSubprocessHelper(t *testing.T) {
+	dir := os.Getenv("AGENTKLAR_CONTEXT_MIGRATION_DIR")
+	if dir == "" {
+		return
+	}
+	start := os.Getenv("AGENTKLAR_CONTEXT_MIGRATION_START")
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, err := os.Stat(start); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for migration start")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	store, err := New(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestNewIdempotent(t *testing.T) {
 	dir := t.TempDir()
@@ -24,6 +150,27 @@ func TestNewIdempotent(t *testing.T) {
 
 	if _, err := s1.Index([]Doc{{Source: SourceKnowledge, Ref: "k1", Title: "idempotent", Body: "first"}}); err != nil {
 		t.Fatalf("index after reopen: %v", err)
+	}
+}
+
+func TestDeleteRemovesDocumentAndFTSProjection(t *testing.T) {
+	s, err := New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	if _, err := s.Index([]Doc{{Source: SourceMemory, Ref: "memory/7", Title: "key", Body: "forget-me-needle"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Delete(SourceMemory, "memory/7"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Search("forget-me-needle", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("deleted document remained searchable: %#v", got)
 	}
 }
 
@@ -202,6 +349,82 @@ func TestSearchReturnsDocsAcrossAllSources(t *testing.T) {
 		if !seen[want] {
 			t.Errorf("source %q missing from results; got sources %v", want, sortedKeys(seen))
 		}
+	}
+}
+
+func TestReplaceSourcesRemovesStaleDocsAndPreservesOtherSources(t *testing.T) {
+	s, err := New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	if _, err := s.Index([]Doc{
+		{Source: SourceKnowledge, Ref: "old", Title: "old-knowledge-needle", Body: "old"},
+		{Source: SourceMemory, Ref: "old", Title: "old-memory-needle", Body: "old"},
+		{Source: SourceCode, Ref: "old", Title: "old-code-needle", Body: "old"},
+		{Source: SourceTicket, Ref: "ticket", Title: "ticket-needle", Body: "keep"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := s.ReplaceSources([]Doc{{Source: SourceKnowledge, Ref: "new", Title: "new-needle", Body: "new"}}, SourceKnowledge, SourceMemory, SourceCode); err != nil || n != 1 {
+		t.Fatalf("replace n=%d err=%v", n, err)
+	}
+	for _, query := range []string{"old-knowledge-needle", "old-memory-needle", "old-code-needle"} {
+		if got, _ := s.Search(query, 10); len(got) != 0 {
+			t.Fatalf("stale %q remained: %#v", query, got)
+		}
+	}
+	if got, _ := s.Search("ticket-needle", 10); len(got) != 1 || got[0].Source != SourceTicket {
+		t.Fatalf("unreplaced ticket lost: %#v", got)
+	}
+}
+
+func TestReplaceSourcesRollsBackOnWriteFailure(t *testing.T) {
+	s, err := New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	if _, err := s.Index([]Doc{{Source: SourceCode, Ref: "old", Title: "preserved-needle", Body: "old"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`CREATE TRIGGER fail_rebuild BEFORE INSERT ON docs WHEN NEW.ref = 'fail' BEGIN SELECT RAISE(FAIL, 'stop'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ReplaceSources([]Doc{{Source: SourceCode, Ref: "fail", Title: "new", Body: "new"}}, SourceCode); err == nil {
+		t.Fatal("replace unexpectedly succeeded")
+	}
+	if got, _ := s.Search("preserved-needle", 10); len(got) != 1 {
+		t.Fatalf("failed rebuild erased previous index: %#v", got)
+	}
+}
+
+func TestReplaceSourcesPersistsRebuildTimeAndTaskScope(t *testing.T) {
+	s, err := New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	if _, err := s.ReplaceSources([]Doc{
+		{Source: SourceMemory, Ref: "memory/1", Title: "shared", Body: "scoped needle", TaskID: "TASK-1"},
+		{Source: SourceMemory, Ref: "memory/2", Title: "other", Body: "scoped needle", TaskID: "TASK-2"},
+	}, SourceMemory); err != nil {
+		t.Fatal(err)
+	}
+	rebuilt, err := s.LastReindexedAt()
+	if err != nil || rebuilt == "" {
+		t.Fatalf("rebuild time=%q err=%v", rebuilt, err)
+	}
+	packet, err := s.PacketScoped("scoped", "TASK-1", 50)
+	if err != nil || len(packet.Items) != 1 || packet.Items[0].TaskID != "TASK-1" {
+		t.Fatalf("task-scoped packet=%#v err=%v", packet, err)
+	}
+	if _, err := s.Index([]Doc{{Source: SourceTicket, Ref: "ticket", Title: "later", Body: "write"}}); err != nil {
+		t.Fatal(err)
+	}
+	after, err := s.LastReindexedAt()
+	if err != nil || after != rebuilt {
+		t.Fatalf("ordinary index changed rebuild time: before=%q after=%q err=%v", rebuilt, after, err)
 	}
 }
 

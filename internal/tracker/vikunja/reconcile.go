@@ -63,8 +63,8 @@ func (r *Reconciler) ReconcileTask(taskID string, trackerTaskID int64) (*tracker
 		}
 		// Apply to the protected state machine. This is the ONLY path that
 		// can reach Done, and it originates from a human tracker account.
-		if err := r.Engine.ResolveApproval(taskID, decision.Nonce, decision.Approve,
-			decision.Actor, decision.Channel); err != nil {
+		if err := r.Engine.ResolveApprovalWithReason(taskID, decision.Nonce, decision.Approve,
+			decision.Actor, decision.Channel, decision.Reason); err != nil {
 			return nil, err
 		}
 		// Project the terminal state back onto the board.

@@ -187,6 +187,8 @@ func cmdContext(args []string) error {
 	if err != nil {
 		return err
 	}
+	defer store.Close()
+	defer eng.DB().Close()
 	switch args[0] {
 	case "search":
 		if len(args) < 2 {
@@ -203,37 +205,54 @@ func cmdContext(args []string) error {
 		return nil
 
 	case "index":
-		// Gather knowledge (in-repo) and memory (workspace sqlite) into the index,
-		// then walk the repo's code. The context store is the union of all three
-		// layers — what an agent gets back as a focused work packet on claim.
-		var docs []akctx.Doc
-		if ks, err := knowledge.New(repoRoot()); err == nil {
-			entries, _ := ks.List()
-			for _, e := range entries {
-				docs = append(docs, akctx.Doc{Source: akctx.SourceKnowledge, Ref: string(e.Kind) + "/" + e.Slug, Title: e.Title, Body: e.Body})
-			}
-		}
-		if ms, err := memory.New(dir); err == nil {
-			rows, _ := ms.List("")
-			for _, m := range rows {
-				ref := fmt.Sprintf("memory/%d", m.ID)
-				title := m.Namespace + "/" + m.Key
-				docs = append(docs, akctx.Doc{Source: akctx.SourceMemory, Ref: ref, Title: title, Body: m.Value})
-			}
-		}
-		n, err := store.Index(docs)
+		n, codeN, err := rebuildContext(repoRoot(), dir, store)
 		if err != nil {
 			return err
 		}
-		codeN, err := store.IndexCode(repoRoot())
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "warning: code index partial: %v\n", err)
-		}
 		fmt.Printf("indexed %d knowledge/memory docs + %d code files\n", n, codeN)
-		_ = eng
 		return nil
 	}
 	return fmt.Errorf("unknown context subcommand %q", args[0])
+}
+
+func rebuildContext(repo, workspace string, store *akctx.Store) (int, int, error) {
+	ks, err := knowledge.New(repo)
+	if err != nil {
+		return 0, 0, err
+	}
+	entries, err := ks.List()
+	if err != nil {
+		return 0, 0, err
+	}
+	docs := make([]akctx.Doc, 0, len(entries))
+	for _, entry := range entries {
+		docs = append(docs, akctx.Doc{Source: akctx.SourceKnowledge, Ref: string(entry.Kind) + "/" + entry.Slug, Title: entry.Title, Body: entry.Body})
+	}
+	ms, err := memory.New(workspace)
+	if err != nil {
+		return 0, 0, err
+	}
+	rows, err := ms.List("")
+	closeErr := ms.Close()
+	if err != nil {
+		return 0, 0, err
+	}
+	if closeErr != nil {
+		return 0, 0, closeErr
+	}
+	for _, row := range rows {
+		docs = append(docs, akctx.Doc{Source: akctx.SourceMemory, Ref: akctx.MemoryRef(row.ID), Title: row.Namespace + "/" + row.Key, Body: row.Value, TaskID: row.SourceTask})
+	}
+	coreN := len(docs)
+	codeDocs, err := akctx.CollectCode(repo)
+	if err != nil {
+		return 0, 0, err
+	}
+	docs = append(docs, codeDocs...)
+	if _, err := store.ReplaceSources(docs, akctx.SourceKnowledge, akctx.SourceMemory, akctx.SourceCode); err != nil {
+		return 0, 0, err
+	}
+	return coreN, len(codeDocs), nil
 }
 
 // cmdAlerts drives the human-alert log. Agents record alerts (over MCP

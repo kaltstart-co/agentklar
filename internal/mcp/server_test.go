@@ -6,7 +6,10 @@ import (
 	"strings"
 	"testing"
 
+	akctx "github.com/kaltstart-co/agentklar/internal/context"
 	"github.com/kaltstart-co/agentklar/internal/contracts"
+	"github.com/kaltstart-co/agentklar/internal/memory"
+	"github.com/kaltstart-co/agentklar/internal/notify"
 	"github.com/kaltstart-co/agentklar/internal/store"
 	"github.com/kaltstart-co/agentklar/internal/workflow"
 )
@@ -137,5 +140,224 @@ func TestClaimAndSubmitOverMCP(t *testing.T) {
 	task, _ := eng.GetTask("T1")
 	if task.State != contracts.StateCompletionReview {
 		t.Fatalf("expected Completion Review, got %s", task.State)
+	}
+}
+
+func TestRememberImmediatelyUpdatesMemoryAndContext(t *testing.T) {
+	dir := t.TempDir()
+	mem, err := memory.New(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { mem.Close() })
+	contextStore, err := akctx.New(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { contextStore.Close() })
+	srv, _ := newServer(t)
+	srv.Memory, srv.Context = mem, contextStore
+
+	remember := func(value string) {
+		t.Helper()
+		params, _ := json.Marshal(map[string]string{
+			"namespace": "T1", "key": "decision", "value": value,
+			"task_id": "T1", "holder": "codex",
+		})
+		resp := srv.Dispatch(Request{JSONRPC: "2.0", ID: json.RawMessage(`1`), Method: "remember", Params: params})
+		if resp.Error != nil {
+			t.Fatalf("remember %q: %v", value, resp.Error)
+		}
+	}
+	recall := func(query string) []memory.Entry {
+		t.Helper()
+		params, _ := json.Marshal(map[string]interface{}{"query": query, "limit": 10})
+		resp := srv.Dispatch(Request{JSONRPC: "2.0", ID: json.RawMessage(`2`), Method: "recall", Params: params})
+		if resp.Error != nil {
+			t.Fatalf("recall %q: %v", query, resp.Error)
+		}
+		return resp.Result.(map[string]interface{})["results"].([]memory.Entry)
+	}
+	getContext := func(query string) []akctx.Doc {
+		t.Helper()
+		params, _ := json.Marshal(map[string]string{"query": query})
+		resp := srv.Dispatch(Request{JSONRPC: "2.0", ID: json.RawMessage(`3`), Method: "get_context", Params: params})
+		if resp.Error != nil {
+			t.Fatalf("get_context %q: %v", query, resp.Error)
+		}
+		return resp.Result.(akctx.Packet).Items
+	}
+
+	remember("oranges are preferred")
+	if got := recall("oranges"); len(got) != 1 || got[0].Value != "oranges are preferred" {
+		t.Fatalf("recall after remember = %#v", got)
+	}
+	rows, err := mem.List("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := getContext("oranges")
+	if len(first) != 1 || first[0].Source != akctx.SourceMemory || first[0].Ref != akctx.MemoryRef(rows[0].ID) {
+		t.Fatalf("context after remember = %#v", first)
+	}
+	if _, err := contextStore.Index([]akctx.Doc{{
+		Source: akctx.SourceMemory,
+		Ref:    akctx.MemoryRef(rows[0].ID),
+		Title:  rows[0].Namespace + "/" + rows[0].Key,
+		Body:   rows[0].Value,
+	}}); err != nil {
+		t.Fatalf("manual full reindex: %v", err)
+	}
+
+	remember("bananas are preferred")
+	if got := recall("oranges"); len(got) != 0 {
+		t.Fatalf("old memory remained searchable after update: %#v", got)
+	}
+	updated := getContext("bananas")
+	if len(updated) != 1 || updated[0].Ref != first[0].Ref {
+		t.Fatalf("context update duplicated or changed ref: first=%#v updated=%#v", first, updated)
+	}
+	if got := getContext("oranges"); len(got) != 0 {
+		t.Fatalf("old context remained searchable after update: %#v", got)
+	}
+}
+
+func TestRememberReportsContextProjectionFailureWithoutLosingMemory(t *testing.T) {
+	dir := t.TempDir()
+	mem, err := memory.New(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { mem.Close() })
+	contextStore, err := akctx.New(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := contextStore.Close(); err != nil {
+		t.Fatal(err)
+	}
+	srv, _ := newServer(t)
+	srv.Memory, srv.Context = mem, contextStore
+
+	resp := srv.Dispatch(Request{
+		JSONRPC: "2.0", ID: json.RawMessage(`1`), Method: "remember",
+		Params: json.RawMessage(`{"key":"decision","value":"keep this"}`),
+	})
+	if resp.Error != nil {
+		t.Fatalf("remember returned an error after durable mutation: %v", resp.Error)
+	}
+	result := resp.Result.(map[string]interface{})
+	if result["status"] != "remembered" || result["context_indexed"] != false || !strings.Contains(result["warning"].(string), "context") {
+		t.Fatalf("remember result = %#v", result)
+	}
+	if got, err := mem.Recall("keep", 10); err != nil || len(got) != 1 {
+		t.Fatalf("durable memory missing after projection failure: got=%#v err=%v", got, err)
+	}
+}
+
+func TestMalformedParamsReturnInvalidParams(t *testing.T) {
+	srv, _ := newServer(t)
+	for _, method := range contracts.MCPMethods {
+		resp := srv.Dispatch(Request{JSONRPC: "2.0", ID: json.RawMessage(`1`), Method: method, Params: json.RawMessage(`{`)})
+		if resp.Error == nil || resp.Error.Code != -32602 {
+			t.Errorf("%s malformed params response = %#v, want -32602", method, resp)
+		}
+	}
+}
+
+func TestMissingRequiredParamsReturnInvalidParams(t *testing.T) {
+	srv, _ := newServer(t)
+	for _, def := range ToolDefs {
+		if _, required := def.InputSchema["required"]; !required {
+			continue
+		}
+		resp := srv.Dispatch(Request{JSONRPC: "2.0", ID: json.RawMessage(`1`), Method: def.Name, Params: json.RawMessage(`{}`)})
+		if resp.Error == nil || resp.Error.Code != -32602 {
+			t.Errorf("%s missing params response = %#v, want -32602", def.Name, resp)
+		}
+	}
+}
+
+func TestStateChangingToolsRoundTripThroughDispatch(t *testing.T) {
+	srv, eng := newServer(t)
+	createReady := func(id string) {
+		t.Helper()
+		if err := eng.CreateTask(workflow.Task{ID: id, Project: "p", Title: id, Lane: contracts.LaneStandard, Criteria: []string{"c"}, Verification: "v"}); err != nil {
+			t.Fatal(err)
+		}
+		if err := eng.MarkReady(id, contracts.ActorHuman); err != nil {
+			t.Fatal(err)
+		}
+	}
+	call := func(method string, params interface{}) map[string]interface{} {
+		t.Helper()
+		raw, _ := json.Marshal(params)
+		resp := srv.Dispatch(Request{JSONRPC: "2.0", ID: json.RawMessage(`1`), Method: method, Params: raw})
+		if resp.Error != nil {
+			t.Fatalf("%s: %v", method, resp.Error)
+		}
+		if result, ok := resp.Result.(map[string]interface{}); ok {
+			return result
+		}
+		return nil
+	}
+
+	createReady("release")
+	claim := call("claim_task", map[string]interface{}{"task_id": "release", "holder": "codex"})
+	token := claim["fencing_token"].(int64)
+	call("heartbeat_task", map[string]interface{}{"task_id": "release", "fencing_token": token})
+	call("add_comment", map[string]interface{}{"task_id": "release", "type": "progress", "body": "working"})
+	call("release_task", map[string]interface{}{"task_id": "release", "fencing_token": token})
+	if task, _ := eng.GetTask("release"); task.State != contracts.StateReady {
+		t.Fatalf("released task state = %s", task.State)
+	}
+
+	createReady("review")
+	claim = call("claim_task", map[string]interface{}{"task_id": "review", "holder": "codex"})
+	token = claim["fencing_token"].(int64)
+	submission := call("submit_for_review", map[string]interface{}{
+		"task_id": "review", "fencing_token": token, "base_commit": "a", "head_commit": "b", "summary": "verified",
+	})["submission_id"].(int64)
+	call("record_review", map[string]interface{}{"task_id": "review", "submission_id": submission, "result": "pass", "provider": "reviewer", "findings": "[]"})
+	call("record_qa", map[string]interface{}{"task_id": "review", "submission_id": submission, "result": "pass", "provider": "gate", "findings": "[]"})
+	if task, _ := eng.GetTask("review"); task.State != contracts.StateUserApproval {
+		t.Fatalf("reviewed task state = %s, want user_approval", task.State)
+	}
+
+	dir := t.TempDir()
+	mem, err := memory.New(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { mem.Close() })
+	alerts, err := notify.New(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { alerts.Close() })
+	srv.Memory, srv.Notify = mem, alerts
+	call("remember", map[string]interface{}{"key": "decision", "value": "stdlib", "holder": "codex"})
+	notified := call("notify_human", map[string]interface{}{"severity": "info", "message": "review ready", "holder": "codex"})
+	if notified["speak"] != false {
+		t.Fatalf("info default speak = %#v, want false", notified["speak"])
+	}
+	if task, _ := eng.GetTask("review"); task.State == contracts.StateDone {
+		t.Fatal("agent-facing tools crossed the human-only Done boundary")
+	}
+}
+
+func TestDefaultSpeakFollowsSeverity(t *testing.T) {
+	for _, tc := range []struct {
+		severity notify.Severity
+		want     bool
+	}{
+		{notify.Info, false},
+		{notify.Warn, true},
+		{notify.Error, true},
+		{notify.Block, true},
+	} {
+		if got := defaultSpeak(tc.severity); got != tc.want {
+			t.Errorf("defaultSpeak(%s) = %v, want %v", tc.severity, got, tc.want)
+		}
 	}
 }

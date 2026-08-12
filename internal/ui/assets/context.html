@@ -1,29 +1,9 @@
 {{define "content"}}
-<h1>Context Index</h1>
-{{if not .CtxOK}}<p class="empty">Context store not available.</p>
-{{else}}
-<form method="get" action="/context" class="row" style="margin-bottom:1rem">
-  <input type="search" id="ctx-q" name="q" value="{{.Q}}" placeholder="search indexed context&hellip;" autocomplete="off">
-  <button class="btn" type="submit">Search</button>
-</form>
-{{if .Q}}
-<p class="muted" style="margin:.2rem 0 .8rem">{{len .ContextPkt.Items}} result(s) for &ldquo;{{.Q}}&rdquo;</p>
-<table>
-<thead><tr><th>Source</th><th>Ref</th><th>Title</th><th>Body</th></tr></thead>
-<tbody id="ctx-results">
-{{range .ContextPkt.Items}}<tr><td><span class="badge">{{.Source}}</span></td><td><code>{{.Ref}}</code></td><td>{{.Title}}</td><td class="muted">{{.Body}}</td></tr>
-{{else}}<tr><td colspan="4" class="empty">no matches</td></tr>{{end}}
-</tbody>
-</table>
-{{else}}
-<p class="empty">Enter a query to search the indexed knowledge, memory, code, and tickets.</p>
-{{end}}
-<script>
-(function(){
-  var input=document.getElementById('ctx-q');
-  if(!input) return;
-  input.focus();
-})();
-</script>
+<header class="page-head"><div><p class="eyebrow">Relevant retrieval, on demand</p><h1>Context</h1><p class="lede">Search the derived index without mixing project boundaries.</p></div>{{if .Human}}<button class="button secondary" type="button" data-context-reindex data-api="/api/projects/{{.ProjectID}}/context/reindex">Reindex project</button>{{end}}</header>
+<nav class="subnav" aria-label="Intelligence sections"><a href="{{.BasePath}}/knowledge">Knowledge</a><a href="{{.BasePath}}/memory">Memory</a><a class="active" href="{{.BasePath}}/context">Context</a></nav>
+{{if not .CtxOK}}<p class="empty">Context is not available for this project.</p>{{else}}
+<div class="index-status"><span class="status-dot"></span>Index available{{if .ContextIndexedAt}} · updated {{.ContextIndexedAt}}{{end}}</div>
+<form method="get" action="{{.BasePath}}/context" class="searchbar context-search"><label for="ctx-q">Search context</label><input type="search" id="ctx-q" name="q" value="{{.Q}}" placeholder="Code, tickets, knowledge, memory" autocomplete="off"><label for="ctx-task">Source task</label><input id="ctx-task" name="task" value="{{.TaskScope}}" placeholder="Any task"><button class="button secondary" type="submit">Search</button></form>
+{{if .Q}}<div class="context-results">{{range .ContextPkt.Items}}<article><header><span class="state-badge">{{.Source}}</span><strong>{{.Title}}</strong>{{if .TaskID}}<span class="task-id">Task {{.TaskID}}</span>{{end}}<code>{{.Ref}}</code></header><p>{{.Body}}</p></article>{{else}}<p class="empty">No matches for “{{.Q}}”.</p>{{end}}</div>{{else}}<p class="empty">Enter a query to retrieve focused project context.</p>{{end}}
 {{end}}
 {{end}}

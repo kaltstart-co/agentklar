@@ -1,9 +1,12 @@
 package workflow
 
 import (
+	"errors"
 	"path/filepath"
+	"reflect"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/kaltstart-co/agentklar/internal/contracts"
 	"github.com/kaltstart-co/agentklar/internal/store"
@@ -261,6 +264,189 @@ func TestHumanRejectionReturnsToChangesRequested(t *testing.T) {
 	}
 }
 
+func TestResolveApprovalWithReasonAppendsHumanRequestChangesComment(t *testing.T) {
+	e := newEngine(t)
+	readyTask(t, e, "T1", contracts.LaneQuick, "")
+	c, _ := e.ClaimTask("T1", "agent-a", contracts.StateReady)
+	sub, _ := e.SubmitForReview("T1", c.FencingToken, "base", "head", "s")
+	e.RecordReview("T1", sub, "completion", contracts.ResultPass, "det", "[]")
+	e.RecordReview("T1", sub, "qa", contracts.ResultPass, "det", "[]")
+
+	nonce, _, _ := e.PendingApproval("T1")
+	if err := e.ResolveApprovalWithReason("T1", nonce, false, "divyansh", "tracker_comment", "bound the retry loop"); err != nil {
+		t.Fatal(err)
+	}
+	var actor, ctype, body string
+	if err := e.DB().QueryRow(`SELECT actor, ctype, body FROM comments WHERE task_id = ? ORDER BY id DESC LIMIT 1`, "T1").Scan(&actor, &ctype, &body); err != nil {
+		t.Fatal(err)
+	}
+	if actor != string(contracts.ActorHuman) || ctype != "request_changes" || body != "bound the retry loop" {
+		t.Fatalf("rejection comment = %q %q %q", actor, ctype, body)
+	}
+}
+
+func TestResolveApprovalWithReasonRejectsBlankReasonWithoutSpendingNonce(t *testing.T) {
+	e := newEngine(t)
+	readyTask(t, e, "T1", contracts.LaneQuick, "")
+	c, _ := e.ClaimTask("T1", "agent-a", contracts.StateReady)
+	sub, _ := e.SubmitForReview("T1", c.FencingToken, "base", "head", "s")
+	e.RecordReview("T1", sub, "completion", contracts.ResultPass, "det", "[]")
+	e.RecordReview("T1", sub, "qa", contracts.ResultPass, "det", "[]")
+	nonce, _, _ := e.PendingApproval("T1")
+	if err := e.ResolveApprovalWithReason("T1", nonce, false, "divyansh", "tracker_comment", " \t "); err != ErrInvalidTask {
+		t.Fatalf("blank rejection reason = %v", err)
+	}
+	if got, _, err := e.PendingApproval("T1"); err != nil || got != nonce {
+		t.Fatalf("blank rejection spent nonce: %q, %v", got, err)
+	}
+}
+
+func TestReadyRejectsWhitespaceOnlyVerification(t *testing.T) {
+	e := newEngine(t)
+	if err := e.CreateTask(Task{ID: "T1", Project: "p", Title: "task", Criteria: []string{"c"}, Verification: " \t\n "}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.MarkReady("T1", contracts.ActorHuman); err != ErrNotReadyCriteria {
+		t.Fatalf("MarkReady whitespace verification = %v", err)
+	}
+	if err := e.HumanTransition("T1", contracts.StateReady, ""); err != ErrNotReadyCriteria {
+		t.Fatalf("HumanTransition whitespace verification = %v", err)
+	}
+}
+
+func TestCancellingInProgressTaskDropsLeases(t *testing.T) {
+	e := newEngine(t)
+	readyTask(t, e, "T1", contracts.LaneQuick, "/tmp/cancel-lease")
+	if _, err := e.ClaimTask("T1", "agent", contracts.StateReady); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.HumanTransition("T1", contracts.StateCancelled, "cancelled"); err != nil {
+		t.Fatal(err)
+	}
+	assertNoTaskLeases(t, e, "T1")
+}
+
+func TestArchiveTaskRejectsInProgressWork(t *testing.T) {
+	e := newEngine(t)
+	readyTask(t, e, "T1", contracts.LaneQuick, "/tmp/archive-lease")
+	if _, err := e.ClaimTask("T1", "agent", contracts.StateReady); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.ArchiveTask("T1"); err == nil {
+		t.Fatal("archived active In Progress task")
+	}
+	got, err := e.GetTask("T1")
+	if err != nil || got.ArchivedAt != "" {
+		t.Fatalf("active task archive changed state: %+v, %v", got, err)
+	}
+}
+
+func assertNoTaskLeases(t *testing.T, e *Engine, taskID string) {
+	t.Helper()
+	for _, table := range []string{"leases", "repo_leases"} {
+		var count int
+		if err := e.DB().QueryRow(`SELECT COUNT(*) FROM `+table+` WHERE task_id = ?`, taskID).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != 0 {
+			t.Fatalf("%s retained %d lease rows for %s", table, count, taskID)
+		}
+	}
+}
+
+func TestArchiveTaskRejectsEveryActiveWorkflowState(t *testing.T) {
+	for _, state := range []contracts.State{
+		contracts.StateInProgress, contracts.StateWaiting, contracts.StateBlocked,
+		contracts.StateCompletionReview, contracts.StateAutoQA, contracts.StateUserApproval,
+	} {
+		t.Run(string(state), func(t *testing.T) {
+			e := newEngine(t)
+			if err := e.CreateTask(Task{ID: "T1", Project: "p", Title: "active"}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := e.DB().Exec(`UPDATE tasks SET state = ? WHERE id = ?`, state, "T1"); err != nil {
+				t.Fatal(err)
+			}
+			if err := e.ArchiveTask("T1"); err == nil {
+				t.Fatalf("archived active %s task", state)
+			}
+		})
+	}
+}
+
+func TestHumanRequestChangesSpendsPendingApproval(t *testing.T) {
+	e := newEngine(t)
+	readyTask(t, e, "T1", contracts.LaneQuick, "")
+	c, _ := e.ClaimTask("T1", "agent-a", contracts.StateReady)
+	sub, _ := e.SubmitForReview("T1", c.FencingToken, "base", "head", "s")
+	e.RecordReview("T1", sub, "completion", contracts.ResultPass, "det", "[]")
+	e.RecordReview("T1", sub, "qa", contracts.ResultPass, "det", "[]")
+	if err := e.HumanTransition("T1", contracts.StateChangesRequested, "add coverage"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := e.PendingApproval("T1"); err != ErrNotFound {
+		t.Fatalf("request changes left approval pending: %v", err)
+	}
+	var decision string
+	if err := e.DB().QueryRow(`SELECT decision FROM approvals WHERE task_id = ?`, "T1").Scan(&decision); err != nil || decision != "rejected" {
+		t.Fatalf("approval decision = %q, %v", decision, err)
+	}
+}
+
+func TestNilCriteriaAndLabelsNormalizeToEmptyArrays(t *testing.T) {
+	e := newEngine(t)
+	if err := e.CreateTask(Task{ID: "T1", Project: "p", Title: "empty"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := e.GetTask("T1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Criteria == nil || got.Labels == nil || len(got.Criteria) != 0 || len(got.Labels) != 0 {
+		t.Fatalf("nil slices were not normalized: %+v", got)
+	}
+	u := updateFor(got)
+	u.Criteria, u.Labels = nil, nil
+	if err := e.UpdateTask("T1", u); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = e.GetTask("T1")
+	if got.Criteria == nil || got.Labels == nil {
+		t.Fatalf("update stored nil slices: %+v", got)
+	}
+}
+
+func TestHeartbeatAndSubmitReturnRepositoryLeaseErrors(t *testing.T) {
+	t.Run("heartbeat", func(t *testing.T) {
+		e := newEngine(t)
+		readyTask(t, e, "T1", contracts.LaneQuick, "/tmp/heartbeat-error")
+		c, err := e.ClaimTask("T1", "agent", contracts.StateReady)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := e.DB().Exec(`DROP TABLE repo_leases`); err != nil {
+			t.Fatal(err)
+		}
+		if err := e.Heartbeat("T1", c.FencingToken); err == nil {
+			t.Fatal("heartbeat ignored repo lease update error")
+		}
+	})
+	t.Run("submit", func(t *testing.T) {
+		e := newEngine(t)
+		readyTask(t, e, "T1", contracts.LaneQuick, "/tmp/submit-error")
+		c, err := e.ClaimTask("T1", "agent", contracts.StateReady)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := e.DB().Exec(`DROP TABLE repo_leases`); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := e.SubmitForReview("T1", c.FencingToken, "base", "head", "summary"); err == nil {
+			t.Fatal("submit ignored repo lease delete error")
+		}
+	})
+}
+
 // Auto QA failure routes to Changes Requested and never to User Approval.
 func TestQAFailureBlocksApproval(t *testing.T) {
 	e := newEngine(t)
@@ -322,5 +508,477 @@ func TestReviewCycleCap(t *testing.T) {
 	}
 	if _, err := e.SubmitForReview("T1", c.FencingToken, "base", "headZ", "s"); err != ErrCycleLimit {
 		t.Fatalf("expected ErrCycleLimit after %d cycles, got %v", contracts.MaxAutoReviewCycles, err)
+	}
+}
+
+func TestCreateTaskStoresPlanningMetadata(t *testing.T) {
+	e := newEngine(t)
+	task := Task{
+		ID: "T1", Project: "p", Title: "planned", Priority: PriorityUrgent,
+		Assignee: "divyansh", Labels: []string{"control-center", "migration"},
+		DueDate: "2026-08-15", Position: 7,
+	}
+
+	if err := e.CreateTask(task); err != nil {
+		t.Fatal(err)
+	}
+	got, err := e.GetTask("T1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Priority != PriorityUrgent || got.Assignee != "divyansh" || !reflect.DeepEqual(got.Labels, []string{"control-center", "migration"}) || got.DueDate != "2026-08-15" || got.Position != 7 || got.ArchivedAt != "" {
+		t.Fatalf("planning metadata = %+v", got)
+	}
+	if got.CreatedAt == "" || got.UpdatedAt == "" {
+		t.Fatalf("timestamps = %q, %q", got.CreatedAt, got.UpdatedAt)
+	}
+}
+
+func TestListTasksOmitsArchivedAndOrdersPlanningPosition(t *testing.T) {
+	e := newEngine(t)
+	for _, id := range []string{"draft-late", "ready", "draft-early", "archived"} {
+		if err := e.CreateTask(Task{ID: id, Project: "p", Title: id, Criteria: []string{"c"}, Verification: "v"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := e.DB().Exec(`UPDATE tasks SET state = CASE id
+		WHEN 'ready' THEN 'ready' WHEN 'archived' THEN 'ready' ELSE 'draft' END,
+		position = CASE id WHEN 'draft-late' THEN 9 WHEN 'draft-early' THEN 1 ELSE 0 END,
+		archived_at = CASE WHEN id = 'archived' THEN '2026-08-12T00:00:00Z' ELSE '' END`); err != nil {
+		t.Fatal(err)
+	}
+
+	all, err := e.ListAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := taskIDs(all), []string{"draft-early", "draft-late", "ready"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("ListAll() = %v, want %v", got, want)
+	}
+	ready, err := e.ListReady(contracts.TargetAny)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := taskIDs(ready), []string{"ready"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("ListReady() = %v, want %v", got, want)
+	}
+}
+
+func TestListTasksBreakOrderingTiesByID(t *testing.T) {
+	e := newEngine(t)
+	e.SetClock(func() time.Time { return time.Date(2026, 8, 12, 0, 0, 0, 0, time.UTC) })
+	for _, id := range []string{"z-task", "a-task"} {
+		if err := e.CreateTask(Task{ID: id, Project: "p", Title: id, Criteria: []string{"c"}, Verification: "v"}); err != nil {
+			t.Fatal(err)
+		}
+		if err := e.MarkReady(id, contracts.ActorHuman); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	all, err := e.ListAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := taskIDs(all), []string{"a-task", "z-task"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("ListAll() = %v, want %v", got, want)
+	}
+	ready, err := e.ListReady(contracts.TargetAny)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := taskIDs(ready), []string{"a-task", "z-task"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("ListReady() = %v, want %v", got, want)
+	}
+}
+
+func taskIDs(tasks []Task) []string {
+	ids := make([]string, len(tasks))
+	for i, task := range tasks {
+		ids[i] = task.ID
+	}
+	return ids
+}
+
+func updateFor(t *Task) TaskUpdate {
+	return TaskUpdate{
+		Title: t.Title, Objective: t.Objective, Verification: t.Verification,
+		Lane: t.Lane, Isolation: t.Isolation, Target: t.Target,
+		Priority: t.Priority, Assignee: t.Assignee, DueDate: t.DueDate,
+		Criteria: t.Criteria, Labels: t.Labels,
+	}
+}
+
+func TestUpdateTaskAllowsDraftEditsAndValidatesPlanningFields(t *testing.T) {
+	e := newEngine(t)
+	if err := e.CreateTask(Task{ID: "T1", Project: "p", Title: "draft"}); err != nil {
+		t.Fatal(err)
+	}
+	u := TaskUpdate{
+		Title: "edited", Objective: "ship safely", Verification: "go test ./...",
+		Lane: contracts.LaneMajor, Isolation: contracts.IsolationWorktree, Target: contracts.TargetCodex,
+		Priority: PriorityUrgent, Assignee: "divyansh", DueDate: "2026-08-20",
+		Criteria: []string{"covered"}, Labels: []string{"control-center", "urgent"},
+	}
+	if err := e.UpdateTask("T1", u); err != nil {
+		t.Fatalf("update draft: %v", err)
+	}
+	got, err := e.GetTask("T1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Title != u.Title || got.Objective != u.Objective || got.Verification != u.Verification || got.Lane != u.Lane || got.Isolation != u.Isolation || got.Target != u.Target || got.Priority != u.Priority || got.Assignee != u.Assignee || got.DueDate != u.DueDate || !reflect.DeepEqual(got.Criteria, u.Criteria) || !reflect.DeepEqual(got.Labels, u.Labels) {
+		t.Fatalf("updated task = %+v", got)
+	}
+	for _, bad := range []TaskUpdate{
+		{Title: "", Priority: PriorityMedium},
+		{Title: "ok", Priority: "now"},
+		{Title: "ok", Priority: PriorityMedium, DueDate: "20-08-2026"},
+		{Title: "ok", Priority: PriorityMedium, Labels: []string{"same", "same"}},
+		{Title: "ok", Priority: PriorityMedium, Labels: []string{""}},
+	} {
+		if err := e.UpdateTask("T1", bad); err == nil {
+			t.Fatalf("invalid update accepted: %+v", bad)
+		}
+	}
+}
+
+func TestUpdateTaskFreezesProtectedFieldsAfterSubmission(t *testing.T) {
+	e := newEngine(t)
+	readyTask(t, e, "T1", contracts.LaneStandard, "")
+	c, err := e.ClaimTask("T1", "agent", contracts.StateReady)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.SubmitForReview("T1", c.FencingToken, "base", "head", "summary"); err != nil {
+		t.Fatal(err)
+	}
+	before, err := e.GetTask("T1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	frozen := updateFor(before)
+	frozen.Title = "rewritten"
+	if err := e.UpdateTask("T1", frozen); err == nil {
+		t.Fatal("post-submission title edit was accepted")
+	}
+	planning := updateFor(before)
+	planning.Priority = PriorityHigh
+	planning.Assignee = "owner"
+	planning.DueDate = "2026-08-21"
+	planning.Labels = []string{"review"}
+	if err := e.UpdateTask("T1", planning); err != nil {
+		t.Fatalf("planning update: %v", err)
+	}
+	got, _ := e.GetTask("T1")
+	if got.Priority != PriorityHigh || got.Assignee != "owner" || got.DueDate != "2026-08-21" || !reflect.DeepEqual(got.Labels, []string{"review"}) {
+		t.Fatalf("planning metadata not updated: %+v", got)
+	}
+}
+
+func TestUpdateTaskAllowsProtectedEditsBeforeSubmission(t *testing.T) {
+	e := newEngine(t)
+	readyTask(t, e, "T1", contracts.LaneStandard, "")
+	before, err := e.GetTask("T1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	update := updateFor(before)
+	update.Title = "renamed before claim"
+	update.Criteria = []string{"new criterion"}
+	if err := e.UpdateTask("T1", update); err != nil {
+		t.Fatalf("pre-submission protected edit: %v", err)
+	}
+}
+
+func TestSetDependenciesRejectsMissingSelfAndCyclesAndRetrievesStably(t *testing.T) {
+	e := newEngine(t)
+	for _, id := range []string{"A", "B", "C"} {
+		if err := e.CreateTask(Task{ID: id, Project: "p", Title: id}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, deps := range [][]string{{"missing"}, {"A"}} {
+		if err := e.SetDependencies("A", deps); err == nil {
+			t.Fatalf("invalid dependencies accepted: %v", deps)
+		}
+	}
+	if err := e.SetDependencies("A", []string{"C", "B"}); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := e.Dependencies("A"); err != nil || !reflect.DeepEqual(got, []string{"B", "C"}) {
+		t.Fatalf("Dependencies() = %v, %v", got, err)
+	}
+	if err := e.SetDependencies("B", []string{"A"}); err == nil {
+		t.Fatal("dependency cycle was accepted")
+	}
+	if got, err := e.Dependencies("B"); err != nil || len(got) != 0 {
+		t.Fatalf("failed dependency update was not atomic: %v, %v", got, err)
+	}
+}
+
+func TestReorderIsStableAndRequiresExactlyOneStateColumn(t *testing.T) {
+	e := newEngine(t)
+	for _, id := range []string{"A", "B", "C"} {
+		if err := e.CreateTask(Task{ID: id, Project: "p", Title: id}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := e.CreateTask(Task{ID: "R", Project: "p", Title: "R", Criteria: []string{"c"}, Verification: "v"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.MarkReady("R", contracts.ActorHuman); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Reorder(contracts.StateDraft, []string{"C", "A", "B"}); err != nil {
+		t.Fatal(err)
+	}
+	all, err := e.ListAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := taskIDs(all)[:3], []string{"C", "A", "B"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("draft order = %v, want %v", got, want)
+	}
+	for _, ids := range [][]string{{"A", "A", "B"}, {"A", "B"}, {"A", "B", "R"}} {
+		if err := e.Reorder(contracts.StateDraft, ids); err == nil {
+			t.Fatalf("invalid reorder accepted: %v", ids)
+		}
+	}
+}
+
+func TestHumanBoardTransitionUsesContractsAndRequiresRequestChangesReason(t *testing.T) {
+	e := newEngine(t)
+	if err := e.CreateTask(Task{ID: "T1", Project: "p", Title: "bare"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.HumanTransition("T1", contracts.StateReady, ""); err == nil {
+		t.Fatal("ready accepted without criteria and verification")
+	}
+	draft, err := e.GetTask("T1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	update := updateFor(draft)
+	update.Title = "ready"
+	update.Criteria = []string{"c"}
+	update.Verification = "v"
+	if err := e.UpdateTask("T1", update); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.HumanTransition("T1", contracts.StateReady, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.HumanTransition("T1", contracts.StateDone, "drag"); err == nil {
+		t.Fatal("board move directly to Done was accepted")
+	}
+
+	readyTask(t, e, "A", contracts.LaneStandard, "")
+	c, err := e.ClaimTask("A", "agent", contracts.StateReady)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sub, err := e.SubmitForReview("A", c.FencingToken, "base", "head", "summary")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.RecordReview("A", sub, "completion", contracts.ResultPass, "test", "[]"); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.RecordReview("A", sub, "qa", contracts.ResultPass, "test", "[]"); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.HumanTransition("A", contracts.StateDone, "approve"); err == nil {
+		t.Fatal("approval board move directly to Done was accepted")
+	}
+	if err := e.HumanTransition("A", contracts.StateChangesRequested, ""); err == nil {
+		t.Fatal("request changes without reason was accepted")
+	}
+	if err := e.HumanTransition("A", contracts.StateChangesRequested, "add coverage"); err != nil {
+		t.Fatal(err)
+	}
+	var body string
+	if err := e.DB().QueryRow(`SELECT body FROM comments WHERE task_id = ? ORDER BY id DESC LIMIT 1`, "A").Scan(&body); err != nil || body != "add coverage" {
+		t.Fatalf("request-changes reason = %q, %v", body, err)
+	}
+}
+
+func TestArchiveTaskKeepsProtectedHistory(t *testing.T) {
+	e := newEngine(t)
+	if err := e.CreateTask(Task{ID: "T1", Project: "p", Title: "cancel me"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.HumanTransition("T1", contracts.StateCancelled, "cancelled"); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.AddComment("T1", "human", "note", "keep this"); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.ArchiveTask("T1"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := e.GetTask("T1")
+	if err != nil || got.State != contracts.StateCancelled || got.ArchivedAt == "" {
+		t.Fatalf("archived task = %+v, %v", got, err)
+	}
+	var comments int
+	if err := e.DB().QueryRow(`SELECT COUNT(*) FROM comments WHERE task_id = ?`, "T1").Scan(&comments); err != nil || comments != 1 {
+		t.Fatalf("protected history was deleted: comments=%d, err=%v", comments, err)
+	}
+	all, err := e.ListAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 0 {
+		t.Fatalf("archived task listed: %v", taskIDs(all))
+	}
+}
+
+func TestListArchivedDoesNotChangeListAll(t *testing.T) {
+	e := newEngine(t)
+	for _, id := range []string{"active", "archived"} {
+		if err := e.CreateTask(Task{ID: id, Project: "p", Title: id}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := e.ArchiveTask("archived"); err != nil {
+		t.Fatal(err)
+	}
+	active, err := e.ListAll()
+	if err != nil || len(active) != 1 || active[0].ID != "active" {
+		t.Fatalf("active=%v err=%v", active, err)
+	}
+	archived, err := e.ListArchived()
+	if err != nil || len(archived) != 1 || archived[0].ID != "archived" {
+		t.Fatalf("archived=%v err=%v", archived, err)
+	}
+}
+
+func TestArchivedTaskRejectsWorkflowMutations(t *testing.T) {
+	for name, mutate := range map[string]func(*Engine, TaskUpdate) error{
+		"ready": func(e *Engine, _ TaskUpdate) error { return e.MarkReady("archived", contracts.ActorHuman) },
+		"claim": func(e *Engine, _ TaskUpdate) error {
+			_, err := e.ClaimTask("archived", "agent", contracts.StateDraft)
+			return err
+		},
+		"edit":         func(e *Engine, u TaskUpdate) error { return e.UpdateTask("archived", u) },
+		"dependencies": func(e *Engine, _ TaskUpdate) error { return e.SetDependencies("archived", nil) },
+		"transition": func(e *Engine, _ TaskUpdate) error {
+			return e.HumanTransition("archived", contracts.StateCancelled, "")
+		},
+		"approve": func(e *Engine, _ TaskUpdate) error {
+			return e.ResolveApproval("archived", "nonce", true, "human", "ui")
+		},
+		"rearchive": func(e *Engine, _ TaskUpdate) error { return e.ArchiveTask("archived") },
+		"comment":   func(e *Engine, _ TaskUpdate) error { return e.AddComment("archived", "human", "note", "no") },
+		"evidence": func(e *Engine, _ TaskUpdate) error {
+			return e.AddEvidence("archived", 0, contracts.HumanObserved, "", "", "", nil, "", "", "", "no")
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := newEngine(t)
+			if err := e.CreateTask(Task{ID: "archived", Project: "p", Title: "archived"}); err != nil {
+				t.Fatal(err)
+			}
+			if err := e.ArchiveTask("archived"); err != nil {
+				t.Fatal(err)
+			}
+			archived, err := e.GetTask("archived")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := mutate(e, updateFor(archived)); !errors.Is(err, ErrWrongState) {
+				t.Fatalf("archived mutation error = %v, want ErrWrongState", err)
+			}
+			if _, err := e.GetTask("archived"); err != nil {
+				t.Fatalf("archived detail unavailable: %v", err)
+			}
+		})
+	}
+
+	e := newEngine(t)
+	if err := e.CreateTask(Task{ID: "archived", Project: "p", Title: "archived"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.ArchiveTask("archived"); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Reorder(contracts.StateDraft, []string{"archived"}); !errors.Is(err, ErrReorder) {
+		t.Fatalf("archived reorder error = %v, want ErrReorder", err)
+	}
+}
+
+func TestArchivedTaskRejectsLeaseMutation(t *testing.T) {
+	e := newEngine(t)
+	readyTask(t, e, "T1", contracts.LaneStandard, "")
+	claim, err := e.ClaimTask("T1", "agent", contracts.StateReady)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.DB().Exec(`UPDATE tasks SET archived_at = 'now' WHERE id = 'T1'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Heartbeat("T1", claim.FencingToken); !errors.Is(err, ErrWrongState) {
+		t.Fatalf("archived heartbeat error = %v, want ErrWrongState", err)
+	}
+}
+
+func TestActiveTaskRejectsArchivedDependency(t *testing.T) {
+	e := newEngine(t)
+	for _, id := range []string{"active", "archived"} {
+		if err := e.CreateTask(Task{ID: id, Project: "p", Title: id}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := e.ArchiveTask("archived"); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.SetDependencies("active", []string{"archived"}); !errors.Is(err, ErrDependency) {
+		t.Fatalf("archived dependency error = %v, want ErrDependency", err)
+	}
+}
+
+func TestCreateTaskRejectsAmbiguousPathIDs(t *testing.T) {
+	e := newEngine(t)
+	for _, id := range []string{".", "..", "folder/task"} {
+		t.Run(id, func(t *testing.T) {
+			if err := e.CreateTask(Task{ID: id, Project: "p", Title: id}); !errors.Is(err, ErrInvalidTask) {
+				t.Fatalf("CreateTask(%q) error = %v, want ErrInvalidTask", id, err)
+			}
+		})
+	}
+}
+
+func TestCreateTaskWithDependenciesRollsBackInvalidDependency(t *testing.T) {
+	e := newEngine(t)
+	err := e.CreateTaskWithDependencies(Task{ID: "new", Project: "p", Title: "new"}, []string{"missing"})
+	if !errors.Is(err, ErrDependency) {
+		t.Fatalf("error = %v, want ErrDependency", err)
+	}
+	if _, err := e.GetTask("new"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("task persisted after failed dependencies: %v", err)
+	}
+}
+
+func TestUpdateTaskWithDependenciesRollsBackBothChanges(t *testing.T) {
+	e := newEngine(t)
+	for _, id := range []string{"task", "dep"} {
+		if err := e.CreateTask(Task{ID: id, Project: "p", Title: id}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := e.SetDependencies("task", []string{"dep"}); err != nil {
+		t.Fatal(err)
+	}
+	task, _ := e.GetTask("task")
+	u := updateFor(task)
+	u.Title = "changed"
+	if err := e.UpdateTaskWithDependencies("task", u, []string{"missing"}); !errors.Is(err, ErrDependency) {
+		t.Fatalf("error = %v, want ErrDependency", err)
+	}
+	got, _ := e.GetTask("task")
+	deps, _ := e.Dependencies("task")
+	if got.Title != "task" || !reflect.DeepEqual(deps, []string{"dep"}) {
+		t.Fatalf("partial update persisted: title=%q deps=%v", got.Title, deps)
 	}
 }

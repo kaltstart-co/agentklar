@@ -45,9 +45,21 @@ var errCodeIndexLimit = errors.New("ctx: code index file limit reached")
 // existing Index() path (so FTS stays consistent). Returns the number of files
 // indexed. It must never panic on a bad file or permission error — log/skip.
 func (s *Store) IndexCode(repoRoot string) (int, error) {
+	docs, err := CollectCode(repoRoot)
+	if err != nil {
+		return 0, err
+	}
+	return s.Index(docs)
+}
+
+// CollectCode reads the bounded source corpus without changing the index.
+func CollectCode(repoRoot string) ([]Doc, error) {
 	var docs []Doc
 	walkErr := filepath.WalkDir(repoRoot, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
+			if path == repoRoot {
+				return err
+			}
 			// Permission fault, entry deleted mid-walk, etc.: skip this
 			// entry rather than abort the whole index over one bad file.
 			return nil
@@ -102,10 +114,9 @@ func (s *Store) IndexCode(repoRoot string) (int, error) {
 		return nil
 	})
 	if walkErr != nil && !errors.Is(walkErr, errCodeIndexLimit) {
-		return 0, fmt.Errorf("walk %s: %w", repoRoot, walkErr)
+		return nil, fmt.Errorf("walk %s: %w", repoRoot, walkErr)
 	}
-
-	return s.Index(docs)
+	return docs, nil
 }
 
 // readTextHead reads up to codeBodyLimit bytes of path and returns the text

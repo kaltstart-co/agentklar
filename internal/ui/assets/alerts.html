@@ -1,24 +1,4 @@
 {{define "content"}}
-<h1>Alerts</h1>
-{{if not .AlertOK}}<p class="empty">Alert store not available in this workspace.</p>
-{{else if not .Alerts}}<p class="empty">No alerts. Agents raise them with <code>notify_human</code> (blocked / needs input / error / done).</p>
-{{else}}
-{{range .Alerts}}
-<div class="panel">
-  <div class="row" style="justify-content:space-between;align-items:baseline">
-    <h2 style="margin:0">{{.Message}}</h2>
-    <span class="badge {{.Severity}}">{{.Severity}}</span>
-  </div>
-  <div class="muted id" style="margin:.2rem 0 .6rem">
-    #{{.ID}} · {{if .Acknowledged}}acknowledged{{else}}<b>pending</b>{{end}} · by {{.Holder}}{{if .TaskID}} · task {{.TaskID}}{{end}} · {{.CreatedAt}}
-  </div>
-  {{if not .Acknowledged}}
-  <form method="post" action="/alerts/{{.ID}}/ack">
-    <button class="btn" type="submit">Acknowledge</button>
-  </form>
-  {{end}}
-</div>
-{{end}}
-{{end}}
-<p class="muted" style="margin-top:1rem;font-size:.8rem">Every alert is logged with provenance. Agents can record but never acknowledge their own alerts — acknowledging is human-only.</p>
+<header class="page-head"><div><p class="eyebrow">{{if .AlertGlobal}}All projects{{else}}Selected project{{end}}</p><h1>Alerts</h1><p class="lede">All pending and acknowledged operational messages{{if and (not .AlertGlobal) .ProjectName}} for {{.ProjectName}}{{end}}. Pending items are shown first.</p></div></header>
+{{if not .AlertOK}}<p class="empty">Alerts are not available.</p>{{else if not .Alerts}}<p class="empty">No alerts. Agents raise actionable blockers and decisions with <code>notify_human</code>.</p>{{else}}<div class="alert-list">{{range .Alerts}}<article class="alert severity-{{.Severity}}"><header><span class="state-badge">{{.Severity}}</span><h2>{{.Message}}</h2></header><p class="task-id">{{if .ProjectName}}{{.ProjectName}} · {{end}}#{{.ID}} · {{if .Acknowledged}}acknowledged{{else}}pending{{end}} · by {{.Holder}}{{if .TaskID}} · {{.TaskID}}{{end}}</p>{{if and (not .Acknowledged) $.Human}}<form method="post" action="{{.Action}}"><button class="button secondary" type="submit">Acknowledge</button></form>{{end}}</article>{{end}}</div>{{end}}
 {{end}}
