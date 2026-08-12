@@ -164,12 +164,12 @@ func cmdStatus() error {
 	}
 	fmt.Println()
 	if pending > 0 {
-		fmt.Printf("⤷ %d task(s) waiting on YOUR approval — run 'agentklar open ui' (Approvals tab) or 'agentklar approve <id>'\n", pending)
+		fmt.Printf("⤷ %d task(s) waiting on YOUR approval — run 'agentklar ui --open' (Approvals tab) or 'agentklar approve <id>'\n", pending)
 	}
 	// The native UI is the default view and needs no external service. Mention
 	// the optional Vikunja board only when one is actually reachable, so status
 	// never points the human at a dead URL.
-	fmt.Printf("ui:        agentklar open ui   (native board/approvals/alerts — no extra service needed)\n")
+	fmt.Printf("ui:        agentklar ui --open   (native board/approvals/alerts — no extra service needed)\n")
 	if cfg, _ := vikunja.LoadConfig(dir); cfg != nil {
 		if trackerReachable(cfg.URL) {
 			fmt.Printf("board:     connected — approve as %s → %s\n", cfg.HumanUser, boardURL(cfg.URL, cfg.ProjectID))

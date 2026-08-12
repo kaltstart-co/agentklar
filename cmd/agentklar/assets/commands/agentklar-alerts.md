@@ -13,8 +13,8 @@ Then explain:
 - Every alert has provenance (task + agent + time). Agents can record alerts but
   cannot acknowledge or delete them — that is human-only.
 - To acknowledge one: `agentklar alerts ack <id>` (or click Acknowledge in the
-  UI at `agentklar open ui` → Alerts).
-- To see them graphically: `agentklar open ui` and open the Alerts tab.
+  UI at `agentklar ui --open` → Alerts).
+- To see them graphically: `agentklar ui --open` and open the Alerts tab.
 
 If there are pending **block/error** alerts, surface them prominently and ask
 the user how they want to proceed.
