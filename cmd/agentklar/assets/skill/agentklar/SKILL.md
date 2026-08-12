@@ -88,7 +88,7 @@ it aloud and shows a banner. Severity: `info | warn | error | block`.
 Everything an agent knows, the human can see (Transparency). Never claim a fact the gate or memory hasn't recorded.
 
 ### Board & UI
-- `agentklar open ui` (or `agentklar ui`) — the **native local web UI**: Board, Knowledge, Memory, Context, Evidence, Approvals. This is the default; no external service needed. The Approve button there is a trusted human channel.
+- `agentklar ui --open` — the **native local web UI**: Board, Knowledge, Memory, Context, Evidence, Approvals. This is the default; no external service needed. The Approve button there is a trusted human channel.
 - `agentklar open board` — open a connected Vikunja board (optional).
 - `agentklar open app` — launch the macOS menu-bar widget (approval badge).
 - `agentklar open workspace|config|quality|knowledge|docs` — reveal those paths.

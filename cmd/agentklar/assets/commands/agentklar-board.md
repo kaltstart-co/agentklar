@@ -5,7 +5,7 @@ description: Open the Agentklar board / native UI.
 Open Agentklar's board. Prefer the **native UI** (needs no external service):
 
 ```
-agentklar open ui
+agentklar ui --open
 ```
 
 That opens the local web UI (Board / Knowledge / Memory / Context / Approvals /
