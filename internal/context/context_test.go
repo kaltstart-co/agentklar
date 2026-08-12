@@ -1,9 +1,35 @@
 package ctx
 
 import (
+	"database/sql"
+	"path/filepath"
 	"sort"
 	"testing"
 )
+
+func TestNewMigratesLegacyDocsForTaskScope(t *testing.T) {
+	dir := t.TempDir()
+	db, err := sql.Open("sqlite", filepath.Join(dir, "context.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`CREATE TABLE docs (source TEXT NOT NULL, ref TEXT NOT NULL, title TEXT NOT NULL DEFAULT '', body TEXT NOT NULL, PRIMARY KEY (source, ref))`); err != nil {
+		t.Fatal(err)
+	}
+	_ = db.Close()
+	s, err := New(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	if _, err := s.Index([]Doc{{Source: SourceMemory, Ref: "memory/1", Body: "legacy migration needle", TaskID: "TASK-1"}}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.SearchScoped("legacy", "TASK-1", 10)
+	if err != nil || len(got) != 1 || got[0].TaskID != "TASK-1" {
+		t.Fatalf("migrated search=%#v err=%v", got, err)
+	}
+}
 
 func TestNewIdempotent(t *testing.T) {
 	dir := t.TempDir()
@@ -270,6 +296,35 @@ func TestReplaceSourcesRollsBackOnWriteFailure(t *testing.T) {
 	}
 	if got, _ := s.Search("preserved-needle", 10); len(got) != 1 {
 		t.Fatalf("failed rebuild erased previous index: %#v", got)
+	}
+}
+
+func TestReplaceSourcesPersistsRebuildTimeAndTaskScope(t *testing.T) {
+	s, err := New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	if _, err := s.ReplaceSources([]Doc{
+		{Source: SourceMemory, Ref: "memory/1", Title: "shared", Body: "scoped needle", TaskID: "TASK-1"},
+		{Source: SourceMemory, Ref: "memory/2", Title: "other", Body: "scoped needle", TaskID: "TASK-2"},
+	}, SourceMemory); err != nil {
+		t.Fatal(err)
+	}
+	rebuilt, err := s.LastReindexedAt()
+	if err != nil || rebuilt == "" {
+		t.Fatalf("rebuild time=%q err=%v", rebuilt, err)
+	}
+	packet, err := s.PacketScoped("scoped", "TASK-1", 50)
+	if err != nil || len(packet.Items) != 1 || packet.Items[0].TaskID != "TASK-1" {
+		t.Fatalf("task-scoped packet=%#v err=%v", packet, err)
+	}
+	if _, err := s.Index([]Doc{{Source: SourceTicket, Ref: "ticket", Title: "later", Body: "write"}}); err != nil {
+		t.Fatal(err)
+	}
+	after, err := s.LastReindexedAt()
+	if err != nil || after != rebuilt {
+		t.Fatalf("ordinary index changed rebuild time: before=%q after=%q err=%v", rebuilt, after, err)
 	}
 }
 

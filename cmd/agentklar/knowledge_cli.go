@@ -218,7 +218,7 @@ func cmdContext(args []string) error {
 			for _, m := range rows {
 				ref := akctx.MemoryRef(m.ID)
 				title := m.Namespace + "/" + m.Key
-				docs = append(docs, akctx.Doc{Source: akctx.SourceMemory, Ref: ref, Title: title, Body: m.Value})
+				docs = append(docs, akctx.Doc{Source: akctx.SourceMemory, Ref: ref, Title: title, Body: m.Value, TaskID: m.SourceTask})
 			}
 		}
 		n, err := store.Index(docs)

@@ -7,15 +7,11 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"os"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/kaltstart-co/agentklar/internal/contracts"
-	"github.com/kaltstart-co/agentklar/internal/notify"
 	"github.com/kaltstart-co/agentklar/internal/workflow"
 )
 
@@ -171,7 +167,8 @@ func (s *Server) handleKnowledge(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleMemory(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query().Get("q")
 	namespace := strings.TrimSpace(r.URL.Query().Get("namespace"))
-	d := viewData{Title: "Memory", Section: "intelligence", Q: q, Namespace: namespace}
+	taskScope := strings.TrimSpace(r.URL.Query().Get("task"))
+	d := viewData{Title: "Memory", Section: "intelligence", Q: q, Namespace: namespace, TaskScope: taskScope}
 	store, closeFn, err := s.memoryForProject(r.PathValue("project"))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -198,18 +195,9 @@ func (s *Server) handleMemory(w http.ResponseWriter, r *http.Request) {
 	}
 	sort.Strings(d.MemoryNamespaces)
 	if q != "" {
-		d.Memory, err = store.Recall(q, 50)
-		if namespace != "" {
-			filtered := d.Memory[:0]
-			for _, entry := range d.Memory {
-				if entry.Namespace == namespace {
-					filtered = append(filtered, entry)
-				}
-			}
-			d.Memory = filtered
-		}
+		d.Memory, err = store.RecallScoped(q, namespace, taskScope, 50)
 	} else {
-		d.Memory, err = store.List(namespace)
+		d.Memory, err = store.ListScoped(namespace, taskScope)
 	}
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -220,7 +208,8 @@ func (s *Server) handleMemory(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleContext(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query().Get("q")
-	d := viewData{Title: "Context", Section: "intelligence", Q: q}
+	taskScope := strings.TrimSpace(r.URL.Query().Get("task"))
+	d := viewData{Title: "Context", Section: "intelligence", Q: q, TaskScope: taskScope}
 	store, closeFn, err := s.contextForProject(r.PathValue("project"))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -233,11 +222,15 @@ func (s *Server) handleContext(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d.CtxOK = true
-	d.ContextPkt, _ = store.Packet(q, 50)
-	if p, err := s.projectByID(r.PathValue("project")); err == nil {
-		if info, err := os.Stat(filepath.Join(p.WorkspacePath, "context.sqlite")); err == nil {
-			d.ContextIndexedAt = info.ModTime().UTC().Format(time.RFC3339)
-		}
+	d.ContextPkt, err = store.PacketScoped(q, taskScope, 50)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	d.ContextIndexedAt, err = store.LastReindexedAt()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
 	s.renderRequest(w, r, "context", d)
 }
@@ -279,25 +272,68 @@ func (s *Server) handleApproveHTML(w http.ResponseWriter, r *http.Request) {
 // handleAlerts renders the alert log. Agents raise alerts (notify_human);
 // only the human acknowledges them here.
 func (s *Server) handleAlerts(w http.ResponseWriter, r *http.Request) {
-	var (
-		alerts []notify.Alert
-		ok     bool
-	)
-	store, closeFn, err := s.alertsForProject(r.PathValue("project"))
+	projectID := r.PathValue("project")
+	alerts, ok, err := s.allAlerts(projectID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	defer closeFn()
-	if store != nil {
-		ok = true
-		alerts, err = store.List("")
+	s.renderRequest(w, r, "alerts", viewData{Title: "Alerts", Section: "alerts", Alerts: alerts, AlertOK: ok, AlertGlobal: s.catalog != nil && projectID == ""})
+}
+
+func (s *Server) allAlerts(projectID string) ([]alertView, bool, error) {
+	if s.catalog == nil {
+		if s.alerts == nil {
+			return nil, false, nil
+		}
+		rows, err := s.alerts.List("")
+		out := make([]alertView, 0, len(rows))
+		for _, row := range rows {
+			out = append(out, alertView{Alert: row, Action: "/alerts/" + strconv.FormatInt(row.ID, 10) + "/ack"})
+		}
+		sortAlertViews(out)
+		return out, true, err
+	}
+	projects, err := s.catalog.List()
+	if err != nil {
+		return nil, false, err
+	}
+	var out []alertView
+	for _, project := range projects {
+		if projectID != "" && project.ID != projectID {
+			continue
+		}
+		store, closeFn, err := s.alertsForProject(project.ID)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
+			return nil, false, err
+		}
+		rows, listErr := store.List("")
+		closeFn()
+		if listErr != nil {
+			return nil, false, listErr
+		}
+		for _, row := range rows {
+			out = append(out, alertView{Alert: row, ProjectID: project.ID, ProjectName: project.Name,
+				Action: "/projects/" + url.PathEscape(project.ID) + "/alerts/" + strconv.FormatInt(row.ID, 10) + "/ack"})
 		}
 	}
-	s.renderRequest(w, r, "alerts", viewData{Title: "Alerts", Section: "alerts", Alerts: alerts, AlertOK: ok})
+	sortAlertViews(out)
+	return out, true, nil
+}
+
+func sortAlertViews(out []alertView) {
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Acknowledged != out[j].Acknowledged {
+			return !out[i].Acknowledged
+		}
+		if out[i].CreatedAt != out[j].CreatedAt {
+			return out[i].CreatedAt > out[j].CreatedAt
+		}
+		if out[i].ProjectID != out[j].ProjectID {
+			return out[i].ProjectID < out[j].ProjectID
+		}
+		return out[i].ID > out[j].ID
+	})
 }
 
 // handleAckAlertHTML acknowledges an alert from a human click, then refreshes.
@@ -330,23 +366,17 @@ func (s *Server) handleAckAlertHTML(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAPIAlerts(w http.ResponseWriter, r *http.Request) {
-	store, closeFn, err := s.currentAlerts()
+	alerts, ok, err := s.allAlerts("")
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
-	defer closeFn()
-	if store == nil {
+	if !ok {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "alerts unavailable"})
 		return
 	}
-	alerts, err := store.List("")
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
 	if alerts == nil {
-		alerts = []notify.Alert{}
+		alerts = []alertView{}
 	}
 	writeJSON(w, http.StatusOK, alerts)
 }
@@ -536,11 +566,23 @@ func (s *Server) pendingApprovals(engine *workflow.Engine, projectID string, hum
 		if err != nil {
 			return nil, err
 		}
+		currentEvidence := evidence[:0]
+		for _, item := range evidence {
+			if item.SubmissionID != nil && *item.SubmissionID == subID {
+				currentEvidence = append(currentEvidence, item)
+			}
+		}
 		reviews, err := listEngineReviews(engine, t.ID)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, approvalView{Task: t, Evidence: evidence, Reviews: reviews, SubmissionID: subID, ProjectID: projectID, Action: action, TaskURL: taskURL, CSRFToken: token})
+		currentReviews := reviews[:0]
+		for _, item := range reviews {
+			if item.SubmissionID == subID {
+				currentReviews = append(currentReviews, item)
+			}
+		}
+		out = append(out, approvalView{Task: t, Evidence: currentEvidence, Reviews: currentReviews, SubmissionID: subID, ProjectID: projectID, Action: action, TaskURL: taskURL, CSRFToken: token})
 	}
 	return out, nil
 }

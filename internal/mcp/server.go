@@ -459,6 +459,7 @@ func (s *Server) Dispatch(req Request) Response {
 				Ref:    akctx.MemoryRef(id),
 				Title:  p.Namespace + "/" + p.Key,
 				Body:   p.Value,
+				TaskID: p.TaskID,
 			}})
 			if err != nil {
 				result["warning"] = fmt.Sprintf("memory saved, but context indexing failed: %v", err)

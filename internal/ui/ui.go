@@ -488,6 +488,7 @@ type viewData struct {
 	Memory           []memory.Entry
 	MemOK            bool
 	Namespace        string
+	TaskScope        string
 	MemoryNamespaces []string
 
 	// Context
@@ -498,8 +499,16 @@ type viewData struct {
 	Approvals []approvalView
 
 	// Alerts
-	Alerts  []notify.Alert
-	AlertOK bool
+	Alerts      []alertView
+	AlertOK     bool
+	AlertGlobal bool
+}
+
+type alertView struct {
+	notify.Alert
+	ProjectID   string `json:"project_id,omitempty"`
+	ProjectName string `json:"project_name,omitempty"`
+	Action      string `json:"-"`
 }
 
 type columnView struct {
@@ -531,6 +540,7 @@ type comment struct {
 }
 
 type review struct {
+	SubmissionID                                int64
 	Kind, Result, Provider, Findings, CreatedAt string
 }
 
@@ -559,7 +569,7 @@ func listEngineComments(engine *workflow.Engine, taskID string) ([]comment, erro
 }
 
 func listEngineReviews(engine *workflow.Engine, taskID string) ([]review, error) {
-	rows, err := engine.DB().Query(`SELECT kind, result, provider, findings, created_at FROM reviews WHERE task_id = ? ORDER BY id DESC`, taskID)
+	rows, err := engine.DB().Query(`SELECT submission_id, kind, result, provider, findings, created_at FROM reviews WHERE task_id = ? ORDER BY id DESC`, taskID)
 	if err != nil {
 		return nil, err
 	}
@@ -567,7 +577,7 @@ func listEngineReviews(engine *workflow.Engine, taskID string) ([]review, error)
 	var out []review
 	for rows.Next() {
 		var item review
-		if err := rows.Scan(&item.Kind, &item.Result, &item.Provider, &item.Findings, &item.CreatedAt); err != nil {
+		if err := rows.Scan(&item.SubmissionID, &item.Kind, &item.Result, &item.Provider, &item.Findings, &item.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, item)

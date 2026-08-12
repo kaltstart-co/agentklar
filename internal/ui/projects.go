@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -373,7 +372,7 @@ func (s *Server) handleProjectTask(w http.ResponseWriter, r *http.Request) {
 		writeWorkflowError(w, err)
 		return
 	}
-	writeProjectTaskDetail(w, rt.engine, id)
+	writeProjectTaskMutation(w, rt.engine, id)
 }
 
 func (s *Server) handleProjectComment(w http.ResponseWriter, r *http.Request) {
@@ -445,7 +444,7 @@ func (s *Server) transitionProjectTask(w http.ResponseWriter, r *http.Request, s
 		writeWorkflowError(w, err)
 		return
 	}
-	writeProjectTaskDetail(w, rt.engine, r.PathValue("task"))
+	writeProjectTaskMutation(w, rt.engine, r.PathValue("task"))
 }
 
 func (s *Server) handleProjectPosition(w http.ResponseWriter, r *http.Request) {
@@ -489,20 +488,12 @@ func (s *Server) handleProjectMemory(w http.ResponseWriter, r *http.Request) {
 	}
 	defer closeFn()
 	namespace := strings.TrimSpace(r.URL.Query().Get("namespace"))
+	taskScope := strings.TrimSpace(r.URL.Query().Get("task"))
 	var rows []memory.Entry
 	if q := strings.TrimSpace(r.URL.Query().Get("q")); q != "" {
-		rows, err = store.Recall(q, 50)
-		if namespace != "" {
-			filtered := rows[:0]
-			for _, entry := range rows {
-				if entry.Namespace == namespace {
-					filtered = append(filtered, entry)
-				}
-			}
-			rows = filtered
-		}
+		rows, err = store.RecallScoped(q, namespace, taskScope, 50)
 	} else {
-		rows, err = store.List(namespace)
+		rows, err = store.ListScoped(namespace, taskScope)
 	}
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
@@ -561,15 +552,15 @@ func (s *Server) handleProjectContext(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer closeFn()
-	pkt, err := ctx.Packet(r.URL.Query().Get("q"), 50)
+	pkt, err := ctx.PacketScoped(r.URL.Query().Get("q"), strings.TrimSpace(r.URL.Query().Get("task")), 50)
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
-	p, _ := s.projectByID(r.PathValue("project"))
-	indexedAt := ""
-	if info, err := os.Stat(filepath.Join(p.WorkspacePath, "context.sqlite")); err == nil {
-		indexedAt = info.ModTime().UTC().Format(time.RFC3339)
+	indexedAt, err := ctx.LastReindexedAt()
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"packet": pkt, "indexed_at": indexedAt})
 }
@@ -611,7 +602,7 @@ func (s *Server) handleProjectContextReindex(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	for _, m := range rows {
-		docs = append(docs, akctx.Doc{Source: akctx.SourceMemory, Ref: akctx.MemoryRef(m.ID), Title: strings.TrimSpace(m.Namespace + " " + m.Key), Body: m.Value})
+		docs = append(docs, akctx.Doc{Source: akctx.SourceMemory, Ref: akctx.MemoryRef(m.ID), Title: strings.TrimSpace(m.Namespace + " " + m.Key), Body: m.Value, TaskID: m.SourceTask})
 	}
 	docs = append(docs, codeDocs...)
 	ctx, err := akctx.New(p.WorkspacePath)
@@ -625,7 +616,12 @@ func (s *Server) handleProjectContextReindex(w http.ResponseWriter, r *http.Requ
 		writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"status": "indexed", "documents": n, "code_files": len(codeDocs), "indexed_at": time.Now().UTC().Format(time.RFC3339)})
+	indexedAt, err := ctx.LastReindexedAt()
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"status": "indexed", "documents": n, "code_files": len(codeDocs), "indexed_at": indexedAt})
 }
 
 type taskCreate struct {
@@ -824,6 +820,17 @@ func writeProjectTaskDetail(w http.ResponseWriter, engine *workflow.Engine, id s
 		dependencies = []string{}
 	}
 	writeJSON(w, http.StatusOK, projectTaskDetail{Task: *task, Evidence: evidence, Comments: comments, Dependencies: dependencies})
+}
+
+func writeProjectTaskMutation(w http.ResponseWriter, engine *workflow.Engine, id string) {
+	task, err := engine.GetTask(id)
+	if err != nil {
+		writeWorkflowError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, struct {
+		Task workflow.Task `json:"task"`
+	}{Task: *task})
 }
 
 type projectTaskDetail struct {

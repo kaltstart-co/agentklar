@@ -2,6 +2,7 @@ package ui
 
 import (
 	"database/sql"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	akctx "github.com/kaltstart-co/agentklar/internal/context"
 	"github.com/kaltstart-co/agentklar/internal/contracts"
@@ -100,6 +102,16 @@ func TestOverviewSeparatesAttentionQueueFromRecentProjects(t *testing.T) {
 	}
 }
 
+func TestMobileOverviewKeepsApprovalMetricVisible(t *testing.T) {
+	css, err := assetsFS.ReadFile("assets/static/app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(css), ".project-row .metric:nth-of-type(3) { display: none; }") {
+		t.Fatal("mobile overview hides the approvals metric")
+	}
+}
+
 func TestMemoryNamespaceFilterScopesHTMLAndAPI(t *testing.T) {
 	c, alpha, _ := seedProjects(t)
 	ms, _ := memory.New(alpha.WorkspacePath)
@@ -125,6 +137,87 @@ func TestMemoryNamespaceFilterScopesHTMLAndAPI(t *testing.T) {
 	}
 	if strings.Contains(page.Body.String(), "release-only-needle") {
 		t.Fatalf("memory HTML crossed namespace: %s", page.Body.String())
+	}
+}
+
+func TestMemorySearchFiltersNamespaceAndTaskBeforeLimit(t *testing.T) {
+	c, alpha, _ := seedProjects(t)
+	ms, _ := memory.New(alpha.WorkspacePath)
+	for i := 0; i < 55; i++ {
+		if _, err := ms.Remember("release", "noise-"+strconv.Itoa(i), strings.Repeat("needle ", 12), "OTHER", "codex"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := ms.Remember("build", "target", "needle target", "SHARED", "codex"); err != nil {
+		t.Fatal(err)
+	}
+	_ = ms.Close()
+	s, _ := NewControlCenter(c, alpha.ID)
+	t.Cleanup(func() { _ = s.Close() })
+	query := "?q=needle&namespace=build&task=SHARED"
+	api := apiRequest(t, s.Handler(), http.MethodGet, "/api/projects/"+alpha.ID+"/memory"+query, "")
+	if api.Code != http.StatusOK || !strings.Contains(api.Body.String(), "needle target") || strings.Contains(api.Body.String(), "OTHER") {
+		t.Fatalf("scoped memory API status=%d body=%s", api.Code, api.Body.String())
+	}
+	page := apiRequest(t, s.Handler(), http.MethodGet, "/projects/"+alpha.ID+"/memory"+query, "")
+	for _, want := range []string{`name="task"`, `value="SHARED"`, "needle target"} {
+		if !strings.Contains(page.Body.String(), want) {
+			t.Fatalf("task-scoped memory page missing %q: %s", want, page.Body.String())
+		}
+	}
+}
+
+func TestGlobalAlertsArePendingFirstAcrossProjects(t *testing.T) {
+	c, alpha, beta := seedProjects(t)
+	a, _ := notify.New(alpha.WorkspacePath)
+	a.SetDeliver(nil)
+	ackID, _ := a.Record("SHARED", "alpha-agent", notify.Info, "alpha acknowledged", false)
+	if err := a.Ack(ackID); err != nil {
+		t.Fatal(err)
+	}
+	_ = a.Close()
+	b, _ := notify.New(beta.WorkspacePath)
+	b.SetDeliver(nil)
+	if _, err := b.Record("SHARED", "beta-agent", notify.Block, "beta pending", false); err != nil {
+		t.Fatal(err)
+	}
+	_ = b.Close()
+	s, _ := NewControlCenter(c, alpha.ID)
+	t.Cleanup(func() { _ = s.Close() })
+	page := apiRequestWithCookie(t, s, bootstrapHuman(t, s), http.MethodGet, "/alerts")
+	body := page.Body.String()
+	for _, want := range []string{alpha.Name, beta.Name, "alpha acknowledged", "beta pending"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("global alerts missing %q: %s", want, body)
+		}
+	}
+	if strings.Index(body, "beta pending") > strings.Index(body, "alpha acknowledged") {
+		t.Fatalf("pending alert was not first: %s", body)
+	}
+}
+
+func TestSingleProjectAlertsArePendingFirst(t *testing.T) {
+	dir := t.TempDir()
+	s, err := New(dir, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	s.alerts.SetDeliver(nil)
+	if _, err := s.alerts.Record("T-1", "agent", notify.Block, "older pending", false); err != nil {
+		t.Fatal(err)
+	}
+	ackID, err := s.alerts.Record("T-2", "agent", notify.Info, "newer acknowledged", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.alerts.Ack(ackID); err != nil {
+		t.Fatal(err)
+	}
+	page := apiRequest(t, s.Handler(), http.MethodGet, "/alerts", "")
+	body := page.Body.String()
+	if strings.Index(body, "older pending") > strings.Index(body, "newer acknowledged") {
+		t.Fatalf("pending alert was not first: %s", body)
 	}
 }
 
@@ -180,8 +273,12 @@ func TestApprovalsRenderEvidenceFromCorrectProject(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		var submissionID int64
+		if err := db.QueryRow(`SELECT submission_id FROM approvals WHERE task_id = 'T-1'`).Scan(&submissionID); err != nil {
+			t.Fatal(err)
+		}
 		exit := 0
-		if err := workflow.New(db).AddEvidence("T-1", 0, contracts.MachineAttested, "quality", "go test ./...", "", &exit, "evidence/quality.log", "sha256:approval", "", item.note); err != nil {
+		if err := workflow.New(db).AddEvidence("T-1", submissionID, contracts.MachineAttested, "quality", "go test ./...", "", &exit, "evidence/quality.log", "sha256:approval", "", item.note); err != nil {
 			t.Fatal(err)
 		}
 		_ = db.Close()
@@ -193,6 +290,69 @@ func TestApprovalsRenderEvidenceFromCorrectProject(t *testing.T) {
 		if !strings.Contains(res.Body.String(), want) {
 			t.Fatalf("approvals missing %q: %s", want, res.Body.String())
 		}
+	}
+}
+
+func TestApprovalsOnlyRenderActiveSubmissionRecords(t *testing.T) {
+	c, alpha, _ := seedProjects(t)
+	pending, _ := seedApproval(t, alpha.WorkspacePath)
+	db, err := store.Open(filepath.Join(alpha.WorkspacePath, "control.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var current int64
+	if err := db.QueryRow(`SELECT submission_id FROM approvals WHERE task_id = ?`, pending).Scan(&current); err != nil {
+		t.Fatal(err)
+	}
+	res, err := db.Exec(`INSERT INTO submissions (task_id, base_commit, head_commit, summary, criteria_snapshot, stale, created_at)
+		VALUES (?, 'old-base', 'old-head', 'old', '[]', 1, '2026-01-01T00:00:00Z')`, pending)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale, _ := res.LastInsertId()
+	if _, err := db.Exec(`INSERT INTO evidence (task_id, submission_id, provenance, note, created_at) VALUES (?, ?, 'machine_attested', 'stale evidence', '2026-01-01T00:00:00Z')`, pending, stale); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO evidence (task_id, submission_id, provenance, note, created_at) VALUES (?, ?, 'machine_attested', 'current evidence', '2026-01-02T00:00:00Z')`, pending, current); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO reviews (task_id, submission_id, kind, result, provider, findings, created_at) VALUES (?, ?, 'qa', 'pass', 'stale-provider', 'stale review', '2026-01-01T00:00:00Z')`, pending, stale); err != nil {
+		t.Fatal(err)
+	}
+	_ = db.Close()
+	s, _ := NewControlCenter(c, alpha.ID)
+	t.Cleanup(func() { _ = s.Close() })
+	page := apiRequestWithCookie(t, s, bootstrapHuman(t, s), http.MethodGet, "/approvals")
+	body := page.Body.String()
+	if !strings.Contains(body, "current evidence") || strings.Contains(body, "stale evidence") || strings.Contains(body, "stale-provider") {
+		t.Fatalf("approval records were not scoped to submission %d: %s", current, body)
+	}
+}
+
+func TestSuccessfulMutationsDoNotDependOnProjectionReads(t *testing.T) {
+	c, alpha, _ := seedProjects(t)
+	db, _ := store.Open(filepath.Join(alpha.WorkspacePath, "control.sqlite"))
+	if _, err := db.Exec(`DROP TABLE evidence; CREATE TABLE evidence (id INTEGER); DROP TABLE comments; CREATE TABLE comments (id INTEGER)`); err != nil {
+		t.Fatal(err)
+	}
+	_ = db.Close()
+	s, _ := NewControlCenter(c, alpha.ID)
+	t.Cleanup(func() { _ = s.Close() })
+	cookie := bootstrapHuman(t, s)
+	path := "/api/projects/" + alpha.ID + "/tasks/SHARED"
+	updated := humanRequest(t, s, cookie, http.MethodPatch, path, `{"assignee":"owner"}`)
+	if updated.Code != http.StatusOK {
+		t.Fatalf("successful update reported failure: status=%d body=%s", updated.Code, updated.Body.String())
+	}
+	db, _ = store.Open(filepath.Join(alpha.WorkspacePath, "control.sqlite"))
+	got, err := workflow.New(db).GetTask("SHARED")
+	_ = db.Close()
+	if err != nil || got.Assignee != "owner" {
+		t.Fatalf("update did not persist: task=%#v err=%v", got, err)
+	}
+	transitioned := humanRequest(t, s, cookie, http.MethodPost, path+"/transition", `{"state":"cancelled"}`)
+	if transitioned.Code != http.StatusOK {
+		t.Fatalf("successful transition reported failure: status=%d body=%s", transitioned.Code, transitioned.Body.String())
 	}
 }
 
@@ -259,6 +419,80 @@ func TestTaskDetailShowsEvidenceFirstControls(t *testing.T) {
 		if !strings.Contains(res.Body.String(), want) {
 			t.Fatalf("detail missing %q: %s", want, res.Body.String())
 		}
+	}
+}
+
+func TestArchivedTaskDetailIsReadOnlyHistory(t *testing.T) {
+	c, alpha, _ := seedProjects(t)
+	db, _ := store.Open(filepath.Join(alpha.WorkspacePath, "control.sqlite"))
+	if err := workflow.New(db).ArchiveTask("SHARED"); err != nil {
+		t.Fatal(err)
+	}
+	_ = db.Close()
+	s, _ := NewControlCenter(c, alpha.ID)
+	t.Cleanup(func() { _ = s.Close() })
+	page := apiRequestWithCookie(t, s, bootstrapHuman(t, s), http.MethodGet, "/projects/"+alpha.ID+"/tasks/SHARED")
+	body := page.Body.String()
+	if !strings.Contains(body, "Archived task") {
+		t.Fatalf("archived detail lacks history marker: %s", body)
+	}
+	for _, forbidden := range []string{"Edit task", "data-task-form", "data-comment-form", ">Archive<"} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("archived detail retained %q: %s", forbidden, body)
+		}
+	}
+}
+
+func TestContextUsesPersistedReindexTimeAndPropagatesSearchErrors(t *testing.T) {
+	c, alpha, _ := seedProjects(t)
+	s, _ := NewControlCenter(c, alpha.ID)
+	t.Cleanup(func() { _ = s.Close() })
+	cookie := bootstrapHuman(t, s)
+	reindex := humanRequest(t, s, cookie, http.MethodPost, "/api/projects/"+alpha.ID+"/context/reindex", "")
+	if reindex.Code != http.StatusOK {
+		t.Fatalf("reindex status=%d body=%s", reindex.Code, reindex.Body.String())
+	}
+	var payload struct {
+		IndexedAt string `json:"indexed_at"`
+	}
+	if err := json.Unmarshal(reindex.Body.Bytes(), &payload); err != nil || payload.IndexedAt == "" {
+		t.Fatalf("reindex payload=%s err=%v", reindex.Body.String(), err)
+	}
+	dbPath := filepath.Join(alpha.WorkspacePath, "context.sqlite")
+	ctx, err := akctx.New(alpha.WorkspacePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ctx.Index([]akctx.Doc{
+		{Source: akctx.SourceMemory, Ref: "memory/1", Body: "scoped context needle", TaskID: "SHARED"},
+		{Source: akctx.SourceMemory, Ref: "memory/2", Body: "scoped context needle", TaskID: "OTHER"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_ = ctx.Close()
+	future := time.Now().Add(2 * time.Hour)
+	if err := os.Chtimes(dbPath, future, future); err != nil {
+		t.Fatal(err)
+	}
+	page := apiRequest(t, s.Handler(), http.MethodGet, "/projects/"+alpha.ID+"/context", "")
+	if !strings.Contains(page.Body.String(), payload.IndexedAt) {
+		t.Fatalf("context page did not use persisted rebuild time %q: %s", payload.IndexedAt, page.Body.String())
+	}
+	scoped := apiRequest(t, s.Handler(), http.MethodGet, "/projects/"+alpha.ID+"/context?q=scoped&task=SHARED", "")
+	if scoped.Code != http.StatusOK || !strings.Contains(scoped.Body.String(), "Task SHARED") || strings.Contains(scoped.Body.String(), "Task OTHER") {
+		t.Fatalf("task-scoped context status=%d body=%s", scoped.Code, scoped.Body.String())
+	}
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`DROP TABLE docs_fts; CREATE TABLE docs_fts (id INTEGER)`); err != nil {
+		t.Fatal(err)
+	}
+	_ = db.Close()
+	broken := apiRequest(t, s.Handler(), http.MethodGet, "/projects/"+alpha.ID+"/context?q=needle", "")
+	if broken.Code != http.StatusInternalServerError {
+		t.Fatalf("context search error status=%d body=%s", broken.Code, broken.Body.String())
 	}
 }
 

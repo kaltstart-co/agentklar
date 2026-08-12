@@ -19,15 +19,16 @@ type Submission struct {
 
 // Evidence is one append-only evidence row with explicit provenance.
 type Evidence struct {
-	ID         int64
-	Provenance string
-	Criterion  string
-	Command    string
-	ExitCode   *int
-	LogPath    string
-	Hash       string
-	Note       string
-	CreatedAt  string
+	ID           int64
+	SubmissionID *int64
+	Provenance   string
+	Criterion    string
+	Command      string
+	ExitCode     *int
+	LogPath      string
+	Hash         string
+	Note         string
+	CreatedAt    string
 }
 
 // ListAll returns every task in the workspace.
@@ -115,7 +116,7 @@ func (e *Engine) LatestSubmission(taskID string) (*Submission, error) {
 
 // ListEvidence returns append-only evidence for a task, newest last.
 func (e *Engine) ListEvidence(taskID string) ([]Evidence, error) {
-	rows, err := e.db.Query(`SELECT id, provenance, criterion, command, exit_code, log_path,
+	rows, err := e.db.Query(`SELECT id, submission_id, provenance, criterion, command, exit_code, log_path,
 		artifact_hash, note, created_at FROM evidence WHERE task_id = ? ORDER BY id`, taskID)
 	if err != nil {
 		return nil, err
@@ -124,7 +125,7 @@ func (e *Engine) ListEvidence(taskID string) ([]Evidence, error) {
 	var out []Evidence
 	for rows.Next() {
 		var ev Evidence
-		if err := rows.Scan(&ev.ID, &ev.Provenance, &ev.Criterion, &ev.Command, &ev.ExitCode,
+		if err := rows.Scan(&ev.ID, &ev.SubmissionID, &ev.Provenance, &ev.Criterion, &ev.Command, &ev.ExitCode,
 			&ev.LogPath, &ev.Hash, &ev.Note, &ev.CreatedAt); err != nil {
 			return nil, err
 		}

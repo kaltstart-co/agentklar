@@ -2,8 +2,9 @@
 {{with .Task}}
 <header class="page-head task-head">
   <div><a class="back-link" href="{{$.BasePath}}/board">← Back to board</a><p class="eyebrow">{{.ID}} · {{.Priority}} priority</p><h1>{{.Title}}</h1></div>
-  <div class="head-actions"><span class="state-badge state-{{.State}}">{{$.StateLabel}}</span><button class="button secondary" type="button" data-open-dialog="edit-task-dialog" {{if not $.Human}}disabled{{end}}>Edit task</button></div>
+  <div class="head-actions"><span class="state-badge state-{{.State}}">{{$.StateLabel}}</span>{{if eq .ArchivedAt ""}}<button class="button secondary" type="button" data-open-dialog="edit-task-dialog" {{if not $.Human}}disabled{{end}}>Edit task</button>{{end}}</div>
 </header>
+{{if .ArchivedAt}}<p class="index-status">Archived task · read-only history.</p>{{end}}
 <section class="task-summary">
   <div class="task-main">
     <h2>Objective</h2><p>{{if .Objective}}{{.Objective}}{{else}}<span class="muted">No objective recorded.</span>{{end}}</p>
@@ -12,7 +13,7 @@
     <h2>Dependencies</h2>{{if $.Dependencies}}<div class="dependency-list">{{range $.Dependencies}}<a href="{{$.BasePath}}/tasks/{{.}}">{{.}}</a>{{end}}</div>{{else}}<p class="muted">No dependencies.</p>{{end}}
   </div>
   <aside class="task-facts" aria-label="Task planning details">
-    <dl><dt>Assignee</dt><dd>{{if .Assignee}}{{.Assignee}}{{else}}Unassigned{{end}}</dd><dt>Due</dt><dd>{{if .DueDate}}{{.DueDate}}{{else}}None{{end}}</dd><dt>Lane</dt><dd>{{.Lane}}</dd><dt>Isolation</dt><dd>{{.Isolation}}</dd><dt>Target</dt><dd>{{.Target}}</dd><dt>Review cycles</dt><dd>{{.ReviewCycles}}</dd><dt>Created</dt><dd>{{.CreatedAt}}</dd><dt>Updated</dt><dd>{{.UpdatedAt}}</dd></dl>
+    <dl><dt>Assignee</dt><dd>{{if .Assignee}}{{.Assignee}}{{else}}Unassigned{{end}}</dd><dt>Due</dt><dd>{{if .DueDate}}{{.DueDate}}{{else}}None{{end}}</dd><dt>Lane</dt><dd>{{.Lane}}</dd><dt>Isolation</dt><dd>{{.Isolation}}</dd><dt>Target</dt><dd>{{.Target}}</dd><dt>Review cycles</dt><dd>{{.ReviewCycles}}</dd><dt>Created</dt><dd class="timestamp">{{.CreatedAt}}</dd><dt>Updated</dt><dd class="timestamp">{{.UpdatedAt}}</dd></dl>
     {{if .Labels}}<div class="labels">{{range .Labels}}<span>{{.}}</span>{{end}}</div>{{end}}
   </aside>
 </section>
@@ -34,13 +35,13 @@
   </div>
 </section>
 
-{{if $.Human}}<section class="decision-bar" aria-label="Human task actions">
+{{if and $.Human (eq .ArchivedAt "")}}<section class="decision-bar" aria-label="Human task actions">
   <form data-comment-form data-api="/api/projects/{{$.ProjectID}}/tasks/{{.ID}}/comments"><label><span>Add comment</span><input name="body" required placeholder="Record a decision or note"></label><button class="button secondary" type="submit">Add comment</button></form>
   {{if eq .State "user_approval"}}<button class="button danger" type="button" data-request-changes="{{.ID}}">Request changes</button>{{end}}
   {{if canArchive .State}}<button class="button danger-quiet" type="button" data-archive-task="{{.ID}}">Archive</button>{{end}}
 </section>{{end}}
 
-<dialog id="edit-task-dialog" class="task-dialog" aria-labelledby="edit-task-title">
+{{if eq .ArchivedAt ""}}<dialog id="edit-task-dialog" class="task-dialog" aria-labelledby="edit-task-title">
   <form method="dialog" data-task-form data-method="PATCH" data-api="/api/projects/{{$.ProjectID}}/tasks/{{.ID}}">
     <header><div><p class="eyebrow">Planning metadata</p><h2 id="edit-task-title">Edit task</h2></div><button class="icon-button" value="cancel" aria-label="Close edit task dialog">×</button></header>
     <div class="form-grid">
@@ -59,6 +60,6 @@
     </div>
     <footer><button class="button secondary" value="cancel">Cancel</button><button class="button primary" type="submit" value="default">Save changes</button></footer>
   </form>
-</dialog>
+</dialog>{{end}}
 {{end}}
 {{end}}

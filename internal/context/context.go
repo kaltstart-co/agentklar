@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 	"unicode"
 
 	_ "modernc.org/sqlite"
@@ -39,6 +40,7 @@ type Doc struct {
 	Ref    string
 	Title  string
 	Body   string
+	TaskID string
 }
 
 // Packet is a focused slice of context handed to an agent alongside a task,
@@ -72,7 +74,13 @@ CREATE TABLE IF NOT EXISTS docs (
     ref    TEXT NOT NULL,
     title  TEXT NOT NULL DEFAULT '',
     body   TEXT NOT NULL,
+	task_id TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (source, ref)
+);
+
+CREATE TABLE IF NOT EXISTS metadata (
+	key   TEXT PRIMARY KEY,
+	value TEXT NOT NULL
 );
 
 CREATE VIRTUAL TABLE IF NOT EXISTS docs_fts USING fts5(
@@ -97,7 +105,43 @@ func New(workspaceDir string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("migrate context.sqlite: %w", err)
 	}
+	if err := ensureTaskIDColumn(db); err != nil {
+		db.Close()
+		return nil, err
+	}
 	return &Store{db: db}, nil
+}
+
+func ensureTaskIDColumn(db *sql.DB) error {
+	rows, err := db.Query(`PRAGMA table_info(docs)`)
+	if err != nil {
+		return fmt.Errorf("inspect context schema: %w", err)
+	}
+	found := false
+	for rows.Next() {
+		var cid, notnull, pk int
+		var name, typ string
+		var dflt any
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
+			rows.Close()
+			return fmt.Errorf("scan context schema: %w", err)
+		}
+		found = found || name == "task_id"
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return fmt.Errorf("iterate context schema: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if found {
+		return nil
+	}
+	if _, err := db.Exec(`ALTER TABLE docs ADD COLUMN task_id TEXT NOT NULL DEFAULT ''`); err != nil {
+		return fmt.Errorf("migrate context task scope: %w", err)
+	}
+	return nil
 }
 
 // Index upserts docs keyed by (source, ref): existing rows for a key are
@@ -129,9 +173,9 @@ func indexDocsTx(tx *sql.Tx, docs []Doc) error {
 		if _, err := tx.Exec(`DELETE FROM docs_fts WHERE source = ? AND ref = ?`, d.Source, d.Ref); err != nil {
 			return fmt.Errorf("delete docs_fts %s:%s: %w", d.Source, d.Ref, err)
 		}
-		if _, err := tx.Exec(`INSERT INTO docs (source, ref, title, body) VALUES (?, ?, ?, ?)
-			ON CONFLICT(source, ref) DO UPDATE SET title = excluded.title, body = excluded.body`,
-			d.Source, d.Ref, d.Title, d.Body); err != nil {
+		if _, err := tx.Exec(`INSERT INTO docs (source, ref, title, body, task_id) VALUES (?, ?, ?, ?, ?)
+			ON CONFLICT(source, ref) DO UPDATE SET title = excluded.title, body = excluded.body, task_id = excluded.task_id`,
+			d.Source, d.Ref, d.Title, d.Body, d.TaskID); err != nil {
 			return fmt.Errorf("upsert docs %s:%s: %w", d.Source, d.Ref, err)
 		}
 		if _, err := tx.Exec(`INSERT INTO docs_fts (title, body, source, ref) VALUES (?, ?, ?, ?)`,
@@ -170,6 +214,10 @@ func (s *Store) ReplaceSources(docs []Doc, sources ...Source) (int, error) {
 	if err := indexDocsTx(tx, docs); err != nil {
 		return 0, err
 	}
+	if _, err := tx.Exec(`INSERT INTO metadata (key, value) VALUES ('last_reindexed_at', ?)
+		ON CONFLICT(key) DO UPDATE SET value = excluded.value`, time.Now().UTC().Format(time.RFC3339)); err != nil {
+		return 0, fmt.Errorf("record context rebuild: %w", err)
+	}
 	if err := tx.Commit(); err != nil {
 		return 0, fmt.Errorf("commit replace tx: %w", err)
 	}
@@ -200,6 +248,11 @@ func (s *Store) Delete(source Source, ref string) error {
 // are weighted above body-only matches. An empty or non-alphanumeric query
 // returns no results without error rather than crashing FTS5 on a bad MATCH.
 func (s *Store) Search(query string, limit int) ([]Doc, error) {
+	return s.SearchScoped(query, "", limit)
+}
+
+// SearchScoped searches the derived index after applying task provenance.
+func (s *Store) SearchScoped(query, taskID string, limit int) ([]Doc, error) {
 	match := sanitizeFTS(query)
 	if match == "" {
 		return nil, nil
@@ -209,11 +262,12 @@ func (s *Store) Search(query string, limit int) ([]Doc, error) {
 	}
 
 	rows, err := s.db.Query(`
-		SELECT source, ref, title, body
+		SELECT docs_fts.source, docs_fts.ref, docs_fts.title, docs_fts.body, docs.task_id
 		FROM docs_fts
-		WHERE docs_fts MATCH ?
+		JOIN docs ON docs.source = docs_fts.source AND docs.ref = docs_fts.ref
+		WHERE docs_fts MATCH ? AND (? = '' OR docs.task_id = ?)
 		ORDER BY bm25(docs_fts, 10.0, 1.0, 0.0, 0.0)
-		LIMIT ?`, match, limit)
+		LIMIT ?`, match, taskID, taskID, limit)
 	if err != nil {
 		// A robustly-sanitized query should never produce a syntax error
 		// here, but if SQLite rejects the MATCH we surface it rather than
@@ -226,7 +280,7 @@ func (s *Store) Search(query string, limit int) ([]Doc, error) {
 	for rows.Next() {
 		var d Doc
 		var source string
-		if err := rows.Scan(&source, &d.Ref, &d.Title, &d.Body); err != nil {
+		if err := rows.Scan(&source, &d.Ref, &d.Title, &d.Body, &d.TaskID); err != nil {
 			return nil, fmt.Errorf("scan doc: %w", err)
 		}
 		d.Source = Source(source)
@@ -241,11 +295,29 @@ func (s *Store) Search(query string, limit int) ([]Doc, error) {
 // Packet is Search wrapped with the originating query, ready to hand to an
 // agent as focused context.
 func (s *Store) Packet(query string, limit int) (Packet, error) {
-	docs, err := s.Search(query, limit)
+	return s.PacketScoped(query, "", limit)
+}
+
+// PacketScoped builds a focused packet after applying task provenance.
+func (s *Store) PacketScoped(query, taskID string, limit int) (Packet, error) {
+	docs, err := s.SearchScoped(query, taskID, limit)
 	if err != nil {
 		return Packet{}, err
 	}
 	return Packet{Query: query, Items: docs}, nil
+}
+
+// LastReindexedAt returns the timestamp of the last successful full rebuild.
+func (s *Store) LastReindexedAt() (string, error) {
+	var value string
+	err := s.db.QueryRow(`SELECT value FROM metadata WHERE key = 'last_reindexed_at'`).Scan(&value)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("read context rebuild time: %w", err)
+	}
+	return value, nil
 }
 
 // Close releases the underlying database handle.

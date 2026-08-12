@@ -115,6 +115,31 @@ func TestRecallFindsAndRanks(t *testing.T) {
 	}
 }
 
+func TestRecallScopedFiltersBeforeLimit(t *testing.T) {
+	s, err := New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	for i := 0; i < 55; i++ {
+		if _, err := s.Remember("release", "noise-"+string(rune('a'+i%26))+string(rune('a'+i/26)), strings.Repeat("needle ", 12), "OTHER", "codex"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.Remember("build", "target", "needle target", "TASK-1", "codex"); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := s.RecallScoped("needle", "build", "TASK-1", 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Namespace != "build" || got[0].SourceTask != "TASK-1" {
+		t.Fatalf("scoped recall = %#v", got)
+	}
+}
+
 func TestRecallPrefixMatch(t *testing.T) {
 	s, err := New(t.TempDir())
 	if err != nil {
