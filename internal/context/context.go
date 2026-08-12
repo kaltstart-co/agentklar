@@ -12,11 +12,11 @@
 package ctx
 
 import (
+	stdctx "context"
 	"database/sql"
 	"fmt"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 	"unicode"
 
@@ -57,8 +57,6 @@ type Store struct {
 	db *sql.DB
 }
 
-var migrateMu sync.Mutex
-
 // schema is applied verbatim on open. WAL + busy_timeout match the rest of
 // Agentklar's SQLite usage; foreign_keys is intentionally off — this index
 // has no relational integrity to enforce beyond its own composite key.
@@ -69,9 +67,6 @@ var migrateMu sync.Mutex
 // A standalone table (rather than external-content) avoids the fragility of
 // wiring triggers against a composite primary key.
 const schema = `
-PRAGMA busy_timeout = 5000;
-PRAGMA journal_mode = WAL;
-
 CREATE TABLE IF NOT EXISTS docs (
     source TEXT NOT NULL,
     ref    TEXT NOT NULL,
@@ -104,21 +99,69 @@ func New(workspaceDir string) (*Store, error) {
 	// modernc/sqlite serializes writes; a single connection avoids
 	// SQLITE_BUSY between our own transactions.
 	db.SetMaxOpenConns(1)
-	migrateMu.Lock()
-	defer migrateMu.Unlock()
-	if _, err := db.Exec(schema); err != nil {
+	if err := migrate(db); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("migrate context.sqlite: %w", err)
-	}
-	if err := ensureTaskIDColumn(db); err != nil {
-		db.Close()
-		return nil, err
 	}
 	return &Store{db: db}, nil
 }
 
-func ensureTaskIDColumn(db *sql.DB) error {
-	rows, err := db.Query(`PRAGMA table_info(docs)`)
+func migrate(db *sql.DB) error {
+	ctx := stdctx.Background()
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, `PRAGMA busy_timeout = 5000`); err != nil {
+		return err
+	}
+	if err := ensureWAL(ctx, conn); err != nil {
+		return err
+	}
+	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
+		return err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_, _ = conn.ExecContext(ctx, `ROLLBACK`)
+		}
+	}()
+	if _, err := conn.ExecContext(ctx, schema); err != nil {
+		return err
+	}
+	if err := ensureTaskIDColumn(ctx, conn); err != nil {
+		return err
+	}
+	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+		return err
+	}
+	committed = true
+	return nil
+}
+
+func ensureWAL(ctx stdctx.Context, conn *sql.Conn) error {
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		var mode string
+		err := conn.QueryRowContext(ctx, `PRAGMA journal_mode = WAL`).Scan(&mode)
+		if err == nil {
+			if strings.EqualFold(mode, "wal") {
+				return nil
+			}
+			return fmt.Errorf("journal mode is %q", mode)
+		}
+		message := strings.ToLower(err.Error())
+		if (!strings.Contains(message, "locked") && !strings.Contains(message, "busy")) || time.Now().After(deadline) {
+			return err
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func ensureTaskIDColumn(ctx stdctx.Context, conn *sql.Conn) error {
+	rows, err := conn.QueryContext(ctx, `PRAGMA table_info(docs)`)
 	if err != nil {
 		return fmt.Errorf("inspect context schema: %w", err)
 	}
@@ -143,7 +186,7 @@ func ensureTaskIDColumn(db *sql.DB) error {
 	if found {
 		return nil
 	}
-	if _, err := db.Exec(`ALTER TABLE docs ADD COLUMN task_id TEXT NOT NULL DEFAULT ''`); err != nil {
+	if _, err := conn.ExecContext(ctx, `ALTER TABLE docs ADD COLUMN task_id TEXT NOT NULL DEFAULT ''`); err != nil {
 		return fmt.Errorf("migrate context task scope: %w", err)
 	}
 	return nil
