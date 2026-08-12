@@ -43,6 +43,16 @@ func TestControlCenterShellAndBoardContracts(t *testing.T) {
 	}
 }
 
+func TestTaskFormUsesScopedDetailResponseID(t *testing.T) {
+	js, err := assetsFS.ReadFile("assets/static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(js), "task.task?.ID") {
+		t.Fatal("task form does not read the scoped detail response id")
+	}
+}
+
 func TestArchivedBoardHasNoMutationOrDragTargets(t *testing.T) {
 	c, alpha, _ := seedProjects(t)
 	s, _ := NewControlCenter(c, alpha.ID)

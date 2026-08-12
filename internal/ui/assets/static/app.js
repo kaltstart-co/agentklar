@@ -111,7 +111,7 @@
     const body = values(form);
 	  try {
 	    const task = await api(form.dataset.api, { method: form.dataset.method || "POST", body: JSON.stringify(body) });
-	    const id = task.Task?.ID || task.ID || body.id;
+	    const id = task.task?.ID || task.Task?.ID || task.ID || body.id;
 	    notify("Task saved. Reloading authoritative state.");
 	    location.assign(`/projects/${encodeURIComponent(projectID)}/tasks/${encodeURIComponent(id)}`);
 	  } catch (error) { notify(error.message, true); }
