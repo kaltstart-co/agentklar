@@ -113,7 +113,7 @@ agentklar task ready AK-1' aria-label="Copy task commands">Copy</button><pre><sp
   --criteria "handles empty input;tests pass" \
   --verify "go test ./..."
 <span class="prompt">$</span> agentklar task ready AK-1</pre></div>
-        <p>Let the connected agent claim the task. When it submits, Agentklar runs only the recipes declared by the project and stores the evidence. A person handles the final decision from the Approvals view.</p>
+        <p>Let the connected agent claim and submit the task. After submission, run <code>agentklar gate &lt;id&gt;</code> to execute the project's declared recipes and store the evidence. A person handles the final decision from the Approvals view.</p>
       </div></section>
 
       <section class="step" aria-labelledby="update-title"><div class="step-side"><span class="step-no">05 / Update</span><h2 id="update-title">Re-run the installer.</h2></div><div class="step-main">
@@ -125,7 +125,7 @@ agentklar task ready AK-1' aria-label="Copy task commands">Copy</button><pre><sp
 
     <section class="reference" aria-labelledby="reference-title"><div class="shell"><span class="step-no">Reference / Daily commands</span><h2 id="reference-title">The short list.</h2>
       <div class="command"><code>agentklar ui --open</code><span>Start the native control center and open it in your browser.</span></div>
-      <div class="command"><code>agentklar status</code><span>See task counts, human attention, and the local UI address.</span></div>
+      <div class="command"><code>agentklar status</code><span>See task counts, human attention, and the command that launches the local UI.</span></div>
       <div class="command"><code>agentklar task list</code><span>List tasks in the current repository's workspace.</span></div>
       <div class="command"><code>agentklar task show &lt;id&gt;</code><span>Inspect one task, its reviews, and retained evidence.</span></div>
       <div class="command"><code>agentklar gate &lt;id&gt;</code><span>Run declared checks and record machine-attested evidence.</span></div>
