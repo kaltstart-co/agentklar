@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kaltstart-co/agentklar/internal/catalog"
 	akctx "github.com/kaltstart-co/agentklar/internal/context"
 	"github.com/kaltstart-co/agentklar/internal/contracts"
 	"github.com/kaltstart-co/agentklar/internal/knowledge"
@@ -191,8 +192,48 @@ func TestGlobalAlertsArePendingFirstAcrossProjects(t *testing.T) {
 			t.Fatalf("global alerts missing %q: %s", want, body)
 		}
 	}
+	if strings.Contains(body, "for "+alpha.Name) {
+		t.Fatalf("global alerts lede was scoped to the selected project: %s", body)
+	}
 	if strings.Index(body, "beta pending") > strings.Index(body, "alpha acknowledged") {
 		t.Fatalf("pending alert was not first: %s", body)
+	}
+}
+
+func TestGlobalAlertAPIAckRequiresProjectScope(t *testing.T) {
+	c, alpha, beta := seedProjects(t)
+	for _, project := range []catalog.Project{alpha, beta} {
+		alerts, err := notify.New(project.WorkspacePath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		alerts.SetDeliver(nil)
+		if _, err := alerts.Record("SHARED", "agent", notify.Info, project.Name+" alert", false); err != nil {
+			t.Fatal(err)
+		}
+		_ = alerts.Close()
+	}
+	s, _ := NewControlCenter(c, alpha.ID)
+	t.Cleanup(func() { _ = s.Close() })
+	cookie := bootstrapHuman(t, s)
+	unscoped := humanRequest(t, s, cookie, http.MethodPost, "/api/alerts/1/ack", "")
+	if unscoped.Code != http.StatusBadRequest {
+		t.Fatalf("unscoped global ack status=%d body=%s", unscoped.Code, unscoped.Body.String())
+	}
+	scoped := humanRequest(t, s, cookie, http.MethodPost, "/api/projects/"+beta.ID+"/alerts/1/ack", "")
+	if scoped.Code != http.StatusOK {
+		t.Fatalf("scoped alert ack status=%d body=%s", scoped.Code, scoped.Body.String())
+	}
+	for _, item := range []struct {
+		project catalog.Project
+		want    bool
+	}{{alpha, false}, {beta, true}} {
+		alerts, _ := notify.New(item.project.WorkspacePath)
+		rows, err := alerts.List("")
+		_ = alerts.Close()
+		if err != nil || len(rows) != 1 || rows[0].Acknowledged != item.want {
+			t.Fatalf("%s acknowledged=%v rows=%#v err=%v", item.project.Name, item.want, rows, err)
+		}
 	}
 }
 

@@ -36,7 +36,7 @@ func TestRegisterKeepsCompatibleLegacyWorkspace(t *testing.T) {
 
 - [ ] **Step 2: Run the focused test and confirm RED**
 
-Run: `go test ./internal/catalog -run TestRegister -v`  
+Run: `go test ./internal/catalog -run TestRegister -v`
 Expected: FAIL because the package does not exist.
 
 - [ ] **Step 3: Implement the catalog**
@@ -65,8 +65,8 @@ workspaces in place.
 
 - [ ] **Step 5: Verify and commit**
 
-Run: `gofmt -w internal/catalog cmd/agentklar/main.go cmd/agentklar/ui_cli.go && go test ./internal/catalog ./cmd/agentklar`  
-Expected: PASS.  
+Run: `gofmt -w internal/catalog cmd/agentklar/main.go cmd/agentklar/ui_cli.go && go test ./internal/catalog ./cmd/agentklar`
+Expected: PASS.
 Commit: `feat: add the global project catalog`
 
 ### Task 2: Versioned task planning schema
@@ -88,7 +88,7 @@ self-dependency.
 
 - [ ] **Step 2: Confirm RED**
 
-Run: `go test ./internal/store -run 'TestOpenMigrates|TestDependencies' -v`  
+Run: `go test ./internal/store -run 'TestOpenMigrates|TestDependencies' -v`
 Expected: FAIL because no versioned migration adds the columns.
 
 - [ ] **Step 3: Add ordered migrations**
@@ -116,8 +116,8 @@ archived rows by default.
 
 - [ ] **Step 5: Verify and commit**
 
-Run: `gofmt -w internal/store internal/workflow && go test ./internal/store ./internal/workflow`  
-Expected: PASS.  
+Run: `gofmt -w internal/store internal/workflow && go test ./internal/store ./internal/workflow`
+Expected: PASS.
 Commit: `feat: migrate tasks for planning metadata`
 
 ### Task 3: Safe task editing, dependencies, and board ordering
@@ -136,7 +136,7 @@ physical deletion, and inability to drag directly into Done.
 
 - [ ] **Step 2: Confirm RED**
 
-Run: `go test ./internal/workflow -run 'TestUpdateTask|TestSetDependencies|TestReorder|TestHumanBoardTransition' -v`  
+Run: `go test ./internal/workflow -run 'TestUpdateTask|TestSetDependencies|TestReorder|TestHumanBoardTransition' -v`
 Expected: FAIL because the methods do not exist.
 
 - [ ] **Step 3: Implement the minimum engine API**
@@ -164,8 +164,8 @@ one transaction.
 
 - [ ] **Step 4: Verify and commit**
 
-Run: `gofmt -w internal/workflow && go test ./internal/workflow`  
-Expected: PASS.  
+Run: `gofmt -w internal/workflow && go test ./internal/workflow`
+Expected: PASS.
 Commit: `feat: add safe board task operations`
 
 ### Task 4: Catalog-aware HTTP application and API
@@ -192,7 +192,7 @@ and a normal board transition to Done returns `409`.
 
 - [ ] **Step 3: Confirm RED**
 
-Run: `go test ./internal/ui -run 'TestProjects|TestTaskMutation|TestApprovalNonceRedacted|TestOrigin' -v`  
+Run: `go test ./internal/ui -run 'TestProjects|TestTaskMutation|TestApprovalNonceRedacted|TestOrigin' -v`
 Expected: FAIL on missing routes and leaked nonce.
 
 - [ ] **Step 4: Implement catalog-backed project runtimes**
@@ -210,8 +210,8 @@ that can approve without browser-origin protection.
 
 - [ ] **Step 6: Verify and commit**
 
-Run: `gofmt -w internal/ui cmd/agentklar/ui_cli.go && go test ./internal/ui ./cmd/agentklar`  
-Expected: PASS.  
+Run: `gofmt -w internal/ui cmd/agentklar/ui_cli.go && go test ./internal/ui ./cmd/agentklar`
+Expected: PASS.
 Commit: `feat: expose the multi-project control center API`
 
 ### Task 5: Professional application shell and interactive board
@@ -240,7 +240,7 @@ have labels and the mobile menu has accessible names.
 
 - [ ] **Step 2: Confirm RED**
 
-Run: `go test ./internal/ui -run 'TestControlCenterShell|TestBoardActions|TestTaskFormAccessibility' -v`  
+Run: `go test ./internal/ui -run 'TestControlCenterShell|TestBoardActions|TestTaskFormAccessibility' -v`
 Expected: FAIL because the new application elements do not exist.
 
 - [ ] **Step 3: Build the shell and screens**
@@ -264,8 +264,8 @@ toasts, labels, escape-to-close, and horizontal mobile board scrolling.
 
 - [ ] **Step 6: Verify and commit**
 
-Run: `go test ./internal/ui && go build ./...`  
-Expected: PASS.  
+Run: `go test ./internal/ui && go build ./...`
+Expected: PASS.
 Commit: `feat: build the interactive Agentklar control center`
 
 ### Task 6: Reliable memory/context and exact MCP contracts
@@ -288,7 +288,7 @@ holder provenance, and boolean alert speech.
 
 - [ ] **Step 2: Confirm RED**
 
-Run: `go test ./internal/mcp -run TestToolSchemasMatchDispatch -v`  
+Run: `go test ./internal/mcp -run TestToolSchemasMatchDispatch -v`
 Expected: FAIL on the current schema/handler mismatches.
 
 - [ ] **Step 3: Repair tool definitions and remember indexing**
@@ -304,8 +304,8 @@ UI. Keep forget absent from MCP. Show reindex time/status in the page response.
 
 - [ ] **Step 5: Verify and commit**
 
-Run: `gofmt -w internal/mcp internal/context internal/ui && go test ./internal/mcp ./internal/context ./internal/memory ./internal/ui`  
-Expected: PASS.  
+Run: `gofmt -w internal/mcp internal/context internal/ui && go test ./internal/mcp ./internal/context ./internal/memory ./internal/ui`
+Expected: PASS.
 Commit: `fix: make agent memory and MCP contracts reliable`
 
 ### Task 7: Atomic installer and documented update path
@@ -326,7 +326,7 @@ files are untouched.
 
 - [ ] **Step 2: Confirm RED**
 
-Run: `bash scripts/install_test.sh`  
+Run: `bash scripts/install_test.sh`
 Expected: FAIL because installation is not staged/atomic and SHA absence is
 handled incorrectly.
 
@@ -345,8 +345,8 @@ fresh-install/update command and custom install-directory example.
 
 - [ ] **Step 5: Verify and commit**
 
-Run: `bash -n install.sh scripts/install_test.sh && bash scripts/install_test.sh`  
-Expected: PASS.  
+Run: `bash -n install.sh scripts/install_test.sh && bash scripts/install_test.sh`
+Expected: PASS.
 Commit: `fix: make Agentklar updates atomic`
 
 ### Task 8: Reposition the GitHub Pages product site
@@ -367,7 +367,7 @@ storage, memory/context, and the protected Done boundary.
 - [ ] **Step 2: Replace Vikunja-first setup**
 
 Move Vikunja to optional legacy integration. Document `agentklar init`,
-`agentklar open ui`, agent wiring, task creation, and the update command.
+`agentklar ui --open`, agent wiring, task creation, and the update command.
 
 - [ ] **Step 3: Verify static pages**
 

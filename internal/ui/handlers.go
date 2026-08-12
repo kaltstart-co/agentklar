@@ -382,7 +382,12 @@ func (s *Server) handleAPIAlerts(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAPIAckAlert(w http.ResponseWriter, r *http.Request) {
-	store, closeFn, err := s.currentAlerts()
+	projectID := r.PathValue("project")
+	if s.catalog != nil && projectID == "" {
+		writeAPIError(w, http.StatusBadRequest, "project_scope_required", "project scope is required to acknowledge an aggregated alert")
+		return
+	}
+	store, closeFn, err := s.alertsForProject(projectID)
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return

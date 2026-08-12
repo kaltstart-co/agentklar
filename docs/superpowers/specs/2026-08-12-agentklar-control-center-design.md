@@ -1,7 +1,7 @@
 # Agentklar Control Center Design
 
-**Date:** 2026-08-12  
-**Status:** Approved from the user's supplied product brief  
+**Date:** 2026-08-12
+**Status:** Approved from the user's supplied product brief
 **Owner:** Kaltstart
 
 ## Product decision
@@ -12,9 +12,9 @@ and context. Vikunja remains a legacy optional adapter, not a setup requirement
 or primary user experience.
 
 The first release stays a single Go binary with embedded HTML, CSS, and vanilla
-JavaScript. It must work locally without a service dependency and remain
-deployable behind an authenticated reverse proxy. We will not add React, a
-frontend build chain, or a new runtime dependency.
+JavaScript. It works locally without a service dependency and binds only to
+loopback. Shared-network deployment and team identity are outside this release.
+We will not add React, a frontend build chain, or a new runtime dependency.
 
 ## Alternatives considered
 
@@ -97,9 +97,9 @@ cancel operations. The UI never writes SQLite directly.
 
 Drag-and-drop reorders freely inside a state. Cross-state drops invoke a real
 allowed transition; they never assign `state` directly. Locked system states
-explain why a drop is not allowed. Dropping toward Done opens approval review;
-it never marks work Done. A “Move to” menu offers the same actions by keyboard
-and on touch devices.
+explain why a drop is not allowed. Done is never a valid drop target; approval
+review remains a separate human-only action. A “Move to” menu offers the same
+actions by keyboard and on touch devices.
 
 All workflow states remain visible. Waiting, Blocked, and Cancelled can be
 collapsed into an “Exceptions” planning column while retaining their exact
@@ -122,12 +122,12 @@ The local server exposes scoped JSON endpoints used by the embedded UI:
 - `POST /api/projects/{project}/context/reindex`
 - human review endpoints for approve and request-changes
 
-Mutation endpoints accept JSON or form bodies, validate size and enum fields,
-and return structured errors. Browser forms include an origin check and a
-session CSRF token. Approval nonces are never returned by JSON. Remote binding
-is refused unless explicitly enabled; production deployment must supply an
-authenticated reverse proxy. The documentation will not claim that loopback
-alone creates an agent-proof human identity boundary.
+Task mutation endpoints accept bounded JSON, validate enum fields, and return
+structured errors. Browser mutations require the one-use-bootstrapped human
+session plus an exact Origin; approval forms additionally use an HMAC token
+bound to the project, task, submission, and nonce. Approval nonces are never
+returned by JSON. The server rejects non-loopback listeners and is not a
+network service in this release.
 
 ## Agent integration
 
@@ -149,11 +149,12 @@ Agentklar follows the same useful split documented by Codex and Claude Code:
   source, and timestamp provenance;
 - the derived context index retrieves only relevant excerpts on demand.
 
-Memory defaults to the selected project. “All projects” is an explicit human
-view, never an automatic agent context merge. Remembering a fact immediately
-updates its context document. Humans can inspect and forget memory; agents can
-remember and recall but cannot delete. The UI shows when the code/context index
-was rebuilt and provides a reindex action.
+Memory is always scoped through the selected project and may be narrowed by
+source task. The project switcher is explicit human control; agents never merge
+context across projects. Remembering a fact immediately updates its context
+document. Humans can inspect and forget memory; agents can remember and recall
+but cannot delete. The UI shows when the code/context index was rebuilt and
+provides a reindex action.
 
 ## Installation, upgrades, and releases
 
@@ -178,9 +179,9 @@ and the live site.
 
 The site leads with the product rather than a terminal demo: one workspace,
 every project, agents and people sharing a workflow, evidence before approval.
-It includes an embedded product board visual, core capabilities, local-first
-and deployable positioning, install/update commands, and a clear note that
-Vikunja is optional legacy integration.
+It includes an embedded product board visual, core capabilities, loopback-only
+local positioning, install/update commands, and a clear note that Vikunja is
+optional legacy integration.
 
 ## Verification
 
@@ -198,6 +199,6 @@ Vikunja is optional legacy integration.
 
 - replacing SQLite with a network database
 - building team accounts, billing, or organization administration
-- promising secure public deployment without an authenticated reverse proxy
+- shared-network deployment or team identity
 - arbitrary human bypasses of agent/system workflow states
 - deleting protected task history

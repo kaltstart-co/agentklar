@@ -334,6 +334,7 @@ func (s *Server) routes() http.Handler {
 		mux.HandleFunc("DELETE /api/projects/{project}/memory/{id}", s.handleProjectMemoryForget)
 		mux.HandleFunc("GET /api/projects/{project}/context", s.handleProjectContext)
 		mux.HandleFunc("POST /api/projects/{project}/context/reindex", s.handleProjectContextReindex)
+		mux.HandleFunc("POST /api/projects/{project}/alerts/{id}/ack", s.handleAPIAckAlert)
 	}
 
 	return s.protectHumanMutations(mux)
