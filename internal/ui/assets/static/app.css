@@ -11,7 +11,7 @@
   --amber: #ad6b12;
   --green: #287456;
   --rail: 232px;
-  --sans: "IBM Plex Sans", "Avenir Next", "Segoe UI", sans-serif;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --mono: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
 }
 * { box-sizing: border-box; }
