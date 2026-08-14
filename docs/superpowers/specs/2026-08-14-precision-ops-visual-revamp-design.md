@@ -33,7 +33,7 @@ Warm cream, paper texture, decorative ink borders, and editorial color treatment
 
 ### Typography
 
-- Use the existing sans-serif stack headed by IBM Plex Sans and Avenir Next.
+- Use the native UI sans stack headed by `-apple-system` and `BlinkMacSystemFont`, matching the approved mockup without adding a font download.
 - Use the existing monospaced stack only for identifiers, paths, timestamps, and evidence metadata.
 - Remove serif display typography.
 - Page headings are compact and bold; they never dominate the operational content.
