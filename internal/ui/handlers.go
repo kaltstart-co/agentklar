@@ -60,8 +60,18 @@ func (s *Server) handleBoard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	buckets := make(map[contracts.State][]workflow.Task)
+	activeCount, reviewCount, approvalCount := 0, 0, 0
 	for _, t := range tasks {
 		buckets[t.State] = append(buckets[t.State], t)
+		if t.State != contracts.StateDone && t.State != contracts.StateCancelled {
+			activeCount++
+		}
+		switch t.State {
+		case contracts.StateCompletionReview, contracts.StateAutoQA, contracts.StateChangesRequested:
+			reviewCount++
+		case contracts.StateUserApproval:
+			approvalCount++
+		}
 	}
 	columns := make([]columnView, 0, len(boardOrder()))
 	for _, st := range boardOrder() {
@@ -74,7 +84,7 @@ func (s *Server) handleBoard(w http.ResponseWriter, r *http.Request) {
 		}
 		prefix = "/projects/" + url.PathEscape(projectID)
 	}
-	s.renderRequest(w, r, "board", viewData{Title: "Board", Section: "board", Columns: columns, ProjectID: projectID, TaskPrefix: prefix, Archived: archived, AllTasks: tasks})
+	s.renderRequest(w, r, "board", viewData{Title: "Board", Section: "board", Columns: columns, ProjectID: projectID, TaskPrefix: prefix, Archived: archived, AllTasks: tasks, ActiveCount: activeCount, ReviewCount: reviewCount, ApprovalCount: approvalCount})
 }
 
 func (s *Server) handleTask(w http.ResponseWriter, r *http.Request) {

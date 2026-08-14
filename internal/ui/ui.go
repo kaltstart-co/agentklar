@@ -473,7 +473,10 @@ type viewData struct {
 	ContextIndexedAt string
 
 	// Board
-	Columns []columnView
+	Columns       []columnView
+	ActiveCount   int
+	ReviewCount   int
+	ApprovalCount int
 
 	// Task detail
 	Task     *workflow.Task

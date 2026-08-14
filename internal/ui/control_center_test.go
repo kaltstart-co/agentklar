@@ -46,6 +46,36 @@ func TestControlCenterShellAndBoardContracts(t *testing.T) {
 	}
 }
 
+func TestBoardSummaryCountsOperationalWork(t *testing.T) {
+	c, alpha, _ := seedProjects(t)
+	db, err := store.Open(filepath.Join(alpha.WorkspacePath, "control.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := workflow.New(db).CreateTask(workflow.Task{ID: "APPROVAL", Title: "Awaiting approval"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE tasks SET state = ? WHERE id = ?`, contracts.StateAutoQA, "SHARED"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE tasks SET state = ? WHERE id = ?`, contracts.StateUserApproval, "APPROVAL"); err != nil {
+		t.Fatal(err)
+	}
+	_ = db.Close()
+
+	s, err := NewControlCenter(c, alpha.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	page := apiRequest(t, s.Handler(), http.MethodGet, "/projects/"+alpha.ID+"/board", "").Body.String()
+	for _, want := range []string{"Active tasks</span><strong>2", "Needs review</span><strong>1", "Human approval</span><strong>1"} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("board summary missing %q: %s", want, page)
+		}
+	}
+}
+
 func TestTaskFormUsesScopedDetailResponseID(t *testing.T) {
 	js, err := assetsFS.ReadFile("assets/static/app.js")
 	if err != nil {
