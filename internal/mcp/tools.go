@@ -32,7 +32,21 @@ func boolean(desc string) map[string]interface{} {
 
 var taskID = str("Task identifier, e.g. KS-1")
 
+var workerSelection = obj(map[string]interface{}{
+	"harness": str("Named native harness. A pin can name codex; current may name the main harness."),
+	"model":   str("Named native model. A pin may use auto only when a unique compatible catalog candidate exists."),
+}, "harness", "model")
+
 var ToolDefs = []ToolDef{
+	{"get_completion_packet", "Read this workspace's recorded task evidence, reviews, native results, and remaining checks. This neither runs verification nor approves completion.", obj(map[string]interface{}{"task_id": taskID}, "task_id")},
+	{"recommend_worker", "Read saved project team policy and service-observed native catalog/usage. Returns keep_current, nominate_worker, or no_recommendation with sources and missing evidence. A nomination is not verified entitlement, a quality guarantee, or permission to launch or change billing.", obj(map[string]interface{}{
+		"task_id":               taskID,
+		"role_id":               str("Optional saved team role id; preferred selection and allowed fallback constrain advice."),
+		"task_kind":             str("Optional task category such as coding; this is not a capability or measured quality."),
+		"required_capabilities": map[string]interface{}{"type": "array", "items": str("Concrete input/operation requirement. text is supported by the run adapter; image and audio are checked against model, harness, and adapter facts and currently cannot be delegated. Other operations have no verified support yet."), "minItems": 1, "maxItems": 64},
+		"current":               workerSelection,
+		"pin":                   workerSelection,
+	}, "task_id", "required_capabilities")},
 	{"get_usage", "Read sourced native quota and token snapshots, with unknown spend. Optional id selects a registered run's estimate.", obj(map[string]interface{}{"id": str("Optional registered run id.")})},
 	{"list_harnesses", "List saved native executable probes; discovery does not prove login or model access.", obj(map[string]interface{}{})},
 	{"get_model_catalog", "Read Codex native model catalog without inference. Catalog membership does not prove access.", obj(map[string]interface{}{})},
@@ -131,10 +145,10 @@ var PromptDefs = []PromptDef{
 var PromptText = map[string]string{
 	"next": "For explicitly tracked AgentKlar work, read get_team_policy, list_harnesses, and get_model_catalog; a model catalog does not prove access. Call list_ready_tasks, pick a suitable task, " +
 		"claim it with claim_task, then read it fully with get_task. Implement the work so every " +
-		"acceptance criterion is met. Delegate only when useful: start_run needs a stable retry id and current claim holder/token; edits currently require a quick/auto exclusive claim, reviews read_only=true. Read get_run until terminal; completed means worker execution, not task approval. Native permission requests need the trusted human interface. Run the declared local verification, then stop at submit_for_review " +
+		"acceptance criterion is met. For opted-in delegation, call recommend_worker with the task, saved role when applicable, concrete capability requirements, and current selection before choosing a worker. Follow its action, reason, and limits; a nomination is not verified entitlement or a guarantee. Delegate only when useful: start_run needs a stable retry id and current claim holder/token; native launch validates access and permissions, edits currently require a quick/auto exclusive claim, reviews read_only=true. Read get_run until terminal, then get_completion_packet for recorded evidence and remaining checks; completed means worker execution, not task approval, and worker prose is not verification. Native permission requests need the trusted human interface. Run the declared local verification, then stop at submit_for_review " +
 		"with an honest summary. The gate and reviewer record review and QA evidence; the agent must not " +
 		"fabricate those results or attempt to approve. Tell the human what is awaiting review.",
-	"status": "For AgentKlar work, bind_workspace for context and list_runs for native worker state; get_run shows results and pending native requests. get_usage reports sourced account snapshots, estimates, or unknowns. Then " +
+	"status": "For AgentKlar work, bind_workspace for context and list_runs for native worker state; get_run shows results and pending native requests. get_completion_packet combines recorded checks, reviews, worker reports, and remaining work without running verification; worker prose and completed execution do not prove passing checks or human approval. get_usage reports sourced account snapshots, estimates, or unknowns. Then " +
 		"get_task for each known task (start from list_ready_tasks and any tasks mentioned in this " +
 		"conversation). Summarize as a short table: id, title, state, holder, and what action is " +
 		"needed next — flagging anything waiting on human approval.",

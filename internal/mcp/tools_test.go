@@ -14,6 +14,8 @@ func TestToolDefinitionsMatchDispatchContract(t *testing.T) {
 		properties map[string]string
 		required   []string
 	}{
+		"get_completion_packet":         {map[string]string{"task_id": "string"}, []string{"task_id"}},
+		"recommend_worker":              {map[string]string{"task_id": "string", "role_id": "string", "task_kind": "string", "required_capabilities": "array", "current": "object", "pin": "object"}, []string{"task_id", "required_capabilities"}},
 		"get_usage":                     {map[string]string{"id": "string"}, nil},
 		"list_harnesses":                {map[string]string{}, nil},
 		"get_model_catalog":             {map[string]string{}, nil},

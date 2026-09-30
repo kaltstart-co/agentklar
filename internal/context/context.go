@@ -15,6 +15,8 @@ import (
 	stdctx "context"
 	"database/sql"
 	"fmt"
+	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -104,6 +106,39 @@ func New(workspaceDir string) (*Store, error) {
 		return nil, fmt.Errorf("migrate context.sqlite: %w", err)
 	}
 	return &Store{db: db}, nil
+}
+
+// OpenReadOnly inspects an existing index without creating or migrating it.
+func OpenReadOnly(workspaceDir string) (*Store, error) {
+	path := filepath.Join(workspaceDir, "context.sqlite")
+	if _, err := os.Stat(path); err != nil {
+		return nil, err
+	}
+	u := url.URL{Scheme: "file", Path: path, RawQuery: "mode=ro"}
+	db, err := sql.Open("sqlite", u.String())
+	if err != nil {
+		return nil, err
+	}
+	db.SetMaxOpenConns(1)
+	return &Store{db: db}, nil
+}
+
+// TaskDocs reads exact task provenance, independent of text-search relevance.
+func (s *Store) TaskDocs(taskID string, limit int) ([]Doc, error) {
+	rows, err := s.db.Query(`SELECT source,ref,title,body,task_id FROM docs WHERE task_id=? ORDER BY source,ref LIMIT ?`, taskID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Doc{}
+	for rows.Next() {
+		var d Doc
+		if err := rows.Scan(&d.Source, &d.Ref, &d.Title, &d.Body, &d.TaskID); err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
 }
 
 func migrate(db *sql.DB) error {

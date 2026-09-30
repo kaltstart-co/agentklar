@@ -22,7 +22,7 @@ Tick new features only after their acceptance checks pass.
 - [ ] Native worker runs
 - [ ] Run status and recovery
 - [ ] Review and fix loop
-- [ ] Completion evidence packet
+- [x] Completion evidence packet
 - [ ] Attention inbox
 - [x] Saved delegation preference
 - [ ] Easy harness onboarding

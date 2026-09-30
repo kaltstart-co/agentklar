@@ -22,7 +22,7 @@ Choose one host and one worker from tools installed on the test machine. Start w
 
 The local service owns the worker process and durable run record. The caller's MCP connection may close without losing that record. After a service crash, report interrupted runs truthfully; reattach only when the adapter supports and passes that test. Its bridge exposes caller and project scoped work. A task has one orchestrator owner; transfers advance an ownership fence so an old owner cannot launch duplicate work. New instructions wait for a turn boundary unless that adapter has verified native steering support.
 
-Implement three useful additions first: a completion packet with changed commits, checks, findings, and open questions; an attention inbox for approvals, blockers, and failed runs; and saved delegation policies. A standalone policy for using one subscription is useful without a mixed provider team.
+Prioritize a packet of recorded commit references, checks, findings, and open questions; an attention inbox for approvals, blockers, and failed runs; and saved delegation policies. A standalone policy for one subscription is useful.
 
 Acceptance checks:
 
@@ -54,7 +54,7 @@ Avoid a large app fork. Superset's [ELv2 license](https://github.com/superset-sh
 
 ## Vercel and local pairing
 
-Vercel hosts the shared frontend. The local Go connector runs installed tools and preserves offline use. Frontend build settings are now checked into `vercel.json`; cloud authentication, durable storage, and secure pairing still need a separate design phase. The repository also has a GitHub Pages workflow for its static website. Hosted deployment status must be verified separately from local tests.
+Vercel hosts the shared frontend; `vercel.json` contains its build settings. The local connector runs installed tools and preserves offline use. Cloud authentication, durable storage, and secure pairing need a separate phase. The repository also has a GitHub Pages workflow for its static website.
 
 Start with a hosted status view. Design authenticated account and device pairing, revocation, and explicit project selection. Use outbound HTTPS status updates and a durable command inbox. Commands need expiry, deduplication, and ownership fences. Short polling is enough initially. Verify reconnects cannot duplicate runs and revoked devices cannot accept commands.
 
@@ -70,21 +70,16 @@ The first local slice is underway: native supervisor, saved team policy, sourced
 
 ## Audit evidence
 
-Baseline: clean `main`, commit `65da7e6559a79e05a8c20346daca4eb05b0faa3c`, cloned into `/Users/divyansh/Projects/Agentklar` on 2026-09-30. Framework: Go 1.25.6; direct dependencies are TOML parsing, SQLite, and a macOS menu library. Dependency records are `go.mod` and `go.sum`.
-
-| Existing area | Code evidence |
-| --- | --- |
-| Tasks, claims, dependencies, history | `internal/workflow`, `internal/store` |
-| Project registry and local UI | `internal/catalog`, `internal/ui` |
-| Memory and context | `internal/knowledge`, `internal/memory`, `internal/context` |
-| Checks and approvals | `internal/quality`, `internal/gate`, UI session tests |
-| MCP and setup assets | `internal/mcp`, `cmd/agentklar/install.go` |
-| Alerts | `internal/notify` |
+Baseline: clean `main` at `65da7e6559a79e05a8c20346daca4eb05b0faa3c`, cloned into `/Users/divyansh/Projects/Agentklar` on 2026-09-30. Go 1.25.6 uses TOML, SQLite, and a macOS menu library. Existing sources are `internal/workflow`, `store`, `catalog`, `ui`, `quality`, `gate`, `context`, `memory`, `knowledge`, `mcp`, and `notify`.
 
 Actual Git worktree creation remains proposed. Editing runs require existing quick/auto exclusive claims; read-only reviews use a narrowed native sandbox. Team roles, saved cost/quality preferences, and conservative recommendations now have code and tests. Native run completion is separate from task approval.
 
 Runtime fixtures pass for exact retry identity, claim and project scope, final-event persistence, caller disconnect, cancellation, serial edits, native permission decisions, stale requests, and interrupted restart reporting. The trusted UI has separate session/origin tests; no permission decision exists on MCP or the supervisor socket. Native input and dynamic tool requests remain unsupported. Interrupted runs do not automatically reattach or relaunch.
 
-The live audit found Codex 0.159.2, Claude Code 2.1.280, Muse Code 1.3.0, and ZCode CLI 0.16.9. Only Codex runs workers. ChatGPT login, native handshake, model catalog, and read-only usage queries passed. A real read-only `gpt-6.1-sol` transport smoke completed with the requested phrase, retained native IDs and actual token usage, and kept the task In Progress. Exact replay after caller close returned that same record. A separate Sol write paused at native file approval; the coding loop is unverified. The Node check failed while the file was withheld. Resume, recovery, detached-child termination, and additional adapters remain unverified.
+The live audit found Codex 0.159.2, Claude Code 2.1.280, Muse Code 1.3.0, and ZCode CLI 0.16.9. Only Codex runs workers. ChatGPT login, native handshake, catalog, and read-only usage passed. A real read-only `gpt-6.1-sol` smoke retained its result, native IDs, and tokens while keeping the task In Progress. Replay after caller close returned that record. A Sol write paused at native file approval, then timed out without creating `add.js`; the coding loop is unverified. Its Node check failed. Resume, recovery, detached-child termination, and other adapters remain unverified.
 
-Baseline `go build ./...`, `go test ./...`, and `go vet ./...` passed on macOS arm64 with Go 1.25.6; `gofmt -l cmd internal` returned no files. The toolchain was downloaded temporarily from [go.dev](https://go.dev/dl/go1.25.6.darwin-arm64.tar.gz); SHA-256 `984521ae978a5377c7d782fd2dd953291840d7d3d0bd95781a1f32f16d94a006` matched official metadata. No global tool install or harness settings changes were made.
+The completion packet uses existing records through CLI and MCP. Fixtures verify provenance, revision scope, task isolation, read-only retrieval, and explicit shortening: five records per section share a 3500-byte excerpt budget. Reading the saved real smoke returned a completed worker with `human_approved=false`, no submission, and no checks. Reports remain unverified prose; no git/log recheck or note-resolution inference occurs.
+
+Commit `64dba52` was pushed; [GitHub CI passed](https://github.com/kaltstart-co/agentklar/actions/runs/36769277620). The new Vercel project is READY at [agentklar-seven.vercel.app](https://agentklar-seven.vercel.app). Automatic GitHub deployments are blocked by a missing [Vercel GitHub App installation](https://github.com/apps/vercel). Pairing and hosted worker control remain planned.
+
+Current `go build ./...`, `go test ./...`, `go vet ./...`, and six affected race suites passed on macOS arm64 with Go 1.25.6; `gofmt -l cmd internal` returned no files. The toolchain was downloaded temporarily from [go.dev](https://go.dev/dl/go1.25.6.darwin-arm64.tar.gz); SHA-256 `984521ae978a5377c7d782fd2dd953291840d7d3d0bd95781a1f32f16d94a006` matched official metadata. No global tool install or harness settings changes were made.

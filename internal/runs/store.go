@@ -146,6 +146,24 @@ func (s *Store) List() ([]Run, error) {
 	return out, rows.Err()
 }
 
+// ListTask reads only this task's latest runs. It never initializes native tables.
+func (s *Store) ListTask(taskID string, limit int) ([]Run, error) {
+	rows, err := s.DB.Query(`SELECT `+runColumns+` FROM native_runs WHERE task_id=? ORDER BY created_at DESC,id DESC LIMIT ?`, taskID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Run{}
+	for rows.Next() {
+		r, err := scanRun(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 // Insert validates the live task ownership in the same transaction as launch reservation.
 func (s *Store) Insert(in Start, repo string) (Run, bool, error) {
 	if strings.TrimSpace(in.ID) == "" || len(in.ID) > 100 || strings.TrimSpace(in.Prompt) == "" || len(in.Prompt) > 100000 || in.Holder == "" || in.FencingToken <= 0 {

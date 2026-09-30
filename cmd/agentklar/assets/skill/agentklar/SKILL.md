@@ -65,11 +65,30 @@ an adapter. Discovery proves a version probe; a model catalog does not prove
 account access. Native credentials and permissions stay with the native tool.
 Only Codex app-server runs workers in this slice.
 
+For opted-in tracked delegation, call `recommend_worker` with `task_id`, the
+saved `role_id` when applicable, `required_capabilities`, and the current
+`{harness,model}` before choosing a worker. Read its `action`, `reason`, sources,
+and missing evidence. `keep_current` preserves the choice; `nominate_worker`
+uses an explicit task pin or saved role preference/unique allowed fallback as a limited-confidence proposal;
+`no_recommendation` means the missing evidence or requirements need attention.
+A nomination is not verified entitlement or a quality guarantee. Native launch
+still checks access, billing, limits, and permissions. No recommendation launches
+work or changes billing. The CLI equivalent is `agentklar team recommend <request.json>`.
+`task_kind` (such as `coding`) describes the task, not tested coding quality.
+`required_capabilities` names concrete inputs or operations: the current run
+adapter accepts `text`; `image` and `audio` cannot currently be delegated.
+Other operations have no verified capability observation yet.
+
 For a claimed task, `start_run` needs a stable retry `id`, task ID, claim holder,
 fencing token, and bounded instructions. Repeat the exact request on retry;
 changing its payload requires a new ID. Read `get_run` for events, output, and
 native permission requests. The supervisor keeps the run when a caller MCP
 connection closes. `cancel_run` requires current claim ownership.
+
+After `get_run`, read `get_completion_packet {task_id}` (CLI: `agentklar task
+packet <id>`) for recorded checks, reviews, native results, and remaining work.
+Native completion is separate from task approval. Worker summaries and error
+text are reports, not verification evidence. The packet does not run checks.
 
 Editing currently requires a quick/auto task with an exclusive primary claim.
 A dedicated isolation label does not create a real worktree. Review runs must

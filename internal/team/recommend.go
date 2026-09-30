@@ -1,6 +1,7 @@
 package team
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"slices"
@@ -90,23 +91,50 @@ func matches(s Selection, c Candidate) bool {
 	return (s.Harness == "auto" || s.Harness == c.Harness) && (s.Model == "auto" || s.Model == c.Model)
 }
 
+// Validate checks the shared trust boundary before readers make native calls.
+func (r Request) Validate(config Config) error {
+	if err := config.Validate(); err != nil {
+		return err
+	}
+	if r.AsOf.IsZero() || !identifier.MatchString(r.TaskID) || len(r.RequiredCapabilities) == 0 {
+		return errors.New("Task id, observation time, and required capabilities are needed")
+	}
+	if len(r.RequiredCapabilities) > 64 || len(r.TaskKind) > 128 {
+		return errors.New("Too many capability requirements or task kind exceeds 128 bytes")
+	}
+	for _, capability := range r.RequiredCapabilities {
+		if !identifier.MatchString(capability) {
+			return errors.New("Invalid required capability")
+		}
+	}
+	if r.RoleID != "" {
+		found := false
+		for _, role := range config.Roles {
+			if role.ID == r.RoleID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return errors.New("Role is not configured")
+		}
+	}
+	if r.Pin != nil && (!validSelection(r.Pin.Harness, r.Pin.Model, true) || r.Pin.Harness == "auto") {
+		return errors.New("Invalid task pin")
+	}
+	if r.Current != nil && !validSelection(r.Current.Harness, r.Current.Model, false) {
+		return errors.New("Invalid current selection")
+	}
+	return nil
+}
+
 // Recommend is advisory. Starting a run must still validate ownership and the
 // native harness's own access and permission policy.
 func Recommend(config Config, r Request) Decision {
 	d := Decision{InputAuthority: "Caller-supplied observations; advisory only, not a native access check", Confidence: "none", Missing: []string{}, Sources: []Observation{}, Rejected: []Rejection{}}
-	if err := config.Validate(); err != nil {
+	if err := r.Validate(config); err != nil {
 		d.Reason = err.Error()
 		return d
-	}
-	if r.AsOf.IsZero() || !identifier.MatchString(r.TaskID) || len(r.RequiredCapabilities) == 0 {
-		d.Reason = "Task id, observation time, and required capabilities are needed"
-		return d
-	}
-	for _, cap := range r.RequiredCapabilities {
-		if !identifier.MatchString(cap) {
-			d.Reason = "Invalid required capability"
-			return d
-		}
 	}
 	var role *Role
 	if r.RoleID != "" {
@@ -115,10 +143,6 @@ func Recommend(config Config, r Request) Decision {
 				role = &config.Roles[i]
 				break
 			}
-		}
-		if role == nil {
-			d.Reason = "Role is not configured"
-			return d
 		}
 	}
 	pin := r.Pin
@@ -129,14 +153,6 @@ func Recommend(config Config, r Request) Decision {
 				break
 			}
 		}
-	}
-	if pin != nil && (!validSelection(pin.Harness, pin.Model, true) || pin.Harness == "auto") {
-		d.Reason = "Invalid task pin"
-		return d
-	}
-	if r.Current != nil && !validSelection(r.Current.Harness, r.Current.Model, false) {
-		d.Reason = "Invalid current selection"
-		return d
 	}
 	eligible := []Candidate{}
 	seen := map[Selection]bool{}

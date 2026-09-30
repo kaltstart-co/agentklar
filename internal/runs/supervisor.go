@@ -43,12 +43,13 @@ func SocketPath(workspace string) string {
 }
 
 type Request struct {
-	Method       string `json:"method"`
-	Start        Start  `json:"start,omitempty"`
-	ID           string `json:"id,omitempty"`
-	Holder       string `json:"holder,omitempty"`
-	FencingToken int64  `json:"fencing_token,omitempty"`
-	After        int64  `json:"after,omitempty"`
+	Method       string                `json:"method"`
+	Start        Start                 `json:"start,omitempty"`
+	Recommend    RecommendationRequest `json:"recommend,omitempty"`
+	ID           string                `json:"id,omitempty"`
+	Holder       string                `json:"holder,omitempty"`
+	FencingToken int64                 `json:"fencing_token,omitempty"`
+	After        int64                 `json:"after,omitempty"`
 }
 
 type Response struct {
@@ -185,6 +186,8 @@ func (s *Supervisor) Dispatch(req Request) (any, error) {
 		return map[string]string{"status": "opened"}, nil
 	case "usage":
 		return s.Usage(req.ID)
+	case "recommend":
+		return s.RecommendTask(req.Recommend)
 	case "discover":
 		hs := Discover()
 		for _, h := range hs {

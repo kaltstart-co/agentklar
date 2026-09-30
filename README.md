@@ -45,12 +45,21 @@ tool. The support interface has Work, Team, Usage, and Settings views.
 `agentklar runs open` opens the running supervisor's trusted local interface;
 `serve --open` also reuses an existing supervisor.
 
-For tracked delegation, use MCP `get_team_policy`, `list_harnesses`, and
-`get_model_catalog`, then claim a task and call `start_run` with a stable run
-ID, the claim holder, token, and instructions. Repeating the exact request
+For tracked delegation, call MCP `recommend_worker` with `task_id`, an optional
+saved `role_id`, the current `{harness,model}`, and concrete
+`required_capabilities`. It returns a limited recommendation and missing facts;
+it launches no work and does not prove model access. The policy, catalog, and
+usage tools provide detail. Then claim the task and call `start_run` with a
+stable run ID, the claim holder, token, and instructions. Repeating the exact request
 returns the same run. Use `get_run` to read events and the result, and
 `cancel_run` to request interruption. A completed worker has not approved the
 task; verify and submit through the existing task workflow.
+
+Use `get_completion_packet {task_id}` or `agentklar task packet <id>` for a
+small handoff from existing records. It includes recorded checks, reviews,
+commit references, open notes, and native run status. Worker reports remain
+unverified text. Shortened sections are labeled and keep record IDs for details.
+Retrieval runs no checks and cannot approve the task.
 
 Editing currently requires a **quick** task with **auto** isolation and an
 exclusive primary claim. Standard tasks receive an isolation label but no
@@ -68,11 +77,16 @@ Normal native work does not require AgentKlar tracking.
 
 Lifecycle and permission fixtures pass. A live read-only Sol transport smoke
 completed and preserved its result while keeping the task In Progress. A
-separate Sol write paused at native file approval; the coding loop is
-unverified. See the
+separate Sol write paused at native file approval, then timed out without
+creating the requested file; the coding loop is unverified. See the
 [build plan audit](BUILD_PLAN.md#audit-evidence) for current limits. Hosted
 frontend previews require this source build locally; secure pairing and hosted
 worker control are still planned.
+
+The source frontend is deployed at [agentklar-seven.vercel.app](https://agentklar-seven.vercel.app).
+The hosted page cannot connect to local project data yet. Use the local source
+build at localhost for actual work. Automatic GitHub deployment
+still needs the [Vercel GitHub App](https://github.com/apps/vercel).
 
 ## Install or update
 

@@ -51,6 +51,7 @@ Usage:
   agentklar task ready <id>             Mark a task Ready (Definition of Ready enforced)
   agentklar task list                   List tasks
   agentklar task show <id>              Show a task with evidence and reviews
+  agentklar task packet <id>            Read recorded evidence and remaining checks
   agentklar gate <id>                   Run Completion Review + Auto QA for the latest submission
   agentklar approve <id>                Approve a task awaiting human approval (human channel)
   agentklar reject <id> <reason>        Reject a task awaiting human approval
@@ -276,6 +277,9 @@ func openEngineAt(dir string) (*workflow.Engine, string, error) {
 }
 
 func cmdTask(args []string) error {
+	if len(args) > 0 && args[0] == "packet" {
+		return cmdTaskPacket(args[1:])
+	}
 	eng, _, err := openEngine()
 	if err != nil {
 		return err

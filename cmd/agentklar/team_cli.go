@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 
+	"github.com/kaltstart-co/agentklar/internal/runs"
 	"github.com/kaltstart-co/agentklar/internal/team"
 )
 
@@ -44,7 +45,7 @@ func cmdTeam(args []string) error {
 	case "save":
 		value = &team.Config{}
 	case "recommend":
-		value = &team.Request{}
+		value = &runs.RecommendationRequest{}
 	default:
 		return fmt.Errorf("unknown team command %q", args[0])
 	}
@@ -61,9 +62,13 @@ func cmdTeam(args []string) error {
 		fmt.Println("Saved .agentklar/team.toml; native permissions and credentials stay authoritative")
 		return nil
 	}
-	c, err := team.Load(repo)
+	workspace, err := workspaceDir()
 	if err != nil {
 		return err
 	}
-	return json.NewEncoder(os.Stdout).Encode(team.Recommend(c, *value.(*team.Request)))
+	result, err := runs.Call(workspace, runs.Request{Method: "recommend", Recommend: *value.(*runs.RecommendationRequest)})
+	if err != nil {
+		return err
+	}
+	return json.NewEncoder(os.Stdout).Encode(result)
 }

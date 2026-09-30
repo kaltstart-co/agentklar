@@ -8,11 +8,13 @@ package mcp
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
 
+	"github.com/kaltstart-co/agentklar/internal/completion"
 	akctx "github.com/kaltstart-co/agentklar/internal/context"
 	"github.com/kaltstart-co/agentklar/internal/contracts"
 	"github.com/kaltstart-co/agentklar/internal/memory"
@@ -132,6 +134,55 @@ func (s *Server) Dispatch(req Request) Response {
 	}
 
 	switch req.Method {
+	case "get_completion_packet":
+		var p struct {
+			TaskID string `json:"task_id"`
+		}
+		if bad := decode(&p); bad != nil {
+			return *bad
+		}
+		if bad := require("task_id", p.TaskID); bad != nil {
+			return *bad
+		}
+		packet, err := completion.Build(s.Engine, s.Context, p.TaskID)
+		if err != nil {
+			return fail(err)
+		}
+		resp.Result = packet
+	case "recommend_worker":
+		var p runs.RecommendationRequest
+		decoder := json.NewDecoder(bytes.NewReader(req.Params))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&p); err != nil {
+			return invalid(fmt.Errorf("invalid recommendation params: %w", err))
+		}
+		if err := decoder.Decode(&struct{}{}); err != io.EOF {
+			return invalid(fmt.Errorf("recommendation params must contain one JSON object"))
+		}
+		if bad := require("task_id", p.TaskID); bad != nil {
+			return *bad
+		}
+		if len(p.RequiredCapabilities) == 0 {
+			return invalid(fmt.Errorf("required_capabilities must contain concrete capability requirements"))
+		}
+		if s.Repository == "" || s.Engine == nil {
+			return fail(fmt.Errorf("repository unavailable"))
+		}
+		task, err := s.Engine.GetTask(p.TaskID)
+		if err != nil {
+			return fail(err)
+		}
+		if task.RepoPath != s.Repository {
+			return fail(fmt.Errorf("recommendation task is outside this repository"))
+		}
+		if s.Runs == nil {
+			return fail(fmt.Errorf("native supervisor unavailable; start agentklar serve in this repository"))
+		}
+		value, err := s.Runs(runs.Request{Method: "recommend", Recommend: p})
+		if err != nil {
+			return fail(err)
+		}
+		resp.Result = value
 	case "get_team_policy":
 		if bad := decode(&struct{}{}); bad != nil {
 			return *bad

@@ -24,9 +24,11 @@ type Evidence struct {
 	Provenance   string
 	Criterion    string
 	Command      string
+	WorkDir      string
 	ExitCode     *int
 	LogPath      string
 	Hash         string
+	CommitHash   string
 	Note         string
 	CreatedAt    string
 }
@@ -116,8 +118,8 @@ func (e *Engine) LatestSubmission(taskID string) (*Submission, error) {
 
 // ListEvidence returns append-only evidence for a task, newest last.
 func (e *Engine) ListEvidence(taskID string) ([]Evidence, error) {
-	rows, err := e.db.Query(`SELECT id, submission_id, provenance, criterion, command, exit_code, log_path,
-		artifact_hash, note, created_at FROM evidence WHERE task_id = ? ORDER BY id`, taskID)
+	rows, err := e.db.Query(`SELECT id, submission_id, provenance, criterion, command, workdir, exit_code, log_path,
+		artifact_hash, commit_hash, note, created_at FROM evidence WHERE task_id = ? ORDER BY id`, taskID)
 	if err != nil {
 		return nil, err
 	}
@@ -125,8 +127,8 @@ func (e *Engine) ListEvidence(taskID string) ([]Evidence, error) {
 	var out []Evidence
 	for rows.Next() {
 		var ev Evidence
-		if err := rows.Scan(&ev.ID, &ev.SubmissionID, &ev.Provenance, &ev.Criterion, &ev.Command, &ev.ExitCode,
-			&ev.LogPath, &ev.Hash, &ev.Note, &ev.CreatedAt); err != nil {
+		if err := rows.Scan(&ev.ID, &ev.SubmissionID, &ev.Provenance, &ev.Criterion, &ev.Command, &ev.WorkDir, &ev.ExitCode,
+			&ev.LogPath, &ev.Hash, &ev.CommitHash, &ev.Note, &ev.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, ev)
