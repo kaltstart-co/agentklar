@@ -14,6 +14,14 @@ func TestToolDefinitionsMatchDispatchContract(t *testing.T) {
 		properties map[string]string
 		required   []string
 	}{
+		"get_usage":                     {map[string]string{"id": "string"}, nil},
+		"list_harnesses":                {map[string]string{}, nil},
+		"get_model_catalog":             {map[string]string{}, nil},
+		"get_team_policy":               {map[string]string{}, nil},
+		"list_runs":                     {map[string]string{}, nil},
+		"get_run":                       {map[string]string{"id": "string", "after": "integer"}, []string{"id"}},
+		"start_run":                     {map[string]string{"id": "string", "task_id": "string", "holder": "string", "fencing_token": "integer", "harness": "string", "model": "string", "purpose": "string", "read_only": "boolean", "prompt": "string"}, []string{"id", "task_id", "holder", "fencing_token", "prompt"}},
+		"cancel_run":                    {map[string]string{"id": "string", "holder": "string", "fencing_token": "integer"}, []string{"id", "holder", "fencing_token"}},
 		"bind_workspace":                {map[string]string{}, nil},
 		"list_ready_tasks":              {map[string]string{"execution_target": "string"}, nil},
 		"claim_task":                    {map[string]string{"task_id": "string", "expected_state": "string", "holder": "string"}, []string{"task_id"}},

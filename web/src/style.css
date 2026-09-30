@@ -1,0 +1,77 @@
+:root {
+  font-synthesis: none;
+}
+body {
+  margin: 0;
+}
+.mantine-AppShell-main {
+  background: light-dark(#f7f8fa, #141519);
+}
+.mantine-AppShell-navbar {
+  background: light-dark(#fcfcfd, #191a1f);
+}
+.mantine-NavLink-root {
+  border-radius: 8px;
+}
+.work-toolbar {
+  border-bottom: 1px solid var(--mantine-color-default-border);
+}
+.work-search {
+  flex: 1;
+  min-width: 180px;
+  max-width: 360px;
+}
+.work-panel {
+  overflow: hidden;
+}
+.work-grid {
+  display: grid;
+  grid-template-columns: minmax(250px, 33%) minmax(0, 1fr);
+}
+.work-list {
+  border-right: 1px solid var(--mantine-color-default-border);
+}
+.work-detail {
+  min-width: 0;
+  max-height: calc(100vh - 285px);
+  overflow: auto;
+}
+.task-row {
+  display: block;
+  width: 100%;
+  padding: 16px;
+  border-bottom: 1px solid var(--mantine-color-default-border);
+  border-left: 3px solid transparent;
+}
+.task-row:hover {
+  background: var(--mantine-color-default-hover);
+}
+.task-row.selected {
+  background: light-dark(var(--mantine-color-indigo-0), #25283b);
+  border-left-color: var(--mantine-color-indigo-6);
+}
+.task-row:focus-visible {
+  outline: 2px solid var(--mantine-color-indigo-6);
+  outline-offset: -2px;
+}
+@media (max-width: 900px) {
+  .work-grid {
+    grid-template-columns: minmax(210px, 38%) minmax(0, 1fr);
+  }
+}
+@media (max-width: 600px) {
+  .work-grid {
+    display: block;
+  }
+  .work-list {
+    border-right: none;
+    border-bottom: 1px solid var(--mantine-color-default-border);
+  }
+  .work-list .mantine-ScrollArea-root {
+    height: 220px !important;
+    min-height: 0 !important;
+  }
+  .work-detail {
+    max-height: none;
+  }
+}

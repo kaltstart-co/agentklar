@@ -33,6 +33,14 @@ func boolean(desc string) map[string]interface{} {
 var taskID = str("Task identifier, e.g. KS-1")
 
 var ToolDefs = []ToolDef{
+	{"get_usage", "Read sourced native quota and token snapshots, with unknown spend. Optional id selects a registered run's estimate.", obj(map[string]interface{}{"id": str("Optional registered run id.")})},
+	{"list_harnesses", "List saved native executable probes; discovery does not prove login or model access.", obj(map[string]interface{}{})},
+	{"get_model_catalog", "Read Codex native model catalog without inference. Catalog membership does not prove access.", obj(map[string]interface{}{})},
+	{"get_team_policy", "Read the project's saved roles and cost/quality preference.", obj(map[string]interface{}{})},
+	{"list_runs", "List this project's registered native runs; run completion does not approve the task.", obj(map[string]interface{}{})},
+	{"get_run", "Read a durable native run and events after a cursor.", obj(map[string]interface{}{"id": str("Stable run id."), "after": integer("Event sequence cursor; defaults to zero.")}, "id")},
+	{"start_run", "Delegate one task to native Codex through the local supervisor using the current claim. Same id and request retries return the existing run. Reviews must be read-only; editing needs an exclusive primary claim.", obj(map[string]interface{}{"id": str("Stable retry id."), "task_id": taskID, "holder": str("Current task claim holder."), "fencing_token": integer("Current claim token."), "harness": str("codex; default codex."), "model": str("Optional native model; empty keeps native default."), "purpose": str("implement, review, or fix; default implement."), "read_only": boolean("Narrow native sandbox to read-only."), "prompt": str("Bounded instructions for this task.")}, "id", "task_id", "holder", "fencing_token", "prompt")},
+	{"cancel_run", "Request native interruption for a run owned by the current task claim.", obj(map[string]interface{}{"id": str("Run id."), "holder": str("Current claim holder."), "fencing_token": integer("Current claim token.")}, "id", "holder", "fencing_token")},
 	{"bind_workspace", "Return the workspace this server is bound to.", obj(map[string]interface{}{})},
 	{"list_ready_tasks", "List tasks in Ready state that an agent may claim.", obj(map[string]interface{}{
 		"execution_target": str("Optional target filter; empty for any."),
@@ -121,12 +129,12 @@ var PromptDefs = []PromptDef{
 }
 
 var PromptText = map[string]string{
-	"next": "Use the agentklar tools: call list_ready_tasks, pick the highest-priority task, " +
+	"next": "For explicitly tracked AgentKlar work, read get_team_policy, list_harnesses, and get_model_catalog; a model catalog does not prove access. Call list_ready_tasks, pick a suitable task, " +
 		"claim it with claim_task, then read it fully with get_task. Implement the work so every " +
-		"acceptance criterion is met, run the declared local verification, then stop at submit_for_review " +
+		"acceptance criterion is met. Delegate only when useful: start_run needs a stable retry id and current claim holder/token; edits currently require a quick/auto exclusive claim, reviews read_only=true. Read get_run until terminal; completed means worker execution, not task approval. Native permission requests need the trusted human interface. Run the declared local verification, then stop at submit_for_review " +
 		"with an honest summary. The gate and reviewer record review and QA evidence; the agent must not " +
 		"fabricate those results or attempt to approve. Tell the human what is awaiting review.",
-	"status": "Use the agentklar tools to report the board: bind_workspace for context, then " +
+	"status": "For AgentKlar work, bind_workspace for context and list_runs for native worker state; get_run shows results and pending native requests. get_usage reports sourced account snapshots, estimates, or unknowns. Then " +
 		"get_task for each known task (start from list_ready_tasks and any tasks mentioned in this " +
 		"conversation). Summarize as a short table: id, title, state, holder, and what action is " +
 		"needed next — flagging anything waiting on human approval.",

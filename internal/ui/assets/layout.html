@@ -20,6 +20,7 @@
   </select>
   {{end}}
   <nav class="primary-nav" aria-label="Primary navigation">
+    <a href="/app/"><span>▤</span>Work · new interface</a>
     <a href="/" {{if eq .Section "overview"}}class="active" aria-current="page"{{end}}><span>⌂</span>Overview</a>
     <a href="{{.BasePath}}/board" {{if eq .Section "board"}}class="active" aria-current="page"{{end}}><span>▦</span>Board</a>
     <a href="/approvals" {{if eq .Section "approvals"}}class="active" aria-current="page"{{end}}><span>✓</span>Approvals</a>

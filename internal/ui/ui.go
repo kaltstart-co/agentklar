@@ -20,6 +20,7 @@ import (
 	"crypto/sha256"
 	"embed"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"html/template"
@@ -37,6 +38,7 @@ import (
 	"github.com/kaltstart-co/agentklar/internal/knowledge"
 	"github.com/kaltstart-co/agentklar/internal/memory"
 	"github.com/kaltstart-co/agentklar/internal/notify"
+	"github.com/kaltstart-co/agentklar/internal/runs"
 	"github.com/kaltstart-co/agentklar/internal/store"
 	"github.com/kaltstart-co/agentklar/internal/workflow"
 )
@@ -56,8 +58,11 @@ var pageFiles = []string{
 // Server is the local UI server. The legacy single-project constructor keeps
 // stores open; the control-center constructor opens project stores per request.
 type Server struct {
-	workspaceDir string
-	repoRoot     string
+	// NativePermission is attached only by the supervisor in this process.
+	NativePermission func(repo, runID string, requestID json.RawMessage, decision string) error
+	NativeUsage      func(repo, runID string) (runs.UsageSnapshot, error)
+	workspaceDir     string
+	repoRoot         string
 
 	engine           *workflow.Engine // protected workflow state (control.sqlite)
 	knowledge        *knowledge.Store // optional; nil if open failed
@@ -215,9 +220,17 @@ func (s *Server) LaunchURL(base string) (string, error) {
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || !isLoopbackHost(u.Hostname()) {
 		return "", errors.New("ui: invalid launch URL")
 	}
+	next := ""
+	if u.Path == "/app/" || u.Path == "/app" {
+		next = "/app/"
+	}
 	u.Path = "/_agentklar/bootstrap"
 	u.RawPath = ""
-	u.RawQuery = url.Values{"token": {s.bootToken}}.Encode()
+	query := url.Values{"token": {s.bootToken}}
+	if next != "" {
+		query.Set("next", next)
+	}
+	u.RawQuery = query.Encode()
 	u.Fragment = ""
 	return u.String(), nil
 }
@@ -287,6 +300,12 @@ func (s *Server) routes() http.Handler {
 		mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(staticSub)))
 	}
 
+	mux.HandleFunc("GET /app", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/app/", http.StatusSeeOther)
+	})
+	mux.HandleFunc("GET /app/", s.handleFrontend)
+	mux.HandleFunc("GET /api/session", s.handleFrontendSession)
+
 	// HTML pages (the layout nav: Board / Knowledge / Memory / Context / Approvals).
 	mux.HandleFunc("GET /_agentklar/bootstrap", s.handleBootstrap)
 	mux.HandleFunc("GET /{$}", s.handleHome)
@@ -317,6 +336,8 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /api/alerts", s.handleAPIAlerts)
 	mux.HandleFunc("POST /api/alerts/{id}/ack", s.handleAPIAckAlert)
 	if s.catalog != nil {
+		s.RegisterNativeRunRoutes(mux)
+		s.RegisterTeamRoutes(mux)
 		mux.HandleFunc("GET /api/projects", s.handleAPIProjects)
 		mux.HandleFunc("GET /api/overview", s.handleAPIOverview)
 		mux.HandleFunc("GET /api/projects/{project}/tasks", s.handleProjectTasks)
@@ -395,7 +416,11 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 		Secure:   r.TLS != nil,
 		SameSite: http.SameSiteStrictMode,
 	})
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+	next := "/"
+	if r.URL.Query().Get("next") == "/app/" {
+		next = "/app/"
+	}
+	http.Redirect(w, r, next, http.StatusSeeOther)
 }
 
 func (s *Server) isHuman(r *http.Request) bool {

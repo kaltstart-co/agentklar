@@ -2,6 +2,8 @@
 
 **One control center for AI-assisted software delivery.**
 
+Current work: [small feature checklist](FEATURE_CHECKLIST.md) · [build plan and audit](BUILD_PLAN.md).
+
 [![CI](https://github.com/kaltstart-co/agentklar/actions/workflows/ci.yml/badge.svg)](https://github.com/kaltstart-co/agentklar/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Site](https://img.shields.io/badge/site-agentklar.kaltstart.co-2A55D8.svg)](https://agentklar.kaltstart.co)
@@ -16,6 +18,61 @@ human can move work to Done.
 
 Website: **[agentklar.kaltstart.co](https://agentklar.kaltstart.co)** · a
 [Kaltstart](https://kaltstart.co) project.
+
+## Build the current source
+
+The new worker supervisor and support interface are in the current source.
+Older release binaries may not include them. Build the frontend before Go:
+
+```bash
+git clone https://github.com/kaltstart-co/agentklar.git
+cd agentklar
+npm ci --prefix web
+npm run build:local --prefix web
+go build -o agentklar ./cmd/agentklar
+```
+
+In your working repository, use that binary's absolute path:
+
+```bash
+/path/to/agentklar/agentklar init
+/path/to/agentklar/agentklar serve --open
+```
+
+Keep the supervisor running. In another terminal, run `agentklar runs discover`
+using the same binary, then use `agentklar mcp install` to connect your native
+tool. The support interface has Work, Team, Usage, and Settings views.
+`agentklar runs open` opens the running supervisor's trusted local interface;
+`serve --open` also reuses an existing supervisor.
+
+For tracked delegation, use MCP `get_team_policy`, `list_harnesses`, and
+`get_model_catalog`, then claim a task and call `start_run` with a stable run
+ID, the claim holder, token, and instructions. Repeating the exact request
+returns the same run. Use `get_run` to read events and the result, and
+`cancel_run` to request interruption. A completed worker has not approved the
+task; verify and submit through the existing task workflow.
+
+Editing currently requires a **quick** task with **auto** isolation and an
+exclusive primary claim. Standard tasks receive an isolation label but no
+real worktree yet. Read-only review runs narrow the native sandbox. Only the
+Codex app-server adapter runs workers; other discovered tools are version
+probes. Native command and file permissions wait for a person in the local
+interface. Native input requests that this adapter cannot handle stop with an
+explicit error. Native settings and credentials remain with the tool.
+
+The supervisor outlives caller MCP connections. After a supervisor restart,
+unfinished runs are marked interrupted; native session reattachment is not
+implemented. Usage shows sourced account snapshots, registered thread tokens,
+and estimates or unknowns. Model catalog entries do not prove model access.
+Normal native work does not require AgentKlar tracking.
+
+Lifecycle and permission fixtures pass. A live read-only Sol transport smoke
+completed and preserved its result while keeping the task In Progress. A
+separate Sol write paused at native file approval; the coding loop is
+unverified. See the
+[build plan audit](BUILD_PLAN.md#audit-evidence) for current limits. Hosted
+frontend previews require this source build locally; secure pairing and hosted
+worker control are still planned.
 
 ## Install or update
 

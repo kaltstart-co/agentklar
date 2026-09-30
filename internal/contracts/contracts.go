@@ -150,6 +150,14 @@ const (
 // There is intentionally no approve, reject, or done method. Adding one is
 // a contract violation; tests assert this list is closed.
 var MCPMethods = []string{
+	"list_harnesses",
+	"get_model_catalog",
+	"get_team_policy",
+	"get_usage",
+	"list_runs",
+	"get_run",
+	"start_run",
+	"cancel_run",
 	"bind_workspace",
 	"list_ready_tasks",
 	"claim_task",

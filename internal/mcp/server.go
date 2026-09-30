@@ -17,6 +17,8 @@ import (
 	"github.com/kaltstart-co/agentklar/internal/contracts"
 	"github.com/kaltstart-co/agentklar/internal/memory"
 	"github.com/kaltstart-co/agentklar/internal/notify"
+	"github.com/kaltstart-co/agentklar/internal/runs"
+	"github.com/kaltstart-co/agentklar/internal/team"
 	"github.com/kaltstart-co/agentklar/internal/tracker"
 	"github.com/kaltstart-co/agentklar/internal/workflow"
 )
@@ -41,9 +43,11 @@ type RPCError struct {
 }
 
 type Server struct {
-	Engine    *workflow.Engine
-	Workspace string
-	Policy    tracker.ApprovalPolicy
+	Runs       func(runs.Request) (json.RawMessage, error)
+	Repository string
+	Engine     *workflow.Engine
+	Workspace  string
+	Policy     tracker.ApprovalPolicy
 	// Memory and Context are optional shared-knowledge stores. When nil,
 	// the corresponding methods return "unavailable" — they never affect the
 	// workflow state machine or the human-only Done boundary.
@@ -128,6 +132,81 @@ func (s *Server) Dispatch(req Request) Response {
 	}
 
 	switch req.Method {
+	case "get_team_policy":
+		if bad := decode(&struct{}{}); bad != nil {
+			return *bad
+		}
+		if s.Repository == "" {
+			return fail(fmt.Errorf("repository unavailable"))
+		}
+		policy, err := team.Load(s.Repository)
+		if err != nil {
+			return fail(err)
+		}
+		resp.Result = policy
+	case "list_harnesses", "get_model_catalog", "get_usage", "list_runs", "get_run", "start_run", "cancel_run":
+		if bad := decode(&struct{}{}); bad != nil {
+			return *bad
+		}
+		request := runs.Request{}
+		switch req.Method {
+		case "get_usage":
+			if bad := decode(&request); bad != nil {
+				return *bad
+			}
+			request.Method = "usage"
+		case "list_harnesses":
+			request.Method = "harnesses"
+		case "get_model_catalog":
+			request.Method = "models"
+		case "list_runs":
+			request.Method = "list"
+		case "start_run":
+			request.Method = "start"
+			if bad := decode(&request.Start); bad != nil {
+				return *bad
+			}
+			if bad := require("id", request.Start.ID, "task_id", request.Start.TaskID, "holder", request.Start.Holder, "prompt", request.Start.Prompt); bad != nil {
+				return *bad
+			}
+			if bad := positive("fencing_token", request.Start.FencingToken); bad != nil {
+				return *bad
+			}
+			if request.Start.Harness == "" {
+				request.Start.Harness = "codex"
+			}
+			if request.Start.Purpose == "" {
+				request.Start.Purpose = "implement"
+			}
+		case "get_run", "cancel_run":
+			if bad := decode(&request); bad != nil {
+				return *bad
+			}
+			if bad := require("id", request.ID); bad != nil {
+				return *bad
+			}
+			request.Method = "get"
+			if request.After < 0 {
+				return invalid(fmt.Errorf("after must be nonnegative"))
+			}
+			if req.Method == "cancel_run" {
+				request.Method = "cancel"
+				if bad := require("holder", request.Holder); bad != nil {
+					return *bad
+				}
+				if bad := positive("fencing_token", request.FencingToken); bad != nil {
+					return *bad
+				}
+			}
+		}
+		if s.Runs == nil {
+			return fail(fmt.Errorf("native supervisor unavailable"))
+		}
+		value, err := s.Runs(request)
+		if err != nil {
+			return fail(err)
+		}
+		resp.Result = value
 	case "initialize":
 		resp.Result = map[string]interface{}{
 			"protocolVersion": "2025-06-18",

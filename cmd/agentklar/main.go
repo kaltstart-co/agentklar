@@ -22,6 +22,7 @@ import (
 	"github.com/kaltstart-co/agentklar/internal/memory"
 	"github.com/kaltstart-co/agentklar/internal/notify"
 	"github.com/kaltstart-co/agentklar/internal/quality"
+	"github.com/kaltstart-co/agentklar/internal/runs"
 	"github.com/kaltstart-co/agentklar/internal/store"
 	"github.com/kaltstart-co/agentklar/internal/tracker"
 	"github.com/kaltstart-co/agentklar/internal/tracker/vikunja"
@@ -41,6 +42,9 @@ Usage:
   agentklar context search|index         Focused work packets (knowledge+memory+code)
   agentklar alerts list|pending|ack      Human-alert log (agent notify_human; ack is human-only)
   agentklar ui [--addr --open]           Native local web UI (board/memory/context/approvals)
+  agentklar serve [--open --addr]        Local native worker supervisor and support interface
+  agentklar runs discover|models|list|show|start|cancel
+  agentklar team show|save|recommend     Saved team roles and delegation policy
   agentklar task new <id> <title>       Create a Draft task
   agentklar task import <ticket.md>     Create a task from an interrogator ticket
   agentklar task import-plan <dir>      Import a project's dev-task tickets (waves)
@@ -108,6 +112,12 @@ func workspaceDir() (string, error) {
 }
 
 func agentklarDataRoot() (string, error) {
+	if root := os.Getenv("AGENTKLAR_DATA_ROOT"); root != "" {
+		if !filepath.IsAbs(root) {
+			return "", fmt.Errorf("AGENTKLAR_DATA_ROOT must be absolute")
+		}
+		return filepath.Clean(root), nil
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
@@ -176,6 +186,12 @@ func run(args []string) error {
 		return cmdAlerts(args[1:])
 	case "ui":
 		return cmdUI(args[1:])
+	case "serve":
+		return cmdServe(args[1:])
+	case "runs":
+		return cmdRuns(args[1:])
+	case "team":
+		return cmdTeam(args[1:])
 	case "gate":
 		if len(args) < 2 {
 			return fmt.Errorf("gate requires a task id")
@@ -531,7 +547,7 @@ func cmdMCP() error {
 	memStore, _ := memory.New(dir)
 	ctxStore, _ := akctx.New(dir)
 	notifyStore, _ := notify.New(dir)
-	srv := &mcp.Server{Engine: eng, Workspace: dir, Memory: memStore, Context: ctxStore, Notify: notifyStore}
+	srv := &mcp.Server{Engine: eng, Workspace: dir, Repository: repoRoot(), Memory: memStore, Context: ctxStore, Notify: notifyStore, Runs: func(request runs.Request) (json.RawMessage, error) { return runs.Call(dir, request) }}
 	return srv.Serve(os.Stdin, os.Stdout)
 }
 

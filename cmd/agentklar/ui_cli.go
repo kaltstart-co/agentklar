@@ -61,7 +61,7 @@ func cmdUI(args []string) error {
 			return err
 		}
 	}
-	url := "http://" + ln.Addr().String() + "/"
+	url := "http://" + ln.Addr().String() + ui.DefaultPath()
 	fmt.Printf("agentklar UI → %s\n", url)
 	fmt.Println(uiAccessNotice(*open))
 
