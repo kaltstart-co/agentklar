@@ -619,7 +619,11 @@ func (s *Supervisor) execute(ctx context.Context, h Harness, r Run, w *worker) {
 				_, _ = c.call(interruptCtx, "turn/interrupt", map[string]string{"threadId": r.ThreadID, "turnId": r.TurnID})
 				cancel()
 			}
-			finish("cancelled", "worker cancellation or time limit; native interrupt requested and owned process group stopped; detached descendants are not verified")
+			status, problem := "cancelled", "worker cancelled"
+			if ctx.Err() == context.DeadlineExceeded {
+				status, problem = "failed", "worker exceeded its 30 minute time limit"
+			}
+			finish(status, problem+"; native interrupt requested and owned process group stopped; detached descendants are not verified")
 			return
 		}
 	}

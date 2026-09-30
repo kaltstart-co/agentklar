@@ -23,7 +23,7 @@ Tick new features only after their acceptance checks pass.
 - [ ] Run status and recovery
 - [ ] Review and fix loop
 - [x] Completion evidence packet
-- [ ] Attention inbox
+- [x] Attention inbox
 - [x] Saved delegation preference
 - [ ] Easy harness onboarding
 - [x] Saved team roles

@@ -55,7 +55,12 @@ func (s *Server) handleNativeRuns(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, 500, "runs_unavailable", err.Error())
 		return
 	}
-	writeJSON(w, 200, map[string]any{"runs": items})
+	attention, err := store.ListAttention()
+	if err != nil {
+		writeAPIError(w, 500, "runs_unavailable", err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"runs": items, "attention_runs": attention})
 }
 
 func (s *Server) handleNativeRun(w http.ResponseWriter, r *http.Request) {

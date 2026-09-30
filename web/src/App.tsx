@@ -69,6 +69,12 @@ export default function App() {
   const [refresh, setRefresh] = useState(0);
   const [alerts, setAlerts] = useState<AlertRow[]>([]);
   const [runs, setRuns] = useState<Run[]>([]);
+  const [attentionRuns, setAttentionRuns] = useState<Run[]>([]);
+  const [openedRun, setOpenedRun] = useState<Run | null>(null);
+  const [taskError, setTaskError] = useState("");
+  const [runLoading, setRunLoading] = useState(false);
+  const [alertLoading, setAlertLoading] = useState(false);
+  const [alertError, setAlertError] = useState("");
   const [runError, setRunError] = useState("");
   const [newOpened, newModal] = useDisclosure(false);
   const [navOpened, nav] = useDisclosure(false);
@@ -82,6 +88,9 @@ export default function App() {
     setSelected("");
     setTasks([]);
     setDetail(null);
+    setRuns([]);
+    setAttentionRuns([]);
+    setOpenedRun(null);
     setProjectID(id);
   };
   const { colorScheme, setColorScheme } = useMantineColorScheme();
@@ -123,29 +132,53 @@ export default function App() {
     setError("");
     setDetail(null);
     setRuns([]);
+    setAttentionRuns([]);
+    setRunError("");
+    setAlertError("");
+    setTaskError("");
+    setRunLoading(true);
+    setAlertLoading(true);
     api<Task[]>(`${base}/tasks`, "GET", undefined, controller.signal)
       .then((rows) => {
         setTasks(rows);
+        setTaskError("");
         setSelected((old) =>
           rows.some((t) => t.ID === old) ? old : rows[0]?.ID || "",
         );
       })
       .catch((e) => {
-        if (!controller.signal.aborted) setError(e.message);
+        if (!controller.signal.aborted) setTaskError(e.message);
       })
       .finally(() => {
         if (!controller.signal.aborted) setLoading(false);
       });
     api<AlertRow[]>("/api/alerts", "GET", undefined, controller.signal)
-      .then(setAlerts)
-      .catch(() => {});
-    api<{ runs: Run[] }>(`${base}/runs`, "GET", undefined, controller.signal)
+      .then((rows) => {
+        setAlerts(rows);
+        setAlertError("");
+      })
+      .catch((e) => {
+        if (!controller.signal.aborted) setAlertError(e.message);
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setAlertLoading(false);
+      });
+    api<{ runs: Run[]; attention_runs: Run[] }>(
+      `${base}/runs`,
+      "GET",
+      undefined,
+      controller.signal,
+    )
       .then((data) => {
         setRuns(data.runs || []);
+        setAttentionRuns(data.attention_runs || []);
         setRunError("");
       })
       .catch((e) => {
         if (!controller.signal.aborted) setRunError(e.message);
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setRunLoading(false);
       });
     return () => controller.abort();
   }, [projectID, base, refresh]);
@@ -179,16 +212,7 @@ export default function App() {
       (filter === "all" ||
         (filter === "attention" &&
           (attentionStates.includes(t.State) ||
-            runs.some(
-              (r) =>
-                r.task_id === t.ID &&
-                [
-                  "failed",
-                  "interrupted",
-                  "attention_required",
-                  "waiting",
-                ].includes(r.status),
-            ))) ||
+            attentionRuns.some((r) => r.task_id === t.ID))) ||
         (filter === "active" &&
           ["ready", "in_progress", "completion_review", "auto_qa"].includes(
             t.State,
@@ -199,7 +223,7 @@ export default function App() {
   useEffect(() => {
     if (!filtered.some((t) => t.ID === selected))
       setSelected(filtered[0]?.ID || "");
-  }, [query, filter, status, tasks, selected]);
+  }, [query, filter, status, tasks, attentionRuns, selected]);
 
   useEffect(() => {
     if (!projectID || (view !== "Work" && view !== "Usage")) return;
@@ -207,14 +231,35 @@ export default function App() {
     const timer = setInterval(() => {
       if (document.hidden) return;
       api<Task[]>(`${base}/tasks`, "GET", undefined, controller.signal)
-        .then(setTasks)
-        .catch(() => {});
-      api<{ runs: Run[] }>(`${base}/runs`, "GET", undefined, controller.signal)
-        .then((data) => setRuns(data.runs || []))
-        .catch(() => {});
+        .then((rows) => {
+          setTasks(rows);
+          setTaskError("");
+        })
+        .catch((e) => {
+          if (!controller.signal.aborted) setTaskError(e.message);
+        });
+      api<{ runs: Run[]; attention_runs: Run[] }>(
+        `${base}/runs`,
+        "GET",
+        undefined,
+        controller.signal,
+      )
+        .then((data) => {
+          setRuns(data.runs || []);
+          setAttentionRuns(data.attention_runs || []);
+          setRunError("");
+        })
+        .catch((e) => {
+          if (!controller.signal.aborted) setRunError(e.message);
+        });
       api<AlertRow[]>("/api/alerts", "GET", undefined, controller.signal)
-        .then(setAlerts)
-        .catch(() => {});
+        .then((rows) => {
+          setAlerts(rows);
+          setAlertError("");
+        })
+        .catch((e) => {
+          if (!controller.signal.aborted) setAlertError(e.message);
+        });
       if (selected)
         api<Detail>(
           `${base}/tasks/${encodeURIComponent(selected)}`,
@@ -233,18 +278,17 @@ export default function App() {
   const pendingAlerts = alerts.filter(
     (a) => !a.Acknowledged && (!a.project_id || a.project_id === projectID),
   );
+  const attentionTasks = tasks.filter((t) => attentionStates.includes(t.State));
   const attention =
-    tasks.filter(
-      (t) =>
-        attentionStates.includes(t.State) ||
-        runs.some(
-          (r) =>
-            r.task_id === t.ID &&
-            ["failed", "interrupted", "attention_required", "waiting"].includes(
-              r.status,
-            ),
-        ),
-    ).length + pendingAlerts.length;
+    attentionTasks.length + attentionRuns.length + pendingAlerts.length;
+  const inboxLoading = loading || runLoading || alertLoading;
+  const inboxIncomplete = !!(runError || taskError || alertError);
+  const openTask = (id: string) => {
+    setQuery("");
+    setFilter("all");
+    setStatus(null);
+    setSelected(id);
+  };
   const navigate = (next: View) => {
     setView(next);
     nav.close();
@@ -484,55 +528,132 @@ export default function App() {
           )}
           {isLocal && view === "Work" && (
             <>
+              {taskError && (
+                <Alert color="orange" mb="md" title="Task attention unavailable">
+                  {taskError}
+                </Alert>
+              )}
               {runError && (
-                <Alert color="gray" mb="md" title="Worker history unavailable">
+                <Alert color="gray" mb="md" title="Worker attention unavailable">
                   {runError}
                 </Alert>
               )}
-              {pendingAlerts.length > 0 && (
-                <Accordion variant="contained" mb="md">
-                  <Accordion.Item value="attention">
-                    <Accordion.Control>
-                      <Group gap="sm">
-                        <Badge color="orange" size="sm">
-                          {pendingAlerts.length}
-                        </Badge>
-                        <Text size="sm" fw={500}>
-                          Attention inbox
-                        </Text>
-                      </Group>
-                    </Accordion.Control>
-                    <Accordion.Panel>
-                      <Stack gap="sm">
-                        {pendingAlerts.map((a) => (
-                          <Group
-                            key={`${a.project_id}-${a.ID}`}
-                            justify="space-between"
-                            wrap="nowrap"
-                          >
-                            <div>
-                              <Text size="sm" fw={600}>
-                                {a.Title || "Agent alert"}
-                              </Text>
-                              <Text size="sm" c="dimmed">
-                                {a.Message || a.Body}
-                              </Text>
-                            </div>
-                            <Button
-                              size="xs"
-                              variant="default"
-                              disabled={!human}
-                              onClick={() => acknowledge(a)}
-                            >
-                              Acknowledge
-                            </Button>
-                          </Group>
-                        ))}
-                      </Stack>
-                    </Accordion.Panel>
-                  </Accordion.Item>
-                </Accordion>
+              {alertError && (
+                <Alert color="orange" mb="md" title="Alerts unavailable">
+                  {alertError}
+                </Alert>
               )}
+              <Modal
+                opened={!!openedRun}
+                onClose={() => setOpenedRun(null)}
+                title="Run details"
+                size="lg"
+              >
+                {openedRun && (
+                  <RunCard
+                    key={`${projectID}-${openedRun.id}`}
+                    run={attentionRuns.find((r) => r.id === openedRun.id) || openedRun}
+                    base={base}
+                    reload={reload}
+                  />
+                )}
+              </Modal>
+              <Accordion variant="contained" mb="md">
+                <Accordion.Item value="attention">
+                  <Accordion.Control>
+                    <Group gap="sm">
+                      <Badge color="orange" size="sm">
+                        {attention}
+                      </Badge>
+                      <Text size="sm" fw={500}>
+                        Attention inbox
+                      </Text>
+                    </Group>
+                  </Accordion.Control>
+                  <Accordion.Panel>
+                    <Stack gap="sm">
+                      {inboxIncomplete && (
+                        <Text size="sm" c="dimmed">
+                          The inbox may be incomplete because a source could not be read.
+                        </Text>
+                      )}
+                      {inboxLoading && (
+                        <Text size="sm" c="dimmed">Reading attention sources…</Text>
+                      )}
+                      {!inboxLoading && !attention && !inboxIncomplete && (
+                        <Text size="sm" c="dimmed">Nothing needs attention.</Text>
+                      )}
+                      {attentionTasks.map((t) => (
+                        <Group key={t.ID} justify="space-between" wrap="nowrap">
+                          <div>
+                            <Text size="sm" fw={600}>
+                              {t.Title || t.ID}
+                            </Text>
+                            <Text size="sm" c="dimmed">
+                              {label(t.State)} · {t.ID}
+                            </Text>
+                          </div>
+                          <Button
+                            size="xs"
+                            variant="default"
+                            onClick={() => openTask(t.ID)}
+                            aria-label={`Open task ${t.ID}`}
+                          >
+                            Open
+                          </Button>
+                        </Group>
+                      ))}
+                      {attentionRuns.map((r) => (
+                        <Group key={r.id} justify="space-between" wrap="nowrap">
+                          <div>
+                            <Text size="sm" fw={600}>
+                              {tasks.find((t) => t.ID === r.task_id)?.Title || r.task_id}
+                            </Text>
+                            <Text size="sm" c="dimmed">
+                              {r.pending_request ? "Native permission needed" : label(r.status)} · {r.id}
+                            </Text>
+                            {r.error && (
+                              <Text size="sm" c="dimmed">{r.error}</Text>
+                            )}
+                          </div>
+                          <Button
+                            size="xs"
+                            variant="default"
+                            onClick={() => setOpenedRun(r)}
+                            aria-label={`Open run ${r.id}`}
+                          >
+                            Open
+                          </Button>
+                        </Group>
+                      ))}
+                      {pendingAlerts.map((a) => (
+                        <Group
+                          key={`${a.project_id}-${a.ID}`}
+                          justify="space-between"
+                          wrap="nowrap"
+                        >
+                          <div>
+                            <Text size="sm" fw={600}>
+                              {a.Title || "Agent alert"}
+                            </Text>
+                            <Text size="sm" c="dimmed">
+                              {a.Message || a.Body}
+                            </Text>
+                          </div>
+                          <Button
+                            size="xs"
+                            variant="default"
+                            disabled={!human}
+                            onClick={() => acknowledge(a)}
+                          >
+                            Acknowledge
+                          </Button>
+                        </Group>
+                      ))}
+                    </Stack>
+                  </Accordion.Panel>
+                </Accordion.Item>
+              </Accordion>
               <Paper withBorder radius="lg" className="work-panel">
                 <Group p="md" justify="space-between" className="work-toolbar">
                   <TextInput

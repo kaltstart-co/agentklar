@@ -146,6 +146,29 @@ func (s *Store) List() ([]Run, error) {
 	return out, rows.Err()
 }
 
+// ListAttention is uncapped so older native requests remain visible.
+// Human completion clears historical worker problems, never a native request.
+func (s *Store) ListAttention() ([]Run, error) {
+	rows, err := s.DB.Query(`SELECT ` + runColumns + ` FROM native_runs
+ WHERE pending_request != '' OR status = 'attention_required'
+ OR (status IN ('failed','interrupted','waiting')
+ AND NOT EXISTS (SELECT 1 FROM tasks WHERE tasks.id=native_runs.task_id AND tasks.state='done'))
+ ORDER BY created_at DESC,id DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Run{}
+	for rows.Next() {
+		r, err := scanRun(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 // ListTask reads only this task's latest runs. It never initializes native tables.
 func (s *Store) ListTask(taskID string, limit int) ([]Run, error) {
 	rows, err := s.DB.Query(`SELECT `+runColumns+` FROM native_runs WHERE task_id=? ORDER BY created_at DESC,id DESC LIMIT ?`, taskID, limit)

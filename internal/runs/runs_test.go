@@ -436,3 +436,116 @@ func TestClaimScopeAndReadOnlyReview(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestAttentionKeepsOlderRequestsAndClearsDoneFailures(t *testing.T) {
+	s, in, _ := testSupervisor(t)
+	r, _, err := s.Store.Insert(in, s.Repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.Store.Update(r.ID, "failed", "", "", "", "old failure"); err != nil {
+		t.Fatal(err)
+	}
+	// More than the recent-history limit must not hide the old actionable run.
+	for i := 0; i < 101; i++ {
+		next := in
+		next.ID = "history-" + strconv.Itoa(i)
+		if _, _, err = s.Store.Insert(next, s.Repo); err != nil {
+			t.Fatal(err)
+		}
+		if err = s.Store.Update(next.ID, "completed", "", "", "", ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	history, err := s.Store.List()
+	if err != nil || len(history) != 100 {
+		t.Fatalf("history: %d %v", len(history), err)
+	}
+	attention, err := s.Store.ListAttention()
+	if err != nil || len(attention) != 1 || attention[0].ID != in.ID {
+		t.Fatalf("lost old failure: %+v %v", attention, err)
+	}
+	if _, err = s.Store.DB.Exec(`UPDATE tasks SET state='done' WHERE id=?`, in.TaskID); err != nil {
+		t.Fatal(err)
+	}
+	attention, err = s.Store.ListAttention()
+	if err != nil || len(attention) != 0 {
+		t.Fatalf("Done retained old failure: %+v %v", attention, err)
+	}
+	if _, err = s.Store.DB.Exec(`UPDATE native_runs SET pending_request='{"request_id":99}' WHERE id=?`, in.ID); err != nil {
+		t.Fatal(err)
+	}
+	attention, err = s.Store.ListAttention()
+	if err != nil || len(attention) != 1 {
+		t.Fatalf("Done hid pending request: %+v %v", attention, err)
+	}
+	if _, err = s.Store.DB.Exec(`UPDATE native_runs SET pending_request='',status='attention_required' WHERE id=?`, in.ID); err != nil {
+		t.Fatal(err)
+	}
+	attention, err = s.Store.ListAttention()
+	if err != nil || len(attention) != 1 {
+		t.Fatalf("Done hid native interaction: %+v %v", attention, err)
+	}
+	if _, err = s.Store.DB.Exec(`DROP TABLE native_runs`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.Store.ListAttention(); err == nil {
+		t.Fatal("source failure returned healthy inbox")
+	}
+}
+
+func TestWorkerDeadlineAndCancellation(t *testing.T) {
+	for _, deadline := range []bool{false, true} {
+		name := "cancel"
+		if deadline {
+			name = "deadline"
+		}
+		t.Run(name, func(t *testing.T) {
+			s, in, _ := testSupervisor(t)
+			t.Setenv("AGENTKLAR_FIXTURE_MODE", "slow")
+			r, _, err := s.Store.Insert(in, s.Repo)
+			if err != nil {
+				t.Fatal(err)
+			}
+			harnesses, err := s.Store.Harnesses()
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			if deadline {
+				cancel()
+				ctx, cancel = context.WithTimeout(context.Background(), 2*time.Second)
+			}
+			defer cancel()
+			finished := make(chan struct{})
+			go func() {
+				defer close(finished)
+				s.execute(ctx, harnesses[0], r, &worker{resolved: make(chan struct{}, 1)})
+			}()
+			waitStatus(t, s, in.ID, "running")
+			if !deadline {
+				cancel()
+			}
+			select {
+			case <-finished:
+			case <-time.After(8 * time.Second):
+				t.Fatal("worker did not stop")
+			}
+			got, err := s.Store.Get(in.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := "cancelled"
+			if deadline {
+				want = "failed"
+			}
+			if got.Status != want || (deadline && !strings.Contains(got.Error, "time limit")) {
+				t.Fatalf("wrong stop outcome: %+v", got)
+			}
+			attention, err := s.Store.ListAttention()
+			if err != nil || (deadline && len(attention) != 1) || (!deadline && len(attention) != 0) {
+				t.Fatalf("wrong stop attention: %+v %v", attention, err)
+			}
+		})
+	}
+}
