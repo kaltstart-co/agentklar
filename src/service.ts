@@ -26,7 +26,8 @@ import { ClaudeWorker } from "./claude.ts";
 import { MuseWorker } from "./muse.ts";
 import { CatalogCache, readCatalog, type CatalogReader } from "./catalog.ts";
 import { BenchmarkCache } from "./benchmarks.ts";
-import type { Run, Project, RoutingDecision, FollowUpContext } from "./contracts.ts";
+import type { Run, Project, ProjectRun, RoutingDecision, FollowUpContext } from "./contracts.ts";
+import { sourceFromHeader } from "./launch-source.ts";
 import { recommendationSchema, recommendWorker } from "./recommend.ts";
 import { Instructions, InstructionError, instructionFileSchema, instructionPreviewSchema } from "./instructions.ts";
 import { NativeSetup, SetupError, type NativeSetupOptions } from "./setup.ts";
@@ -52,6 +53,23 @@ function compactRun(r: Run): Run {
     promptTruncated: r.prompt.length > 300,
     result: r.result.slice(0, 1000),
     resultTruncated: !!r.resultTruncated || r.result.length > 1000,
+  };
+}
+function projectRun(r: Run): ProjectRun {
+  return {
+    id: r.id,
+    projectId: r.projectId,
+    harness: r.harness,
+    roleId: r.roleId,
+    prompt: r.prompt.slice(0, 120),
+    promptTruncated: r.prompt.length > 120,
+    readOnly: r.readOnly,
+    state: r.state,
+    createdAt: r.createdAt,
+    updatedAt: r.updatedAt,
+    followUp: r.followUp,
+    workspaceKind: r.workspace?.kind || "project",
+    launchSource: r.launchSource,
   };
 }
 export const contextUpdateSchema = z
@@ -320,6 +338,35 @@ export function createService(
     catch { return c.json({ error: "Public benchmark refresh failed. The last good scores are still available." }, 503); }
   });
   app.get("/api/projects", (c) => c.json(store.projects()));
+  app.get("/api/projects/:id/runs", (c) => {
+    c.header("Cache-Control", "no-store");
+    const projectId = c.req.param("id");
+    if (!z.uuid().safeParse(projectId).success) return c.json({ error: "Invalid project ID" }, 400);
+    if (!store.projects().some((p) => p.id === projectId)) return c.json({ error: "Project not found" }, 404);
+    const params = new URL(c.req.url).searchParams;
+    if ([...params.keys()].some((key) => !["limit", "cursor"].includes(key)) ||
+        params.getAll("limit").length > 1 || params.getAll("cursor").length > 1)
+      return c.json({ error: "Invalid run list query" }, 400);
+    const limitText = params.get("limit") ?? "20";
+    const cursorText = params.get("cursor");
+    const limit = Number(limitText);
+    const before = cursorText === null ? Number.MAX_SAFE_INTEGER : Number(cursorText);
+    if (!/^[1-9]\d*$/.test(limitText) || !Number.isSafeInteger(limit) || limit > 20 ||
+        (cursorText !== null && (!/^[1-9]\d*$/.test(cursorText) || !Number.isSafeInteger(before))))
+      return c.json({ error: "limit must be 1–20 and cursor a positive integer" }, 400);
+    const rows = store.projectRuns(projectId, before, limit + 1);
+    const runs: ProjectRun[] = [];
+    let nextCursor: string | null = null;
+    for (const row of rows.slice(0, limit)) {
+      const item = projectRun(row.run);
+      if (runs.length && JSON.stringify({ projectId, runs: [...runs, item], nextCursor: String(row.rowid), hasMore: true }).length > 20000)
+        break;
+      runs.push(item);
+      nextCursor = String(row.rowid);
+    }
+    const hasMore = runs.length < rows.length;
+    return c.json({ projectId, runs, nextCursor: hasMore ? nextCursor : null, hasMore });
+  });
   app.get("/api/projects/:id/setup/:harness", async (c) => {
     const project = store.projects().find((p) => p.id === c.req.param("id"));
     if (!project) return c.json({ error: "Project not found" }, 404);
@@ -773,6 +820,9 @@ export function createService(
       nativeHome,
       nativeHomeEnv: configuredHome === undefined ? "unset" : "set",
       workspace,
+      ...(c.req.header("authorization") === `Bearer ${bearer}`
+        ? { launchSource: sourceFromHeader(c.req.header("x-agentklar-mcp-client")) }
+        : { launchSource: { kind: "ui" } as const }),
       state: "running",
       result: "",
       tokens: null,
@@ -906,6 +956,7 @@ export function createService(
           contextRevision: r.contextSnapshot?.revision ?? null,
           followUp: r.followUp ?? null,
           workspace: r.workspace ?? { kind: "project", path: store.projects().find((p) => p.id === r.projectId)?.path },
+          launchSource: r.launchSource,
         })
       : c.json({ error: "Run not found" }, 404);
   });

@@ -63,7 +63,7 @@ test("SDK stdio wire lists and calls tools; closing MCP leaves service worker al
     assert.equal(service.store.runs().length, 0);
     assert.equal(catalogReads, 0);
     const list = await client.listTools();
-    assert.equal(list.tools.length, 17);
+    assert.equal(list.tools.length, 18);
     assert.equal(
       list.tools.some((t) => /approve/.test(t.name)),
       false,
@@ -205,6 +205,24 @@ test("MCP response character budget carries explicit truncation", async () => {
   assert.match(result.message, /shortened/);
 });
 
+test("request-scoped MCP client info wins over legacy info and unsafe names stay unknown", async () => {
+  const { CLIENT_INFO_META_KEY } = await import("@modelcontextprotocol/server");
+  const { requestClientSource } = await import("../src/mcp.ts");
+  const { clientSourceHeader, sourceFromHeader } = await import("../src/launch-source.ts");
+  const modern = requestClientSource({ [CLIENT_INFO_META_KEY]: { name: "新 client", version: "2" } }, () => {
+    assert.fail("modern request must not read shared legacy state");
+  });
+  assert.deepEqual(modern, { kind: "mcp", clientName: "新 client", clientVersion: "2" });
+  assert.deepEqual(sourceFromHeader(clientSourceHeader(modern)["x-agentklar-mcp-client"]), modern);
+  const unicode = requestClientSource(undefined, () => ({ name: "界".repeat(80), version: "界".repeat(40) }));
+  assert.deepEqual(sourceFromHeader(clientSourceHeader(unicode)["x-agentklar-mcp-client"]), unicode);
+  assert.deepEqual(requestClientSource(undefined, () => ({ name: "legacy", version: "1" })),
+    { kind: "mcp", clientName: "legacy", clientVersion: "1" });
+  assert.equal(requestClientSource({ [CLIENT_INFO_META_KEY]: { name: "bad\nname" } }, () => ({ name: "legacy" })), undefined);
+  assert.equal(requestClientSource({ [CLIENT_INFO_META_KEY]: { name: "bad\ud800" } }, () => ({ name: "legacy" })), undefined);
+  assert.equal(sourceFromHeader("not%%%base64"), undefined);
+});
+
 test("independent MCP stdio clients share saved context with stale writer protection and compact run reads", async () => {
   const dir = mkdtempSync(join(tmpdir(), "agentklar-shared-mcp-"));
   const home = join(dir, "home");
@@ -225,6 +243,7 @@ test("independent MCP stdio clients share saved context with stale writer protec
     new Client({ name: "codex-host", version: "1" }),
     new Client({ name: "claude-host", version: "1" }),
   ];
+  let reconnect: Client | undefined;
   const call = async (
     client: Client,
     name: string,
@@ -319,6 +338,12 @@ test("independent MCP stdio clients share saved context with stale writer protec
       readOnly: true,
     };
     const started = (await call(clients[0], "task_start", startArgs)).data;
+    assert.deepEqual(started.launchSource, { kind: "mcp", clientName: "codex-host", clientVersion: "1" });
+    const discovered = (await call(clients[1], "project_runs_list", readArgs)).data;
+    assert.equal(discovered.projectId, p.id);
+    assert.equal(discovered.runs[0].id, started.id);
+    assert.deepEqual(discovered.runs[0].launchSource, started.launchSource);
+    assert.equal(discovered.runs[0].contextSnapshot, undefined);
     assert.equal(started.contextRevision, 1);
     assert.equal(started.contextSnapshot, undefined);
     await call(clients[1], "project_context_update", {
@@ -330,10 +355,19 @@ test("independent MCP stdio clients share saved context with stale writer protec
       await call(clients[1], "run_context_read", { runId: started.id })
     ).data;
     assert.deepEqual(inspect.contextSnapshot, saved.data);
-    assert.equal(
-      (await call(clients[1], "task_start", startArgs)).data.id,
-      started.id,
-    );
+    const replay = (await call(clients[1], "task_start", startArgs)).data;
+    assert.equal(replay.id, started.id);
+    assert.deepEqual(replay.launchSource, started.launchSource);
+    await clients[0].close();
+    reconnect = new Client({ name: "fresh-host", version: "3" });
+    await reconnect.connect(new StdioClientTransport({
+      command: "npm", args: ["--prefix", resolve("."), "run", "--silent", "mcp"],
+      env: { ...(process.env as Record<string, string>), AGENTKLAR_HOME: home, AGENTKLAR_PORT: String(port) },
+      stderr: "pipe",
+    }));
+    const afterReconnect = (await call(reconnect, "project_runs_list", readArgs)).data;
+    assert.equal(afterReconnect.runs[0].id, started.id);
+    assert.deepEqual(afterReconnect.runs[0].launchSource, started.launchSource);
     for (const name of ["run_status", "run_result", "run_stop"]) {
       const reply = await call(clients[1], name, { runId: started.id });
       assert.equal(reply.data.contextRevision, 1);
@@ -341,6 +375,7 @@ test("independent MCP stdio clients share saved context with stale writer protec
       assert.doesNotMatch(JSON.stringify(reply.data), /MCP_SAVED_BRIEF/);
     }
   } finally {
+    await reconnect?.close().catch(() => {});
     for (const client of clients) await client.close().catch(() => {});
     await service.close();
     await new Promise<void>((resolve) => http.close(() => resolve()));

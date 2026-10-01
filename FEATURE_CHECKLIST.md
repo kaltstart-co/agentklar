@@ -17,6 +17,8 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 - [x] Codex delegation
 - [x] Native approvals
 - [x] Run history
+- [x] Project run discovery
+- [x] Launch source labels
 - [x] Compact status
 - [x] Run usage
 - [x] Task cancellation
@@ -46,6 +48,8 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 
 ## Next
 
+- [ ] Active lead presence
+- [ ] Control transfer
 - [ ] Gemini, Cursor and OpenCode workers
 - [ ] Global skills
 - [ ] Plugin bundles

@@ -2,6 +2,14 @@
 
 Verified on 2026-10-01 and 2026-10-02 using Node 24.21.0. The old application was not used.
 
+## Cross-harness run discovery — beta.11
+
+Offline service and MCP SDK tests cover authenticated project-only run pages, bad IDs and cursors, and 50 large run records with JSON-escaped control text. Every page stays within the MCP character budget and omits results, private paths and process data. Inserting a new run or updating a saved state between pages does not move older entries. Tests also cover UI start attribution, rejected model-supplied source fields, ignored UI header spoofing, idempotent retries, modern per-request client metadata, legacy initialized client info, invalid names, Unicode transport, and discovery after a new stdio connection. These fixtures make no model call.
+
+Independent QA used three separate official MCP clients against an isolated local service and the native protocol fixture. Client A started work; client B discovered its ID through `project_runs_list`, retried the launch without changing A's saved source, then started a linked review. After a service restart, client C discovered both runs with their original A/B source labels. The rebuilt UI showed the two labels on their task details. A third task started through the local UI showed **Started by: Local UI**. The 320-pixel view had no horizontal overflow and the browser reported no errors. Evidence: `/tmp/agentklar-task-discovery-qa/evidence.json`, `started-by.png`, and `mobile.png`. No provider call or native configuration change was made. These client names are self-reported start records; current lead presence and control transfer remain unverified.
+
+TypeScript checking, all 119 tests, the production build, and diff whitespace checks passed. The beta.11 package smoke installed production dependencies in a clean temporary prefix, verified the built UI and 18 MCP tools, registered a disposable project, and read its empty run list through the installed production bridge. No worker or model ran during this package check.
+
 ## Parallel worktrees — beta.10
 
 Local Git tests cover two active workers in separate checkouts, a second registered project pointing into an active checkout, linked review/fix workspace inheritance, a detached main HEAD, changed branch and replaced directory rejection, continuation after a new commit on the same branch, and cancellation during Git preparation. A fake Claude SDK session accepts an exact native worktree path and rejects a main-checkout path before its result. No model inference is used by these tests.

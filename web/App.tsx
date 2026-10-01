@@ -458,7 +458,7 @@ export function App() {
           : "This hosted page is a setup guide. Run the local app to see projects, workers and permission requests."}
       </p>
       <p className="hint">Requires Node 24 on macOS or Linux. Install the pinned beta package:</p>
-      <pre>npm install -g https://github.com/kaltstart-co/agentklar/releases/download/v0.1.0-beta.10/agentklar-0.1.0-beta.10.tgz{"\n"}agentklar start</pre>
+      <pre>npm install -g https://github.com/kaltstart-co/agentklar/releases/download/v0.1.0-beta.11/agentklar-0.1.0-beta.11.tgz{"\n"}agentklar start</pre>
       <p>
         Open the setup link from the terminal, then use{" "}
         <code>http://127.0.0.1:4317</code>.
@@ -722,6 +722,11 @@ export function App() {
                             ·{" "}
                             {run.effectiveModel || run.model || "Harness default model"}{" "}
                             · {time(run.createdAt)}
+                          </p>
+                          <p className="hint instruction-path">
+                            Started by: {run.launchSource?.kind === "ui" ? "Local UI" :
+                              run.launchSource?.kind === "mcp" ? `${run.launchSource.clientName}${run.launchSource.clientVersion ? ` ${run.launchSource.clientVersion}` : ""} · MCP client report` :
+                              "Unknown"}
                           </p>
                           {run.workspace?.kind === "worktree" && <p className="hint instruction-path">
                             Worktree: {run.workspace.path || (run.state === "running" ? "Claude is preparing it" : "Folder was not confirmed")}

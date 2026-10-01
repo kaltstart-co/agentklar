@@ -31,6 +31,9 @@ export type RunState =
   | "failed"
   | "cancelled"
   | "interrupted";
+export type LaunchSource =
+  | { kind: "ui" }
+  | { kind: "mcp"; clientName: string; clientVersion?: string };
 export type FollowUp = { kind: "review" | "fix"; parentRunId: string; rootRunId: string };
 export type FollowUpContext = {
   originalPrompt: string;
@@ -91,10 +94,16 @@ export type Run = {
   nativeHomeEnv?: "set" | "unset";
   workerPid?: number;
   workspace?: RunWorkspace;
+  launchSource?: LaunchSource;
   launchHash?: string;
   routing?: RoutingDecision;
   followUp?: FollowUp;
   followUpContext?: FollowUpContext;
+};
+export type ProjectRun = Pick<Run, "id" | "projectId" | "harness" | "roleId" | "readOnly" | "state" | "createdAt" | "updatedAt" | "followUp" | "launchSource"> & {
+  prompt: string;
+  promptTruncated: boolean;
+  workspaceKind: "project" | "worktree";
 };
 export type RunEvent = {
   id: number;

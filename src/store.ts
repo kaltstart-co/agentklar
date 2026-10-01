@@ -95,6 +95,12 @@ export class Store {
       .all()
       .map((r) => JSON.parse(r.data as string));
   }
+  projectRuns(projectId: string, before: number, limit: number): { rowid: number; run: Run }[] {
+    return this.db
+      .prepare("SELECT rowid,data FROM runs WHERE projectId=? AND rowid<? ORDER BY rowid DESC LIMIT ?")
+      .all(projectId, before, limit)
+      .map((row) => ({ rowid: row.rowid as number, run: JSON.parse(row.data as string) }));
+  }
   run(id: string): Run | undefined {
     const r = this.db.prepare("SELECT data FROM runs WHERE id=?").get(id);
     return r ? JSON.parse(r.data as string) : undefined;

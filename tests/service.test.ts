@@ -8,6 +8,7 @@ import { createService } from "../src/service.ts";
 import { NativeWorker } from "../src/native.ts";
 import { Store } from "../src/store.ts";
 import type { Run } from "../src/contracts.ts";
+import { clientSourceHeader } from "../src/launch-source.ts";
 const fixture = resolve("tests/fixtures/native.mjs");
 const wait = async (check: () => boolean) => {
   for (let i = 0; i < 100; i++) {
@@ -147,6 +148,83 @@ test("durable runs, explicit project scope, idempotency, busy, canonical paths a
   } catch (e) {
     await t.cleanup();
     throw e;
+  }
+});
+
+test("project run pages stay small and stable while new runs and state updates arrive", async () => {
+  const t = setup();
+  try {
+    const p = await (await t.call("/api/projects", "POST", { name: "one", path: t.project })).json();
+    const otherPath = join(t.dir, "other");
+    mkdirSync(otherPath);
+    const other = await (await t.call("/api/projects", "POST", { name: "two", path: otherPath })).json();
+    const template: Run = {
+      id: randomUUID(), projectId: p.id, harness: "codex", prompt: "\u0000".repeat(32000),
+      readOnly: false, state: "completed", result: "PRIVATE_RESULT".repeat(10000),
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), tokens: null,
+      workspace: { kind: "project", path: t.project },
+      launchSource: { kind: "mcp", clientName: "界".repeat(80), clientVersion: "界".repeat(40) },
+    };
+    const ids: string[] = [];
+    for (let i = 0; i < 50; i++) {
+      const id = randomUUID();
+      t.s.store.insertRun({ ...template, id }, `seed-${i}`);
+      ids.push(id);
+    }
+    t.s.store.insertRun({ ...template, id: randomUUID(), projectId: other.id }, "other");
+    const route = `/api/projects/${p.id}/runs`;
+    assert.equal((await t.s.app.request(`http://127.0.0.1:4317${route}`)).status, 401);
+    assert.equal((await t.call("/api/projects/not-a-uuid/runs")).status, 400);
+    assert.equal((await t.call(`/api/projects/${randomUUID()}/runs`)).status, 404);
+    for (const query of ["limit=", "limit=0", "limit=21", "limit=2&limit=3", "cursor=", "cursor=0", "cursor=-1", "cursor=1.2", "other=1"])
+      assert.equal((await t.call(`${route}?${query}`)).status, 400, query);
+    const firstResponse = await t.call(`${route}?limit=20`);
+    const firstText = await firstResponse.text();
+    assert.equal(firstResponse.headers.get("cache-control"), "no-store");
+    assert.ok(firstText.length < 24000);
+    const first = JSON.parse(firstText);
+    assert.equal(first.runs.length > 0, true);
+    assert.equal(first.hasMore, true);
+    assert.equal(first.runs[0].result, undefined);
+    assert.equal(first.runs[0].workspace, undefined);
+    assert.equal(first.runs[0].workerPid, undefined);
+    assert.ok(first.runs[0].promptTruncated);
+    assert.doesNotMatch(firstText, /PRIVATE_RESULT/);
+    const newId = randomUUID();
+    t.s.store.insertRun({ ...template, id: newId }, "new-between-pages");
+    const updated = t.s.store.run(ids[10])!;
+    t.s.store.saveRun({ ...updated, state: "failed", updatedAt: new Date().toISOString() });
+    const found = [...first.runs.map((r: Run) => r.id)];
+    let cursor = first.nextCursor;
+    while (cursor) {
+      const pageText = await (await t.call(`${route}?limit=20&cursor=${cursor}`)).text();
+      assert.ok(pageText.length < 24000);
+      const page = JSON.parse(pageText);
+      found.push(...page.runs.map((r: Run) => r.id));
+      cursor = page.nextCursor;
+    }
+    assert.equal(new Set(found).size, 50);
+    assert.deepEqual(new Set(found), new Set(ids));
+    assert.ok(!found.includes(newId));
+    assert.equal((await (await t.call(`/api/projects/${other.id}/runs`)).json()).runs.length, 1);
+    const setup = await t.s.app.request(t.s.setupUrl);
+    const cookie = setup.headers.get("set-cookie")!.split(";")[0];
+    const uiHeaders = {
+      Cookie: cookie, Origin: "http://127.0.0.1:4317", "Content-Type": "application/json",
+      ...clientSourceHeader({ kind: "mcp", clientName: "spoofed" }),
+    };
+    const body = { projectId: p.id, prompt: "complete", idempotencyKey: "ui-source" };
+    const uiRun = await (await t.call("/api/tasks/start", "POST", body, uiHeaders)).json();
+    assert.deepEqual(uiRun.launchSource, { kind: "ui" });
+    const replay = await (await t.call("/api/tasks/start", "POST", body, {
+      Authorization: `Bearer ${t.s.bearer}`, "Content-Type": "application/json",
+      ...clientSourceHeader({ kind: "mcp", clientName: "later" }),
+    })).json();
+    assert.equal(replay.id, uiRun.id);
+    assert.deepEqual(replay.launchSource, { kind: "ui" });
+    assert.equal((await t.call("/api/tasks/start", "POST", { ...body, idempotencyKey: "invalid-source", launchSource: { kind: "mcp", clientName: "model" } })).status, 400);
+  } finally {
+    await t.cleanup();
   }
 });
 

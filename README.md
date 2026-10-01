@@ -9,7 +9,7 @@ This is a fresh TypeScript rewrite. The old Go application is preserved in Git a
 Requires Node 24 and npm on macOS or Linux. Install this pinned GitHub beta package, then start the local service:
 
 ```sh
-npm install -g https://github.com/kaltstart-co/agentklar/releases/download/v0.1.0-beta.10/agentklar-0.1.0-beta.10.tgz
+npm install -g https://github.com/kaltstart-co/agentklar/releases/download/v0.1.0-beta.11/agentklar-0.1.0-beta.11.tgz
 agentklar start
 ```
 
@@ -129,7 +129,7 @@ For other MCP hosts, use their normal setup. This example expects `agentklar` on
 }
 ```
 
-Start the local service before the MCP connection. The stdio bridge talks to the independent service. Closing the MCP caller leaves its worker running. Ask the tools for registered projects, discovered harnesses, run status, compact events, result, or stop. No MCP tool can approve a native permission request. The API and tool list are in [docs/API.md](docs/API.md).
+Start the local service before the MCP connection. The stdio bridge talks to the independent service. Closing the MCP caller leaves its worker running. A new MCP client can call `projects_list`, then `project_runs_list({projectId})` to find saved run IDs in small pages. It can read run status, events, results, and handoff details by ID. Task detail shows which local UI or reported MCP client started a run. Older runs show Unknown. This record does not say who currently leads the work, and an MCP client name is self-reported. No MCP tool can approve a native permission request. The API and tool list are in [docs/API.md](docs/API.md).
 
 ## Native permissions and data
 

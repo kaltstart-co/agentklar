@@ -82,9 +82,16 @@ try {
   await client.connect(new StdioClientTransport({ command: setup.entry.command, args: setup.entry.args, env: { ...env, ...setup.entry.env }, stderr: "pipe" }));
   const tools = await client.listTools();
   assert.ok(tools.tools.some((tool) => tool.name === "projects_list"));
+  assert.ok(tools.tools.some((tool) => tool.name === "project_runs_list"));
   const response = await client.callTool({ name: "projects_list", arguments: {} });
   assert.equal(response.isError, false);
   assert.deepEqual(JSON.parse(response.content[0].text), []);
+  const registered = await client.callTool({ name: "project_register", arguments: { name: "smoke", path: foreign } });
+  assert.equal(registered.isError, false);
+  const project = JSON.parse(registered.content[0].text);
+  const runs = await client.callTool({ name: "project_runs_list", arguments: { projectId: project.id } });
+  assert.equal(runs.isError, false);
+  assert.deepEqual(JSON.parse(runs.content[0].text), { projectId: project.id, runs: [], nextCursor: null, hasMore: false });
   console.log(`Package smoke passed: ${version}, built UI, installed MCP bridge, ${tools.tools.length} tools.`);
 } finally {
   if (client) await client.close().catch(() => {});
