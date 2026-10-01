@@ -1,5 +1,0 @@
-{{define "content"}}
-<header class="page-head"><div><p class="eyebrow">Human-reviewable intelligence</p><h1>Knowledge</h1><p class="lede">Checked-in decisions, conventions, glossary, and runbook.</p></div></header>
-<nav class="subnav" aria-label="Intelligence sections"><a class="active" href="{{.BasePath}}/knowledge">Knowledge</a><a href="{{.BasePath}}/memory">Memory</a><a href="{{.BasePath}}/context">Context</a></nav>
-{{if .Error}}<p class="empty">{{.Error}}</p>{{else if not .KnowOK}}<p class="empty">Knowledge is not available for this project.</p>{{else if not .Knowledge}}<p class="empty">No knowledge entries yet.</p>{{else}}<div class="intelligence-list">{{range .Knowledge}}<article><header><span class="state-badge">{{.Kind}}</span><h2>{{.Title}}</h2></header><p class="task-id">{{.Slug}}</p><pre>{{.Body}}</pre><small>{{.Path}}</small></article>{{end}}</div>{{end}}
-{{end}}

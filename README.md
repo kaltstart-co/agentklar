@@ -1,313 +1,60 @@
-# Agentklar
+# AgentKlar
 
-**One control center for AI-assisted software delivery.**
+Keep your native coding harness. AgentKlar gives registered projects a shared local work record, team roles, and durable worker runs. Start from Codex, Claude Code, Gemini CLI, Cursor, or OpenCode and connect its MCP client to AgentKlar. The first worker adapter is Codex. Other installed CLIs are discovered as hosts; their worker adapters are planned.
 
-Current work: [small feature checklist](FEATURE_CHECKLIST.md) · [build plan and audit](BUILD_PLAN.md).
+This is a fresh TypeScript rewrite. The old Go application is preserved in Git at `archive/pre-rewrite-2026-10-01`. Old databases and configuration are never imported. A run marked **completed** means the worker finished. Review the changes in your normal editor and harness.
 
-[![CI](https://github.com/kaltstart-co/agentklar/actions/workflows/ci.yml/badge.svg)](https://github.com/kaltstart-co/agentklar/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Site](https://img.shields.io/badge/site-agentklar.kaltstart.co-2A55D8.svg)](https://agentklar.kaltstart.co)
+## Run locally
 
-Agentklar is a local-first control plane for Codex, Claude Code, OpenCode,
-Gemini CLI, Cursor, and other MCP clients. It gives a human one native,
-multi-project view of work while keeping each project's workflow state,
-evidence, memory, and context isolated.
+Requires Node 24 and npm. For workers, install and authenticate Codex using its native setup first. No new model API key is required.
 
-Agents can plan, claim, implement, review, and run declared checks. Only a
-human can move work to Done.
-
-Website: **[agentklar.kaltstart.co](https://agentklar.kaltstart.co)** · a
-[Kaltstart](https://kaltstart.co) project.
-
-## Build the current source
-
-The new worker supervisor and support interface are in the current source.
-Older release binaries may not include them. Build the frontend before Go:
-
-```bash
-git clone https://github.com/kaltstart-co/agentklar.git
-cd agentklar
-npm ci --prefix web
-npm run build:local --prefix web
-go build -o agentklar ./cmd/agentklar
+```sh
+npm ci
+npm run build
+npm start
 ```
 
-In your working repository, use that binary's absolute path:
+Keep that terminal running. Open the one-time setup URL it prints. It creates a private local browser session and opens the support UI. After setup, the UI lives at `http://127.0.0.1:4317`. For frontend development, run `npm run dev` in another terminal and open `http://127.0.0.1:5173`.
 
-```bash
-/path/to/agentklar/agentklar init
-/path/to/agentklar/agentklar serve --open
+Register an existing project folder. Add roles with a harness, optional model, and responsibility. Start a task from your native harness through MCP or from the local UI. Only registered projects can run workers. Each project allows one worker at a time; a busy request returns an error. Repeating the same task with the same idempotency key returns its original run.
+
+Project cost preference is saved as economical, balanced, or best. This first version uses your explicit model pin or native default. It does not infer the best model from benchmarks. Role responsibility is sent with the task, and the role snapshot and actual native model stay in its history.
+
+## Connect MCP
+
+Use your harness's normal MCP setup. Replace the folder below with the checkout path:
+
+```json
+{
+  "mcpServers": {
+    "agentklar": {
+      "command": "npm",
+      "args": ["--prefix", "/absolute/path/to/Agentklar", "run", "--silent", "mcp"]
+    }
+  }
+}
 ```
 
-Keep the supervisor running. In another terminal, run `agentklar runs discover`
-using the same binary, then use `agentklar mcp install` to connect your native
-tool. The support interface has Work, Team, Usage, and Settings views.
-`agentklar runs open` opens the running supervisor's trusted local interface;
-`serve --open` also reuses an existing supervisor.
+Start the local service before the MCP connection. The stdio bridge talks to the independent service. Closing the MCP caller leaves its worker running. Ask the tools for registered projects, discovered harnesses, run status, compact events, result, or stop. No MCP tool can approve a native permission request. The API and tool list are in [docs/API.md](docs/API.md).
 
-For tracked delegation, call MCP `recommend_worker` with `task_id`, an optional
-saved `role_id`, the current `{harness,model}`, and concrete
-`required_capabilities`. It returns a limited recommendation and missing facts;
-it launches no work and does not prove model access. The policy, catalog, and
-usage tools provide detail. Then claim the task and call `start_run` with a
-stable run ID, the claim holder, token, and instructions. Repeating the exact request
-returns the same run. Use `get_run` to read events and the result, and
-`cancel_run` to request interruption. A completed worker has not approved the
-task; verify and submit through the existing task workflow.
+## Native permissions and data
 
-Use `get_completion_packet {task_id}` or `agentklar task packet <id>` for a
-small handoff from existing records. It includes recorded checks, reviews,
-commit references, open notes, and native run status. Worker reports remain
-unverified text. Shortened sections are labeled and keep record IDs for details.
-Retrieval runs no checks and cannot approve the task.
+Codex workers use `codex app-server` with your existing authentication and settings. AgentKlar leaves native approval and sandbox settings in place. Selecting read only adds a read-only restriction. Supported concrete command and file approvals appear in the authenticated local UI. Allow once, decline, or cancel there. Broader permission changes and unsupported native input requests need attention; stop that run and continue in your native harness.
 
-Editing currently requires a **quick** task with **auto** isolation and an
-exclusive primary claim. Standard tasks receive an isolation label but no
-real worktree yet. Read-only review runs narrow the native sandbox. Only the
-Codex app-server adapter runs workers; other discovered tools are version
-probes. Native command and file permissions wait for a person in the local
-interface. Native input requests that this adapter cannot handle stop with an
-explicit error. Native settings and credentials remain with the tool.
+Private records live in `~/.agentklar/local-v1/`: SQLite state, a private MCP bearer token, and a separate SQLite service ownership lock. `AGENTKLAR_HOME` can choose a different isolated folder. `AGENTKLAR_PORT` changes the loopback port. Browser writes require an exact allowed local Origin and session cookie. The server binds only to `127.0.0.1`. A hosted static preview has no local connection and shows no invented work.
 
-The supervisor outlives caller MCP connections. After a supervisor restart,
-unfinished runs are marked interrupted; native session reattachment is not
-implemented. Usage shows sourced account snapshots, registered thread tokens,
-and estimates or unknowns. Model catalog entries do not prove model access.
-Normal native work does not require AgentKlar tracking.
+On a service restart, unfinished runs become interrupted. Native sessions are recorded, but AgentKlar does not claim to recover a live worker. A possibly surviving owned process group keeps its project blocked until it exits; the service never kills an unverified or reused process ID. Cancellation interrupts the owned turn and terminates its owned subprocess group. Keep the service running for active work.
 
-Lifecycle and permission fixtures pass. A live read-only Sol transport smoke
-completed and preserved its result while keeping the task In Progress. A
-separate Sol write paused at native file approval, then timed out without
-creating the requested file; the coding loop is unverified. See the
-[build plan audit](BUILD_PLAN.md#audit-evidence) for current limits. Hosted
-frontend previews require this source build locally; secure pairing and hosted
-worker control are still planned.
+Results and event tails have character limits and explicit truncation flags. Native token counts are shown when available. Dollar cost, remaining quota, and model quality scores are unknown in this release.
 
-The source frontend is deployed at [agentklar-seven.vercel.app](https://agentklar-seven.vercel.app).
-The hosted page cannot connect to local project data yet. Use the local source
-build at localhost for actual work. Automatic GitHub deployment
-still needs the [Vercel GitHub App](https://github.com/apps/vercel).
+## Check the code
 
-## Install or update
-
-Run the same command for a first install or an update on macOS and Linux:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/kaltstart-co/agentklar/main/install.sh | bash -s --
+```sh
+npm run check
+npm test
+npm run build
 ```
 
-The installer downloads the newest GitHub Release for your platform, verifies
-its SHA-256 checksum, checks the binary, stages it, and atomically replaces the
-installed executable. Existing project data under `~/.local/share/agentklar`
-is not modified. Agent integration runs afterward as a best-effort step: it
-copies supported skill and command assets and registers MCP where the host CLI
-supports it. Other clients still use `agentklar mcp install`; an integration
-failure does not roll back the installed binary.
+Tests use a fake native protocol process and the official MCP SDK on real stdio. They verify persistence, project isolation, idempotency, cancellation, restart state, exclusive service ownership, native event identity, role context, and approval boundaries. Real smoke tests use separate temporary projects and explicitly pinned Sol models.
 
-Useful options:
-
-```bash
-# Install the binary without wiring agent skills or MCP instructions
-curl -fsSL https://raw.githubusercontent.com/kaltstart-co/agentklar/main/install.sh | bash -s -- --no-agents
-
-# Use the Go toolchain path instead of a release archive
-curl -fsSL https://raw.githubusercontent.com/kaltstart-co/agentklar/main/install.sh | bash -s -- --with-go
-```
-
-For a custom binary directory, set `AGENTKLAR_INSTALL_DIR` before `bash`:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/kaltstart-co/agentklar/main/install.sh | AGENTKLAR_INSTALL_DIR=/path/to/bin bash -s --
-```
-
-## Five-minute setup
-
-```bash
-cd /path/to/your/repository
-
-agentklar init
-# Review .agentklar/quality.toml. Agentklar runs only recipes declared there.
-
-agentklar mcp install --client codex
-# Add the printed snippet to your MCP client, then restart that client.
-
-agentklar ui --open
-```
-
-`agentklar ui --open` opens a human browser session for the control center.
-Keep that terminal running and press Ctrl-C to stop it.
-
-Create and shape work in the UI, or use the CLI:
-
-```bash
-agentklar task new AK-1 "Fix the parser" \
-  --lane standard \
-  --criteria "handles empty input;tests pass" \
-  --verify "go test ./..."
-agentklar task ready AK-1
-```
-
-The agent then follows the MCP workflow:
-
-```text
-list_ready_tasks → claim_task → work → submit_for_review
-```
-
-Run the declared gate and make the final decision in the local UI:
-
-```bash
-agentklar gate AK-1
-```
-
-See the complete [Setup & Usage guide](docs/USAGE.md).
-
-## The control center
-
-One server shows every repository registered by `agentklar init`:
-
-- **Overview** — project-level attention, approval, and alert counts.
-- **Board** — create, edit, filter, move, reorder, and archive tasks. Planning
-  fields include priority, assignee, labels, due date, lane, isolation target,
-  acceptance criteria, verification, and dependencies.
-- **Task record** — objective, evidence, reviews, timeline, dependencies, and
-  human comments.
-- **Approvals** — one cross-project queue for approving or requesting changes.
-- **Intelligence** — project knowledge, shared memory, and focused context
-  search, with provenance kept visible.
-- **Alerts** — agent-raised events with acknowledgement absent from the MCP
-  surface.
-
-State changes do not require drag-and-drop: every permitted column move also
-has a keyboard-accessible **Move to** control. Same-column ordering currently
-uses drag-and-drop. The server always validates the workflow transition; the
-browser cannot bypass protected state.
-
-### Local trust boundary
-
-The UI listens on loopback only. Starting it without `--open` creates a
-read-only server:
-
-```bash
-agentklar ui
-```
-
-`agentklar ui --open` sends an unprinted, one-use bootstrap capability directly
-to the browser. The server exchanges it for an HttpOnly, SameSite=Strict human
-session cookie. Mutations also require an exact-origin request. An approval
-form token is bound to the project, task, live submission, and current approval
-nonce.
-
-Agentklar does not promise a remotely hosted or multi-user trust boundary. Do
-not expose the local UI through a tunnel or public listener.
-
-## Workflow guarantees
-
-Happy path:
-
-```text
-Draft → Ready → In Progress → Completion Review → Auto QA
-      → User Approval → Done
-```
-
-An In Progress task may enter Waiting or Blocked and return to In Progress.
-Failed review, failed QA, or human rejection enters Changes Requested; an agent
-then reclaims it into In Progress. A human may cancel tasks from Draft, Ready,
-In Progress, Blocked, or Changes Requested.
-
-- **Definition of Ready** — Ready requires acceptance criteria and a
-  verification method.
-- **Atomic claims with fencing** — one worker wins a claim; a stale worker
-  cannot mutate protected state.
-- **Machine-attested evidence** — Agentklar records the command, working
-  directory, exit code, timestamps, retained log, and artifact hash for each
-  declared recipe it runs.
-- **Human-only Done** — the agent MCP surface has no approve, reject, or done
-  method. A valid human decision is bound to the current review snapshot.
-- **Declared checks only** — acceptance-criteria prose is never translated into
-  shell commands. The gate runs only `.agentklar/quality.toml` recipes.
-
-The terminal commands `agentklar approve` and `agentklar reject` remain
-development conveniences. They warn that a shell-capable agent could invoke
-them; use the `agentklar ui --open` browser session for the protected local
-human channel. The designated human CLI commands `agentklar memory forget` and
-`agentklar alerts ack` have the same shell-access limitation.
-
-## Data model
-
-Agentklar uses a small global catalog and federated project stores:
-
-```text
-~/.local/share/agentklar/catalog.sqlite
-  ├── project A → workspace A/control.sqlite, memory.sqlite, context.sqlite
-  ├── project B → workspace B/control.sqlite, memory.sqlite, context.sqlite
-  └── project C → workspace C/control.sqlite, memory.sqlite, context.sqlite
-```
-
-The catalog maps a stable project ID to its repository and workspace. It does
-not merge task databases, so task IDs may repeat safely across projects.
-Agents remain project-bound: each MCP server resolves the repository from the
-working directory in which it was launched. The human control center can read
-all registered projects.
-
-In-repo knowledge lives at `.agentklar/knowledge/` so it can be reviewed and
-versioned with the code. Protected workflow state stays in `control.sqlite`;
-memory and context are separate project-scoped stores.
-
-## Architecture
-
-One Go binary, the standard library, and SQLite provide the product surface.
-
-| Package | Responsibility |
-|---|---|
-| `internal/catalog` | Global project registry and collision-safe workspace lookup |
-| `internal/contracts` | State machine, transition table, MCP method allowlist, evidence provenance |
-| `internal/store` | Per-project `control.sqlite` protected workflow state |
-| `internal/workflow` | Tasks, planning metadata, dependencies, claims, leases, fencing, submissions, approvals |
-| `internal/quality` | Declared recipe parsing and machine-attested execution |
-| `internal/gate` | Completion Review, Auto QA, and Slop Guard |
-| `internal/ui` | Embedded multi-project control center, local human session, HTML and JSON APIs |
-| `internal/knowledge` | Git-versioned project decisions, conventions, glossary, and runbook |
-| `internal/memory` | Project-scoped, provenance-bearing FTS5 memory |
-| `internal/context` | Rebuildable FTS5 projection of knowledge, memory, and code |
-| `internal/notify` | Project alert log and best-effort local delivery |
-| `internal/mcp` | Project-bound agent JSON-RPC surface with no approval method |
-| `internal/tracker/vikunja` | Optional legacy Vikunja projection and comment reconciliation |
-
-## Optional Vikunja integration
-
-The native control center needs no external service. Existing Vikunja users may
-keep a board as an optional projection:
-
-```bash
-agentklar tracker connect \
-  --url http://localhost:3456/api/v1 \
-  --svc-user agentklar-bot --svc-pass '******' \
-  --human you
-agentklar tracker sync
-```
-
-Agentklar projects cards and workflow buckets outward to Vikunja; it does not
-import Vikunja card moves as state transitions. Vikunja may also supply
-human-authored approval or rejection comments. `agentklar reconcile` checks a
-comment against the live submission and nonce before applying the decision.
-
-## Verify and contribute
-
-Tests are the executable specification for the completion boundary:
-
-```bash
-go build ./...
-go test ./...
-```
-
-Start with [CONTRIBUTING.md](CONTRIBUTING.md), follow the
-[Code of Conduct](CODE_OF_CONDUCT.md), and report vulnerabilities through
-[SECURITY.md](SECURITY.md).
-
-Design records live under [`docs/superpowers/specs/`](docs/superpowers/specs/)
-and implementation plans under
-[`docs/superpowers/plans/`](docs/superpowers/plans/).
-
-## License
-
-[MIT](LICENSE) © 2026 Kaltstart · [kaltstart.co](https://kaltstart.co)
+See [docs/VALIDATION.md](docs/VALIDATION.md) for local and real native evidence. See [BUILD_PLAN.md](BUILD_PLAN.md) for the staged roadmap and [FEATURE_CHECKLIST.md](FEATURE_CHECKLIST.md) for verified scope. MIT license.

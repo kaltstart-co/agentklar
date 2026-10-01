@@ -1,16 +1,8 @@
-.DS_Store
-/agentklar
-/dist/
-.superpowers/
-.playwright-mcp/
-*.png
-*.log
-!docs/**/*.png
-# Agentklar local knowledge scaffolding is generated on demand;
-# commit real decisions/ADRs intentionally, not these defaults.
-.agentklar/knowledge/
-# Built support UI is embedded by the release build.
-/internal/ui/frontend/index.html
-/internal/ui/frontend/assets/
+node_modules/
+dist/
 .vercel/
 .env*
+agentklar
+agentklar-bar
+*.sqlite*
+.DS_Store

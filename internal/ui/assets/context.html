@@ -1,9 +1,0 @@
-{{define "content"}}
-<header class="page-head"><div><p class="eyebrow">Relevant retrieval, on demand</p><h1>Context</h1><p class="lede">Search the derived index without mixing project boundaries.</p></div>{{if .Human}}<button class="button secondary" type="button" data-context-reindex data-api="/api/projects/{{.ProjectID}}/context/reindex">Reindex project</button>{{end}}</header>
-<nav class="subnav" aria-label="Intelligence sections"><a href="{{.BasePath}}/knowledge">Knowledge</a><a href="{{.BasePath}}/memory">Memory</a><a class="active" href="{{.BasePath}}/context">Context</a></nav>
-{{if not .CtxOK}}<p class="empty">Context is not available for this project.</p>{{else}}
-<div class="index-status"><span class="status-dot"></span>Index available{{if .ContextIndexedAt}} · updated {{.ContextIndexedAt}}{{end}}</div>
-<form method="get" action="{{.BasePath}}/context" class="searchbar context-search"><label for="ctx-q">Search context</label><input type="search" id="ctx-q" name="q" value="{{.Q}}" placeholder="Code, tickets, knowledge, memory" autocomplete="off"><label for="ctx-task">Source task</label><input id="ctx-task" name="task" value="{{.TaskScope}}" placeholder="Any task"><button class="button secondary" type="submit">Search</button></form>
-{{if .Q}}<div class="context-results">{{range .ContextPkt.Items}}<article><header><span class="state-badge">{{.Source}}</span><strong>{{.Title}}</strong>{{if .TaskID}}<span class="task-id">Task {{.TaskID}}</span>{{end}}<code>{{.Ref}}</code></header><p>{{.Body}}</p></article>{{else}}<p class="empty">No matches for “{{.Q}}”.</p>{{end}}</div>{{else}}<p class="empty">Enter a query to retrieve focused project context.</p>{{end}}
-{{end}}
-{{end}}
