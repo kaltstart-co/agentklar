@@ -62,6 +62,12 @@ Each harness keeps its own native instruction file. These files are separate fro
 
 Drafts stay in the open app when you switch views or harnesses, or the local service briefly disconnects. If a file changes on disk, the UI keeps your draft. **Reload file (replaces draft)** loads the current file. **Undo latest change** restores the saved prior contents only when the current file still matches that change. Recent changes remain visible in the local UI. An interrupted change has a **Try undo** action with the same file check. Instruction editing is available through the trusted local UI; MCP can read file status and change metadata.
 
+## Project skills
+
+Open **Instructions → Project skills**. Choose Codex or Claude Code, then enter a GitHub `owner/repo` (optionally `#ref`) and one exact skill name. **Preview skill** shows its target folder, source hash, full `SKILL.md` text, and a list of every file and folder with sizes. **Install reviewed skill** copies those exact staged bytes into `.agents/skills/<name>` for Codex or `.claude/skills/<name>` for Claude Code. Codex's `.agents/skills` folder can also be read by other native tools. Start a new native session to check whether the skill loads.
+
+The trusted local UI can stage, install, and remove skills. The authenticated local HTTP API can list folder metadata. There is no MCP skill tool. AgentKlar installs only when the target name is free. **Remove managed skill** checks the original project and parent folders, every managed file, its mode, and its folder identity. External or changed skills stay in place. A failed or interrupted write can leave a partial folder. Inspect it manually; AgentKlar does not recover or delete it automatically. No global skill or native user config is changed. This first slice does not update skills or install plugin, hook, or MCP bundles.
+
 ## Connect MCP
 
 Open **Settings**, select a registered project, then choose **Codex** or **Claude Code**. **Refresh native status** reads the current `agentklar` entry. **Preview connection** shows the exact native add command, config path, scope and generated bridge entry. **Add to Codex/Claude Code** runs that command. This is an explicit local UI action; MCP cannot install itself.

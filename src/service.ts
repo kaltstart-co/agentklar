@@ -27,6 +27,7 @@ import type { Run, Project, RoutingDecision } from "./contracts.ts";
 import { recommendationSchema, recommendWorker } from "./recommend.ts";
 import { Instructions, InstructionError, instructionFileSchema, instructionPreviewSchema } from "./instructions.ts";
 import { NativeSetup, SetupError, type NativeSetupOptions } from "./setup.ts";
+import { ProjectSkills, SkillError, skillPreviewInput, skillIdInput, skillRemoveInput } from "./skills.ts";
 const role = z
   .object({
     id: z.string().min(1).max(80),
@@ -118,6 +119,7 @@ export function createService(
   catalogReader: CatalogReader = readCatalog,
   setupOptions: NativeSetupOptions = {},
   operator?: Operator,
+  skillOptions: { timeoutMs?: number; sourceOverride?: (source: string) => string } = {},
 ) {
   const release = ownHome(home);
   let store: Store;
@@ -129,6 +131,7 @@ export function createService(
   }
   const app = new Hono();
   const instructions = new Instructions(store.db);
+  const skills = new ProjectSkills(store.db, home, skillOptions);
   const nativeSetup = new NativeSetup(store.db, home, port, { codex: nativeCommand, claude: claudeCommand }, setupOptions);
   const catalogs = new CatalogCache(catalogReader, {
     codex: nativeCommand,
@@ -158,7 +161,7 @@ export function createService(
     !!a &&
     Buffer.byteLength(a) === Buffer.byteLength(b) &&
     timingSafeEqual(Buffer.from(a), Buffer.from(b));
-  app.onError((e, c) => c.json({ error: e.message }, e instanceof InstructionError || e instanceof SetupError ? e.status : 500));
+  app.onError((e, c) => c.json({ error: e.message }, e instanceof InstructionError || e instanceof SetupError || e instanceof SkillError ? e.status : 500));
   app.use("*", async (c, next) => {
     const host = c.req.header("host") || new URL(c.req.url).host;
     if (![`127.0.0.1:${port}`, "127.0.0.1:5173"].includes(host))
@@ -190,15 +193,18 @@ export function createService(
       return c.json({ error: "Only the trusted local UI may read or change native MCP setup" }, 403);
     if (
       (c.req.path.startsWith("/api/approvals/") ||
-        (c.req.path.includes("/instructions") && c.req.method !== "GET")) &&
+        (c.req.path.includes("/instructions") && c.req.method !== "GET") ||
+        (c.req.path.includes("/skills") && c.req.method !== "GET")) &&
       (!ui || !origin || !origins.has(origin) || mcp)
     )
       return c.json(
-        { error: "Only the trusted local UI may answer native approvals or edit instruction files" },
+        { error: "Only the trusted local UI may answer approvals or change native files and skills" },
         403,
       );
     if (/^\/api\/projects\/[^/]+\/instructions\/[^/]+$/.test(c.req.path) && c.req.method === "GET" && (!ui || mcp))
       return c.json({ error: "Only the trusted local UI may read instruction text" }, 403);
+    if (/^\/api\/projects\/[^/]+\/skills\/[^/]+$/.test(c.req.path) && c.req.method === "GET")
+      return c.json({ error: "Skill previews are available through POST only" }, 403);
     if (c.req.method !== "GET" && !mcp && (!origin || !origins.has(origin)))
       return c.json({ error: "Exact local Origin required" }, 403);
     await next();
@@ -272,6 +278,21 @@ export function createService(
     c.header("Cache-Control", "no-store");
     return project ? c.json(instructions.list(project)) : c.json({ error: "Project not found" }, 404);
   });
+  app.get("/api/projects/:id/skills", (c) => {
+    const project = store.projects().find((p) => p.id === c.req.param("id"));
+    c.header("Cache-Control", "no-store");
+    return project ? c.json(skills.list(project)) : c.json({ error: "Project not found" }, 404);
+  });
+  for (const operation of ["preview", "install", "remove"] as const)
+    app.post(`/api/projects/:id/skills/${operation}`, async (c) => {
+      const project = store.projects().find((p) => p.id === c.req.param("id"));
+      if (!project) return c.json({ error: "Project not found" }, 404);
+      const schema = operation === "preview" ? skillPreviewInput : operation === "install" ? skillIdInput : skillRemoveInput;
+      const parsed = schema.safeParse(await c.req.json().catch(() => null));
+      if (!parsed.success) return c.json({ error: "Provide one native harness, a GitHub owner/repo, and one exact skill name or saved ID." }, 400);
+      c.header("Cache-Control", "no-store");
+      return c.json(operation === "preview" ? await skills.preview(project, parsed.data as typeof skillPreviewInput._output) : operation === "install" ? skills.install(project, (parsed.data as typeof skillIdInput._output).previewId) : skills.remove(project, (parsed.data as typeof skillRemoveInput._output).installId));
+    });
   app.get("/api/projects/:id/instructions/:file", (c) => {
     const project = store.projects().find((p) => p.id === c.req.param("id"));
     if (!project) return c.json({ error: "Project not found" }, 404);
@@ -753,6 +774,7 @@ export function createService(
       stopping = true;
       quiesced = true;
       return closing ??= (async () => {
+        await skills.close();
         await nativeSetup.close();
         await catalogs.close();
         const current = [...workers.values()];

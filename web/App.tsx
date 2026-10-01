@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { NativeSetupForm } from "./NativeSetupForm.js";
 import { InstructionsForm } from "./InstructionsForm.js";
+import { SkillsForm } from "./SkillsForm.js";
 import {
   Alert,
   Autocomplete,
@@ -543,6 +544,7 @@ export function App() {
         {project && (
           <div hidden={view !== "Instructions" || !connected}>
             <InstructionsForm key={project.id} projectId={project.id} connected={connected} />
+            <SkillsForm key={project.id} projectId={project.id} connected={connected} />
           </div>
         )}
         {!loaded ? (

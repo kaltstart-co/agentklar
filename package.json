@@ -24,6 +24,7 @@
     "hono": "4.13.12",
     "react": "19.3.0",
     "react-dom": "19.3.0",
+    "skills": "1.7.0",
     "zod": "4.6.5"
   },
   "devDependencies": {

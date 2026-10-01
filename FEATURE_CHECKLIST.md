@@ -28,6 +28,7 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 - [x] Model advice
 - [x] Automatic model choice
 - [x] Native instructions (Codex and Claude Code)
+- [x] Project skills
 
 ## In progress
 
@@ -39,7 +40,9 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 
 - [ ] Other harness workers
 - [ ] Quality benchmarks
-- [ ] Configs, skills, plugins
+- [ ] Skill updates
+- [ ] Global skills
+- [ ] Plugin bundles
 - [ ] Wider config preview and rollback
 - [ ] Device pairing
 - [ ] Remote work
