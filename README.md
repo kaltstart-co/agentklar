@@ -9,7 +9,7 @@ This is a fresh TypeScript rewrite. The old Go application is preserved in Git a
 Requires Node 24 and npm on macOS or Linux. Install this pinned GitHub beta package, then start the local service:
 
 ```sh
-npm install -g https://github.com/kaltstart-co/agentklar/releases/download/v0.1.0-beta.9/agentklar-0.1.0-beta.9.tgz
+npm install -g https://github.com/kaltstart-co/agentklar/releases/download/v0.1.0-beta.10/agentklar-0.1.0-beta.10.tgz
 agentklar start
 ```
 
@@ -46,7 +46,9 @@ Stop a foreground `agentklar start` first. `open` creates a new one-use browser 
 
 To update, stop the service, install a new pinned release tarball, then start it again. Native MCP entries and a macOS launchd job contain absolute file paths, so keep the same global npm prefix and Node 24 path when updating. If either path changes, remove and add the managed connection or background job through the local UI and CLI.
 
-Register an existing project folder. Add roles with a harness, optional model, and responsibility. Start a task from your native harness through MCP or from the local UI. Only registered projects can run workers. Each project allows one worker at a time; a busy request returns an error. Repeating the same task with the same idempotency key returns its original run.
+Register an existing project folder. Add roles with a harness, optional model, and responsibility. Start a task from your native harness through MCP or from the local UI. Only registered projects can run workers. Choose **Current project folder** or **New worktree** for each new task. A worktree is a separate Git checkout made from the latest local commit. Uncommitted changes, ignored files and local-only files stay in the original folder. AgentKlar allows up to two active workers per project, each in a different checkout. A second worker in the same checkout gets a busy error. Repeating the same task with the same idempotency key returns its original run.
+
+For Codex and Muse, AgentKlar makes the worktree with Git under its private data folder. Claude Code makes its own worktree under the project's `.claude/worktrees` folder, using local HEAD. AgentKlar checks the actual folder and branch before accepting it. Native permission decisions still apply. Claude Code may copy extra files listed in its own `.worktreeinclude`; AgentKlar does not copy local settings or dependencies. Worktrees and their edits stay on disk after completion, cancellation, failure, or restart. AgentKlar does not merge or remove them. Task detail shows the folder and branch once verified.
 
 Project cost preference is saved as economical, balanced, or best. Optional model advice uses that saved preference, task type, complexity, native availability and model family profiles. Fresh comparable LiveBench reference scores can break policy ties. Your explicit task or role model pin takes priority. Role responsibility is sent with the task, and the role snapshot, worker harness, and actual native model stay in its history. Choose an installed worker harness in the local UI. A selected role chooses its harness. Changing the harness clears the model pin so a model name from another harness is not carried over.
 
@@ -78,7 +80,7 @@ Open a completed work task and select **Review work**. The draft starts a read-o
 
 Muse cannot enforce read-only work through its worker interface. Use Codex or Claude Code for a linked review. Muse can run a linked fix when workspace changes are allowed.
 
-The new worker receives the original work prompt and the immediately preceding result, each capped at 8,000 characters. This data is frozen when the linked run starts and marked as untrusted task data. It does not resume the earlier native session or grant permissions. A completed review, including one that says `NO_FINDINGS`, means only that the worker finished; it is not a human acceptance decision.
+The new worker uses the same checkout as the linked task. It receives the original work prompt and the immediately preceding result, each capped at 8,000 characters. This data is frozen when the linked run starts and marked as untrusted task data. It does not resume the earlier native session or grant permissions. A completed review, including one that says `NO_FINDINGS`, means only that the worker finished; it is not a human acceptance decision.
 
 ## Shared project context
 
@@ -135,9 +137,9 @@ Codex workers use `codex app-server` with your existing authentication and setti
 
 Private records live in `~/.agentklar/local-v1/`: SQLite state, a private MCP bearer token, and a separate SQLite service ownership lock. `AGENTKLAR_HOME` can choose a different isolated folder. `AGENTKLAR_PORT` changes the loopback port. Browser writes require an exact allowed local Origin and session cookie. The server binds only to `127.0.0.1`. A hosted static preview has no local connection and shows no invented work.
 
-On a service restart, unfinished runs become interrupted. Native sessions are recorded, but AgentKlar does not claim to recover a live worker. A possibly surviving owned process group keeps its project blocked until it exits; the service never kills an unverified or reused process ID. Cancellation interrupts the owned turn and terminates its owned subprocess group. Keep the service running for active work.
+On a service restart, unfinished runs become interrupted. Native sessions are recorded, but AgentKlar does not claim to recover a live worker. A possibly surviving owned process group keeps its checkout blocked until it exits; the service never kills an unverified or reused process ID. Cancellation interrupts the owned turn and terminates its owned subprocess group. Keep the service running for active work.
 
-For a finished run, open **Continue in native harness** in its task detail, or call `run_handoff({runId})` through MCP. AgentKlar shows a POSIX terminal command only when it has the saved native session UUID, session home, project folder, and installed CLI, with no active worker in that project. The command keeps the saved model when known and Codex read-only sandbox when selected. For Claude, it also keeps whether `CLAUDE_CONFIG_DIR` was set or unset when the worker started; setting that variable changes where Claude reads its config. For Muse, it pins `XDG_DATA_HOME` to the parent of the native data home recorded by Muse before resuming. Claude read-only runs have no ready command because their SDK tool restriction cannot be carried into native CLI resume. Older runs without saved session scope have no ready command. The command is a snapshot; AgentKlar does not launch or monitor the manual session. Close native work before starting another worker in the same project.
+For a finished run, open **Continue in native harness** in its task detail, or call `run_handoff({runId})` through MCP. AgentKlar shows a POSIX terminal command only when it has the saved native session UUID, session home, verified checkout folder, and installed CLI, with no active worker in that checkout. The command keeps the saved model when known and Codex read-only sandbox when selected. For Claude, it also keeps whether `CLAUDE_CONFIG_DIR` was set or unset when the worker started; setting that variable changes where Claude reads its config. For Muse, it pins `XDG_DATA_HOME` to the parent of the native data home recorded by Muse before resuming. Claude read-only runs have no ready command because their SDK tool restriction cannot be carried into native CLI resume. Older runs without saved session scope have no ready command. The command is a snapshot; AgentKlar does not launch or monitor the manual session. Close native work before starting another worker in the same checkout.
 
 Results and event tails have character limits and explicit truncation flags. Native token counts are shown when available. Dollar cost and native task quality remain unknown. Account allowance is shown only when the native harness provides it.
 

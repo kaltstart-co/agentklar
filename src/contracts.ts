@@ -42,6 +42,23 @@ export type FollowUpContext = {
   sourceModel: string | null;
   sourceState: "completed";
 };
+export type RunWorkspace =
+  | { kind: "project"; path: string }
+  | {
+      kind: "worktree";
+      path?: string;
+      branch?: string;
+      repoRoot: string;
+      commonDir: string;
+      repoStamp: string;
+      commonStamp: string;
+      baseCommit: string;
+      rootRunId: string;
+      nativeName?: string;
+      plannedPath?: string;
+      verified?: boolean;
+      workspaceStamp?: string;
+    };
 export type MuseSubscriptionUsage = {
   observedAtMs: number;
   weekly: { resetsAtMs: number; usedPercent: number };
@@ -73,6 +90,7 @@ export type Run = {
   nativeHome?: string;
   nativeHomeEnv?: "set" | "unset";
   workerPid?: number;
+  workspace?: RunWorkspace;
   launchHash?: string;
   routing?: RoutingDecision;
   followUp?: FollowUp;

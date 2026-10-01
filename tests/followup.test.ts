@@ -77,6 +77,10 @@ test("completed work links review, fix, and review with frozen bounded source da
       followUp: { runId: original.id, kind: "review" } })).status, 400);
     assert.equal((await call("/api/tasks/start", { projectId: project.id, prompt: "wrong fix permissions", idempotencyKey: "permission2", readOnly: true,
       followUp: { runId: review.id, kind: "fix" } })).status, 400);
+    const legacy = service.store.run(original.id)!;
+    service.store.saveRun({ ...legacy, workspace: undefined });
+    assert.equal((await call("/api/tasks/start", { projectId: project.id, prompt: "legacy override", idempotencyKey: "legacy-override",
+      workspace: "worktree", readOnly: true, followUp: { runId: original.id, kind: "review" } })).status, 409);
     const snapshot = await (await call("/api/snapshot")).json();
     assert.equal(snapshot.runs.some((item: Run) => "followUpContext" in item), false);
     assert.equal(snapshot.runs.find((item: Run) => item.id === review.id).result, "FINDING: decimal input rounds incorrectly");

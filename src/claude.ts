@@ -12,6 +12,7 @@ import {
 import type { Run } from "./contracts.ts";
 import type { NativeCallbacks } from "./native.ts";
 import { composeWorkerPrompt } from "./prompt.ts";
+import { verifyNativeWorktree } from "./workspace.ts";
 
 const reads = ["Read", "Glob", "Grep"];
 const actions = {
@@ -61,8 +62,12 @@ export class ClaudeWorker {
   }
 
   private options(): Options {
+    const workspace = this.run.workspace;
+    const freshWorktree = workspace?.kind === "worktree" && !!workspace.nativeName && !workspace.path;
     return {
       cwd: this.path,
+      ...(workspace?.kind === "worktree" ? { projectConfigRoot: workspace.repoRoot } : {}),
+      ...(freshWorktree ? { extraArgs: { worktree: workspace.nativeName! }, settings: { worktree: { baseRef: "head" } } } : {}),
       pathToClaudeCodeExecutable: this.command,
       abortController: this.abort,
       ...(this.run.model ? { model: this.run.model } : {}),
@@ -196,6 +201,17 @@ export class ClaudeWorker {
     if (this.sessionId && "session_id" in m && m.session_id !== this.sessionId)
       return;
     if (m.type === "system" && m.subtype === "init") {
+      const workspace = this.run.workspace;
+      if (workspace?.kind === "worktree") {
+        if (workspace.path && m.cwd !== workspace.path)
+          throw new Error("Claude opened a different worktree than this run owns.");
+        if (!workspace.path) {
+          const verified = verifyNativeWorktree(workspace, m.cwd);
+          this.path = verified.path!;
+          this.run.workspace = verified;
+          this.callbacks.update({ workspace: verified });
+        }
+      }
       this.sessionId = m.session_id;
       this.callbacks.update({
         threadId: m.session_id,
@@ -248,7 +264,9 @@ export class ClaudeWorker {
                 ? total
                 : null,
           });
-          if (result.subtype === "success" && !result.is_error) {
+          if (this.run.workspace?.kind === "worktree" && !this.run.workspace.verified) {
+            this.finish("failed", "Claude worktree was not verified before the result.");
+          } else if (result.subtype === "success" && !result.is_error) {
             this.callbacks.update({
               result: result.result.slice(0, 24000),
               resultTruncated: result.result.length > 24000,
@@ -272,11 +290,13 @@ export class ClaudeWorker {
             );
         }
       }
-    } catch {
+    } catch (error) {
       if (!this.finished)
         this.finish(
           "failed",
-          "Claude worker could not run. Check sign-in, model access and limits in your native Claude Code CLI.",
+          error instanceof Error && /worktree/i.test(error.message)
+            ? "Claude worktree could not be verified. Its folder and changes were kept for inspection."
+            : "Claude worker could not run. Check sign-in, model access and limits in your native Claude Code CLI.",
         );
     } finally {
       this.kill();

@@ -37,6 +37,7 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 - [x] Shared instruction files
 - [x] Shared skill folders
 - [x] Reviewed skill updates
+- [x] Parallel worktrees
 
 ## In progress
 
@@ -51,4 +52,3 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 - [ ] Wider config preview and rollback
 - [ ] Device pairing
 - [ ] Remote work
-- [ ] Parallel worktrees

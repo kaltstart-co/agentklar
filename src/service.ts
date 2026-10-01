@@ -32,6 +32,8 @@ import { Instructions, InstructionError, instructionFileSchema, instructionPrevi
 import { NativeSetup, SetupError, type NativeSetupOptions } from "./setup.ts";
 import { ProjectSkills, SkillError, skillPreviewInput, skillIdInput, skillRemoveInput } from "./skills.ts";
 import { runHandoff } from "./handoff.ts";
+import { createWorktree, gitBase, gitCheckout, plannedWorktree, verifyWorktree } from "./workspace.ts";
+import { projectRootIdentity } from "./project-root.ts";
 const role = z
   .object({
     id: z.string().min(1).max(80),
@@ -80,6 +82,7 @@ export const startSchema = z
       taskType: z.enum(["coding", "reasoning", "data-analysis", "language"]).default("coding"),
     }).strict().optional(),
     followUp: z.object({ runId: z.uuid(), kind: z.enum(["review", "fix"]) }).strict().optional(),
+    workspace: z.enum(["project", "worktree"]).optional(),
   })
   .strict();
 export function processGroupAlive(pid: number) {
@@ -173,10 +176,24 @@ export function createService(
     string,
     { stop: () => void; closed?: Promise<void> }
   >();
-  const projectBusy = (projectId: string) => store.runs().some((r) =>
-    r.projectId === projectId &&
-    (["running", "needs_attention"].includes(r.state) || workers.has(r.id) ||
-      (r.workerPid !== undefined && processGroupAlive(r.workerPid))));
+  const active = (r: Run) => ["running", "needs_attention"].includes(r.state) || workers.has(r.id) ||
+    (r.workerPid !== undefined && processGroupAlive(r.workerPid));
+  const activeRuns = (projectId?: string) => store.runs().filter((r) => (!projectId || r.projectId === projectId) && active(r));
+  const runPath = (r: Run) => r.workspace?.path || store.projects().find((p) => p.id === r.projectId)?.path;
+  const overlaps = (a: string, b: string) => a === b || a.startsWith(b + "/") || b.startsWith(a + "/");
+  const sameWorkspace = (a: Run, b: Run) => {
+    if (a.workspace?.kind === "worktree" && b.workspace?.kind === "worktree" &&
+      a.workspace.rootRunId === b.workspace.rootRunId) return true;
+    const aPath = runPath(a);
+    const bPath = runPath(b);
+    if (!aPath || !bPath) return false;
+    const aGit = gitCheckout(aPath);
+    const bGit = gitCheckout(bPath);
+    if (aGit && bGit) return aGit.root === bGit.root;
+    if (a.workspace?.kind === "worktree" && !a.workspace.verified && bGit?.commonDir === a.workspace.commonDir) return true;
+    if (b.workspace?.kind === "worktree" && !b.workspace.verified && aGit?.commonDir === b.workspace.commonDir) return true;
+    return overlaps(aPath, bPath);
+  };
   const answers = new Map<string, (decision: string) => void>();
   const secretPath = join(home, "mcp-token");
   if (!existsSync(secretPath))
@@ -584,11 +601,24 @@ export function createService(
       const linked = linkedSource(p.id, data.followUp);
       if (linked.error) return c.json({ error: linked.error }, 409);
     }
-    if (projectBusy(p.id))
-      return c.json(
-        { error: "Project busy. Wait for or stop its active worker." },
-        409,
-      );
+    const linkedAtStart = data.followUp ? linkedSource(p.id, data.followUp).source : undefined;
+    if (data.followUp && !linkedAtStart) return c.json({ error: "Linked run changed before launch" }, 409);
+    const workspaceChoice = linkedAtStart ? (linkedAtStart.workspace?.kind || "project") : (data.workspace || "project");
+    if (linkedAtStart && data.workspace && data.workspace !== workspaceChoice)
+      return c.json({ error: "Linked work must use its original workspace." }, 409);
+    const target = linkedAtStart || (workspaceChoice === "project" ? {
+      projectId: p.id, workspace: { kind: "project", path: p.path },
+    } as Run : null);
+    const busyError = () => {
+      if (activeRuns(p.id).length >= 2) return "Project already has two active workers.";
+      if (target && activeRuns().some((r) => sameWorkspace(r, target)))
+        return workspaceChoice === "project"
+          ? "Project busy. Wait for or stop its active worker."
+          : "Workspace busy. Wait for or stop its active worker.";
+      return null;
+    };
+    const initialBusy = busyError();
+    if (initialBusy) return c.json({ error: initialBusy }, 409);
     let selected = data.roleId
       ? p.roles.find((r) => r.id === data.roleId)
       : undefined;
@@ -626,14 +656,16 @@ export function createService(
       if (existing) return existing.launchHash === launchHash
         ? c.json(compactRun(existing))
         : c.json({ error: "Idempotency key already used for a different task" }, 409);
-      if (projectBusy(p.id))
-        return c.json({ error: "Project busy. Wait for or stop its active worker." }, 409);
+      const busy = busyError();
+      if (busy) return c.json({ error: busy }, 409);
       const latest = store.projects().find((item) => item.id === p.id);
       if (!latest || JSON.stringify(latest) !== JSON.stringify(p))
         return c.json({ error: "Project settings changed during model selection. Start again." }, 409);
       if (data.followUp) {
         const linked = linkedSource(p.id, data.followUp);
         if (linked.error) return c.json({ error: linked.error }, 409);
+        if (JSON.stringify(linked.source.workspace) !== JSON.stringify(linkedAtStart?.workspace))
+          return c.json({ error: "Linked workspace changed during model selection." }, 409);
       }
       if (!advice.choice) return c.json({
         error: "No suitable model found. Review native access, model pins, and task requirements.",
@@ -695,8 +727,34 @@ export function createService(
     const nativeHome = !homeVariable ? undefined : configuredHome === undefined
       ? join(homedir(), harness === "codex" ? ".codex" : ".claude")
       : isAbsolute(configuredHome) ? configuredHome : undefined;
+    const runId = randomUUID();
+    let workspace: Run["workspace"];
+    if (source) {
+      workspace = source.workspace || { kind: "project", path: p.path };
+      if (workspace.kind === "worktree") {
+        if (!workspace.verified || !workspace.path || !workspace.branch ||
+          workspace.rootRunId !== (source.followUp?.rootRunId || source.id))
+          return c.json({ error: "Linked worktree has no verified folder." }, 409);
+        try {
+          if (verifyWorktree(workspace, workspace.path) !== workspace.branch)
+            throw new Error();
+        } catch { return c.json({ error: "Linked worktree changed or is missing." }, 409); }
+      } else if (workspace.path !== p.path)
+        return c.json({ error: "Linked project workspace changed." }, 409);
+    } else if (workspaceChoice === "project") workspace = { kind: "project", path: p.path };
+    else {
+      try {
+        const base = gitBase(p.path);
+        workspace = { kind: "worktree", repoRoot: base.repoRoot, commonDir: base.commonDir,
+          repoStamp: base.repoStamp, commonStamp: base.commonStamp, baseCommit: base.baseCommit,
+          rootRunId: runId, ...(harness === "claude" ? {
+            nativeName: runId, plannedPath: join(base.repoRoot, ".claude", "worktrees", runId),
+          } : {}) };
+        if (harness !== "claude") workspace = plannedWorktree(workspace, home);
+      } catch (error) { return c.json({ error: (error as Error).message }, 409); }
+    }
     const r: Run = {
-      id: randomUUID(),
+      id: runId,
       harness: harness as "codex" | "claude" | "muse",
       projectId: p.id,
       roleId: data.roleId,
@@ -714,6 +772,7 @@ export function createService(
       readOnly: data.readOnly,
       nativeHome,
       nativeHomeEnv: configuredHome === undefined ? "unset" : "set",
+      workspace,
       state: "running",
       result: "",
       tokens: null,
@@ -725,45 +784,66 @@ export function createService(
     store.event(
       r.id,
       "started",
-      `${harness === "claude" ? "Claude Code" : harness === "muse" ? "Muse" : "Codex"} worker started.`,
+      workspace.kind === "worktree" && !workspace.verified && !workspace.nativeName
+        ? "Preparing separate Git worktree."
+        : `${harness === "claude" ? "Claude Code" : harness === "muse" ? "Muse" : "Codex"} worker started.`,
     );
     queueMicrotask(() => {
+      const callbacks: NativeCallbacks = {
+        update: (patch) => {
+          const current = store.run(r.id);
+          if (current && (["running", "needs_attention"].includes(current.state) ||
+            (Object.keys(patch).length === 1 && ("workerPid" in patch || "workspace" in patch))))
+            store.saveRun({ ...current, ...patch, updatedAt: new Date().toISOString() });
+        },
+        event: (kind, text) => store.event(r.id, kind, text),
+        approval: (a, answer) => { store.saveApproval(a); answers.set(a.id, answer); },
+        done: () => {
+          workers.delete(r.id);
+          store.clearApprovals(r.id);
+          for (const [id] of answers)
+            if (!store.approvals().some((a) => a.id === id)) answers.delete(id);
+        },
+      };
+      const launch = (ready: Run) => {
+        const worker = factory(command, ready, ready.workspace?.path || p.path, callbacks);
+        workers.set(r.id, worker);
+        return worker;
+      };
       try {
         if (quiesced || stopping) {
           store.saveRun({ ...r, state: "interrupted", error: "Local service stopped before worker launch.", updatedAt: new Date().toISOString() });
           return;
         }
-        const worker = factory(command, r, p.path, {
-          update: (patch) => {
-            const current = store.run(r.id);
-            if (
-              current &&
-              (["running", "needs_attention"].includes(current.state) ||
-                (Object.keys(patch).length === 1 && "workerPid" in patch))
-            )
-              store.saveRun({
-                ...current,
-                ...patch,
-                updatedAt: new Date().toISOString(),
-              });
-          },
-          event: (kind, text) => store.event(r.id, kind, text),
-          approval: (a, answer) => {
-            store.saveApproval(a);
-            answers.set(a.id, answer);
-          },
-          done: () => {
-            workers.delete(r.id);
-            store.clearApprovals(r.id);
-            for (const [id] of answers)
-              if (!store.approvals().some((a) => a.id === id))
-                answers.delete(id);
-          },
-        });
-        workers.set(r.id, worker);
+        if (workspace.kind === "worktree" && !workspace.nativeName && !workspace.verified) {
+          const abort = new AbortController();
+          const preparing = { stop: () => abort.abort(), closed: Promise.resolve() as Promise<void> };
+          preparing.closed = (async () => {
+            try {
+              const verified = await createWorktree(workspace, abort.signal, (pid) => callbacks.update({ workerPid: pid }));
+              callbacks.update({ workspace: verified });
+              const current = store.run(r.id);
+              if (abort.signal.aborted || quiesced || stopping || !current || !["running", "needs_attention"].includes(current.state)) return;
+              const worker = launch({ ...current, workspace: verified });
+              await worker.closed;
+            } catch (error) {
+              try {
+                if (workspace.path && verifyWorktree(workspace, workspace.path) === workspace.branch)
+                  callbacks.update({ workspace: { ...workspace, verified: true,
+                    workspaceStamp: projectRootIdentity(workspace.path) } });
+              } catch { /* Keep planned path and branch so partial Git artifacts can be inspected. */ }
+              const current = store.run(r.id);
+              if (current && ["running", "needs_attention"].includes(current.state))
+                callbacks.update({ state: "failed", error: (error as Error).message });
+            } finally {
+              if (workers.get(r.id) === preparing) workers.delete(r.id);
+            }
+          })();
+          workers.set(r.id, preparing);
+        } else launch(r);
       } catch (e) {
         store.saveRun({
-          ...r,
+          ...store.run(r.id)!,
           state: "failed",
           error: (e as Error).message,
           updatedAt: new Date().toISOString(),
@@ -782,7 +862,8 @@ export function createService(
     c.header("Cache-Control", "no-store");
     const project = store.projects().find((p) => p.id === run.projectId);
     const cli = run.harness === "codex" || run.harness === "claude" || run.harness === "muse" ? executable(run.harness) : null;
-    return c.json(runHandoff(run, project, projectBusy(run.projectId), cli));
+    return c.json(runHandoff(run, project,
+      activeRuns().some((item) => sameWorkspace(item, run)), cli));
   });
   app.get("/api/runs/:id/context", (c) => {
     const r = store.run(c.req.param("id"));
@@ -824,6 +905,7 @@ export function createService(
           harness: r.harness || "codex",
           contextRevision: r.contextSnapshot?.revision ?? null,
           followUp: r.followUp ?? null,
+          workspace: r.workspace ?? { kind: "project", path: store.projects().find((p) => p.id === r.projectId)?.path },
         })
       : c.json({ error: "Run not found" }, 404);
   });

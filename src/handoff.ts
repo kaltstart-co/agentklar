@@ -2,6 +2,7 @@ import { accessSync, constants, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join } from "node:path";
 import type { Project, Run, RunHandoff } from "./contracts.ts";
+import { verifyWorktree } from "./workspace.ts";
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const safePath = (value: string) => isAbsolute(value) && value.length <= 4096 && !/[\x00-\x1f\x7f]/.test(value);
@@ -17,13 +18,19 @@ export function runHandoff(run: Run, project: Project | undefined, busy: boolean
   if (["running", "needs_attention"].includes(run.state)) return unavailable("The worker is still active.");
   if (!["completed", "failed", "cancelled", "interrupted"].includes(run.state))
     return unavailable("The run is not in a finished state.");
-  if (busy) return unavailable("This project has an active worker or a possibly surviving worker process group. Close it before continuing in the native harness.");
+  if (busy) return unavailable("This checkout has an active worker or a possibly surviving worker process group. Close it before continuing in the native harness.");
   if (!project) return unavailable("The saved project no longer exists.");
-  if (!safePath(project.path)) return unavailable("The saved project folder path is not safe for a native command.");
+  if (run.workspace?.kind === "worktree" && !run.workspace.verified)
+    return unavailable("This run's worktree was not verified.");
+  const path = run.workspace?.kind === "worktree" ? run.workspace.path : project.path;
+  if (!path || !safePath(path)) return unavailable("The saved workspace path is not safe for a native command.");
   try {
-    if (!statSync(project.path).isDirectory() || realpathSync(project.path) !== project.path)
-      return unavailable("The saved project folder changed or is no longer a directory.");
-  } catch { return unavailable("The saved project folder is missing."); }
+    if (!statSync(path).isDirectory() || realpathSync(path) !== path)
+      return unavailable("The saved workspace folder changed or is no longer a directory.");
+    if (run.workspace?.kind === "worktree" &&
+      verifyWorktree(run.workspace, path) !== run.workspace.branch)
+      return unavailable("The saved worktree branch changed.");
+  } catch { return unavailable("The saved workspace folder is missing or changed."); }
   if (!packet.nativeSessionId) return unavailable("No native session UUID was recorded for this run.");
   if (harness === "claude" && run.readOnly)
     return unavailable("Claude read-only runs use an AgentKlar SDK tool hook that native CLI resume cannot preserve. Open the session in Claude only if you accept its native permissions.");
@@ -47,12 +54,12 @@ export function runHandoff(run: Run, project: Project | undefined, busy: boolean
       return unavailable("The saved model name is not safe for a native command.");
     // Muse 1.4.1 derives museHome from XDG_DATA_HOME; pin the same parent for resume.
     const env = { XDG_DATA_HOME: dirname(run.nativeHome) };
-    const argv = ["resume", packet.nativeSessionId, "--workspace", project.path, ...(model ? ["--model", model] : [])];
-    const display = `cd ${quote(project.path)} && XDG_DATA_HOME=${quote(env.XDG_DATA_HOME)} ${[cli, ...argv].map(quote).join(" ")}`;
+    const argv = ["resume", packet.nativeSessionId, "--workspace", path, ...(model ? ["--model", model] : [])];
+    const display = `cd ${quote(path)} && XDG_DATA_HOME=${quote(env.XDG_DATA_HOME)} ${[cli, ...argv].map(quote).join(" ")}`;
     const ready: RunHandoff = { ...packet, available: true, reason: null,
-      command: { executable: cli, argv, cwd: project.path, env, envUnset: [], shell: "posix", display },
+      command: { executable: cli, argv, cwd: path, env, envUnset: [], shell: "posix", display },
       notes: ["Muse will check whether the saved session and model can be opened. Permission choices remain with the native CLI.",
-        "This is a snapshot. AgentKlar does not monitor or take ownership of the manual native session. Close native work before starting another worker in this project."] };
+        "This is a snapshot. AgentKlar does not monitor or take ownership of the manual native session. Close native work before starting another worker in this checkout."] };
     return JSON.stringify(ready).length <= 20000 ? ready : unavailable("The native command is too long to copy safely.");
   }
   if (harness === "claude") {
@@ -66,7 +73,7 @@ export function runHandoff(run: Run, project: Project | undefined, busy: boolean
     return unavailable("The saved model name is not safe for a native command.");
   const variable = harness === "codex" ? "CODEX_HOME" : "CLAUDE_CONFIG_DIR";
   const argv = harness === "codex"
-    ? ["resume", "--cd", project.path, ...(run.readOnly ? ["--sandbox", "read-only"] : []),
+    ? ["resume", "--cd", path, ...(run.readOnly ? ["--sandbox", "read-only"] : []),
         ...(model ? [`--model=${model}`] : []), packet.nativeSessionId]
     : ["--resume", packet.nativeSessionId, ...(model ? [`--model=${model}`] : [])];
   const unsetClaude = harness === "claude" && run.nativeHomeEnv === "unset";
@@ -74,14 +81,14 @@ export function runHandoff(run: Run, project: Project | undefined, busy: boolean
   const envUnset = unsetClaude ? [variable] : [];
   const commandText = [cli, ...argv].map(quote).join(" ");
   const display = unsetClaude
-    ? `(unset CLAUDE_CONFIG_DIR && cd ${quote(project.path)} && ${commandText})`
-    : `cd ${quote(project.path)} && ${variable}=${quote(run.nativeHome)} ${commandText}`;
+    ? `(unset CLAUDE_CONFIG_DIR && cd ${quote(path)} && ${commandText})`
+    : `cd ${quote(path)} && ${variable}=${quote(run.nativeHome)} ${commandText}`;
   const ready: RunHandoff = { ...packet, available: true, reason: null,
-    command: { executable: cli, argv, cwd: project.path, env, envUnset, shell: "posix", display },
+    command: { executable: cli, argv, cwd: path, env, envUnset, shell: "posix", display },
     notes: [
       ...(model ? [] : ["No model was saved. The native harness will choose its current default model."]),
       "The native harness will check whether this saved session can be opened.",
-      "This is a snapshot. AgentKlar does not monitor or take ownership of the manual native session. Close native work before starting another worker in this project.",
+      "This is a snapshot. AgentKlar does not monitor or take ownership of the manual native session. Close native work before starting another worker in this checkout.",
     ] };
   return JSON.stringify(ready).length <= 20000
     ? ready : unavailable("The native command is too long to copy safely.");

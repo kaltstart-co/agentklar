@@ -130,6 +130,7 @@ export function App() {
   const adviceRequest = useRef(0);
   const [readOnly, setReadOnly] = useState(true);
   const [includeProjectContext, setIncludeProjectContext] = useState(true);
+  const [workspace, setWorkspace] = useState<"project" | "worktree">("project");
   const [roles, setRoles] = useState<Role[]>([]);
   const [preference, setPreference] = useState<Preference>("balanced");
   const project = snapshot.projects.find((p) => p.id === projectId);
@@ -235,6 +236,7 @@ export function App() {
       ? "Review the linked work. Check the changes and report concrete findings with file paths and lines."
       : "Fix the findings in the linked review. Check the result and explain what changed.") : "");
     setReadOnly(source ? kind === "review" : true);
+    setWorkspace(source?.workspace?.kind || "project");
     setRoleId(null);
     setModel("");
     setTaskModal(true);
@@ -456,7 +458,7 @@ export function App() {
           : "This hosted page is a setup guide. Run the local app to see projects, workers and permission requests."}
       </p>
       <p className="hint">Requires Node 24 on macOS or Linux. Install the pinned beta package:</p>
-      <pre>npm install -g https://github.com/kaltstart-co/agentklar/releases/download/v0.1.0-beta.9/agentklar-0.1.0-beta.9.tgz{"\n"}agentklar start</pre>
+      <pre>npm install -g https://github.com/kaltstart-co/agentklar/releases/download/v0.1.0-beta.10/agentklar-0.1.0-beta.10.tgz{"\n"}agentklar start</pre>
       <p>
         Open the setup link from the terminal, then use{" "}
         <code>http://127.0.0.1:4317</code>.
@@ -721,6 +723,12 @@ export function App() {
                             {run.effectiveModel || run.model || "Harness default model"}{" "}
                             · {time(run.createdAt)}
                           </p>
+                          {run.workspace?.kind === "worktree" && <p className="hint instruction-path">
+                            Worktree: {run.workspace.path || (run.state === "running" ? "Claude is preparing it" : "Folder was not confirmed")}
+                            {run.workspace.branch ? ` · ${run.workspace.branch}` : ""}.
+                            {run.workspace.verified ? " Changes stay there until you move or remove them." : " The folder is not verified yet."}
+                            {!run.workspace.path && run.workspace.plannedPath ? ` Expected folder: ${run.workspace.plannedPath}.` : ""}
+                          </p>}
                           {run.harness === "muse" && <MuseSubscriptionUsageView usage={run.museSubscriptionUsage} />}
                           {linkedRuns.length > 1 && (
                             <div>
@@ -768,6 +776,8 @@ export function App() {
                           {!["running", "needs_attention"].includes(run.state) && (
                             <NativeHandoff key={`handoff-${run.id}`} runId={run.id} connected={connected}
                               projectBusy={snapshot.runs.some((item) => item.projectId === run.projectId &&
+                                (item.workspace?.kind === "worktree" ? item.workspace.rootRunId : "project") ===
+                                (run.workspace?.kind === "worktree" ? run.workspace.rootRunId : "project") &&
                                 ["running", "needs_attention"].includes(item.state))} />
                           )}
                           {snapshot.approvals
@@ -1336,6 +1346,7 @@ export function App() {
                 readOnly,
                 includeProjectContext,
                 ...(followUp ? { followUp } : {}),
+                ...(!followUp ? { workspace } : {}),
               });
               setProjectId(draftProjectId);
               setRunId(task.id);
@@ -1348,6 +1359,12 @@ export function App() {
           <Stack gap="sm">
             {error && <Alert color="red">{error}</Alert>}
             {followUp && <p className="hint">Linked to a completed run in {taskProject?.name || "this project"}. {followUp.kind === "review" ? "Review is read only." : "Fix can change workspace files."} Choose the worker and model below.</p>}
+            {followUp ? <p className="hint">This task uses the same workspace as its linked work.</p> : <>
+              <Select label="Workspace" value={workspace} allowDeselect={false}
+                onChange={(value) => setWorkspace(value as "project" | "worktree")}
+                data={[{ value: "project", label: "Current project folder" }, { value: "worktree", label: "New worktree (separate folder)" }]} />
+              {workspace === "worktree" && <p className="hint">Starts from the latest local commit. Uncommitted changes and local-only files stay in the current folder; Claude may include files through its own .worktreeinclude. The new folder and its changes are kept after the task ends. At most two workers can run in one project.</p>}
+            </>}
             <Textarea
               label="What should the worker do?"
               placeholder="Describe the task and what a good result looks like."
@@ -1931,7 +1948,7 @@ function NativeHandoff({ runId, connected, projectBusy }: { runId: string; conne
       <Button size="xs" variant="light" loading={loading} disabled={!canShow} onClick={() => void load()}>
         Show native command
       </Button>
-      {projectBusy && <p className="hint">A worker is active in this project. Close it before preparing a native command.</p>}
+      {projectBusy && <p className="hint">A worker is active in this checkout. Close it before preparing a native command.</p>}
       {error && <Alert color="red">{error}</Alert>}
       {canShow && packet && !packet.available && <Alert color="yellow">{packet.reason}</Alert>}
       {canShow && packet?.command && (

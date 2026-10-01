@@ -172,7 +172,8 @@ test("SDK stdio wire lists and calls tools; closing MCP leaves service worker al
     const linkedProject = JSON.parse((linkedProjectReply.content as { text: string }[])[0].text);
     const sourceId = randomUUID();
     service.store.insertRun({ ...service.store.run(routedRun.id)!, id: sourceId, projectId: linkedProject.id,
-      prompt: "Original work", state: "completed", result: "Source finding data", workerPid: undefined }, "seeded-source");
+      prompt: "Original work", state: "completed", result: "Source finding data", workerPid: undefined,
+      workspace: { kind: "project", path: linkedProject.path } }, "seeded-source");
     const linkedReply = await client.callTool({ name: "task_start", arguments: {
       projectId: linkedProject.id, prompt: "Review the source", idempotencyKey: "linked-wire",
       readOnly: true, followUp: { runId: sourceId, kind: "review" },

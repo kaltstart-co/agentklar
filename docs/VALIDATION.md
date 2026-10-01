@@ -2,6 +2,18 @@
 
 Verified on 2026-10-01 and 2026-10-02 using Node 24.21.0. The old application was not used.
 
+## Parallel worktrees — beta.10
+
+Local Git tests cover two active workers in separate checkouts, a second registered project pointing into an active checkout, linked review/fix workspace inheritance, a detached main HEAD, changed branch and replaced directory rejection, continuation after a new commit on the same branch, and cancellation during Git preparation. A fake Claude SDK session accepts an exact native worktree path and rejects a main-checkout path before its result. No model inference is used by these tests.
+
+A separate metadata-only Claude SDK probe started `--worktree` with `baseRef:head` and `projectConfigRoot`, then waited for `initializationResult()` with empty input. The CLI created `.claude/worktrees/<name>` on a new branch at the exact local HEAD and kept it after `close()`. It sent no prompt or model turn. This proves local worktree creation and retention, not Claude worker inference. Probe script: `/tmp/agentklar-worktree-research/claude-config-root-probe.mjs`.
+
+Live QA used two bounded Codex `gpt-5.6-luna` workers in separate worktrees. Both edited the same filename to different markers in their own folders after native one-time approval in the local UI. The main checkout's uncommitted marker stayed byte for byte unchanged. Both runs completed with native session IDs; `run_handoff` used each saved worktree folder. A linked read-only Codex review used one worker's saved checkout and read its marker. Native token counts are usage reports, not billing or a cost estimate. Evidence: `/tmp/agentklar-parallel-native-qa-2/evidence.json`. These checks do not verify automatic merging or Claude/Muse model execution.
+
+Browser QA checked the new worktree selector, the linked read-only review draft, and the task detail at 320 pixels. The modal and detail had no horizontal overflow, and the browser console had no errors. Evidence: `/tmp/agentklar-parallel-native-qa-2/`.
+
+Final local checks passed: TypeScript, all 117 tests, the production build, and diff whitespace checks. The beta.10 package smoke installed only production dependencies in a temporary prefix and verified the CLI, built UI, and MCP bridge with 17 tools. These package checks used no model inference.
+
 ## Shared project setup — beta.9
 
 The instruction editor now identifies real files and their native readers. AGENTS.md is shared by Codex and Muse; the UI explains Muse's CLAUDE.md fallback and shows a preview note before creating AGENTS.md beside an existing CLAUDE.md. The skill selector identifies the shared `.agents/skills` folder and the `.claude/skills` folder. Both use the existing guarded writers and ownership records. There is no duplicate Muse file or install record. Loading rules come from [Muse configuration docs](https://dev.meta.ai/docs/muse-code/configuration) and [native skills docs](https://meta-models.github.io/muse-code-sdk/next/guides/extend/skills/).
