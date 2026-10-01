@@ -22,17 +22,18 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 - [x] Independent review
 - [x] Shared memory
 - [x] Project context
+- [x] Native model list
 
 ## In progress
 
 - [ ] Claude delegation
+- [ ] Account quotas (Codex only)
 
 ## Next
 
 - [ ] Other harness workers
 - [ ] Model recommendations
 - [ ] Quality benchmarks
-- [ ] Account quotas
 - [ ] Configs, skills, plugins
 - [ ] Config preview and rollback
 - [ ] Easy setup

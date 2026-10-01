@@ -87,3 +87,44 @@ export type Snapshot = {
   approvals: Approval[];
   harnesses: Harness[];
 };
+
+export type CatalogModel = {
+  id: string;
+  name: string;
+  description: string;
+  resolvedModel: string | null;
+  isDefault: boolean;
+  inputModalities: string[] | null;
+};
+export type QuotaWindow = {
+  usedPercent: number;
+  windowDurationMins: number | null;
+  resetsAt: number | null;
+};
+export type QuotaBucket = {
+  id: string;
+  name: string | null;
+  normalModel: string | null;
+  primary: QuotaWindow | null;
+  secondary: QuotaWindow | null;
+  spendControlReached: boolean | null;
+};
+export type AccountQuota = {
+  status: "available" | "unavailable";
+  message: string | null;
+  ordinaryUsageAllowed: boolean | null;
+  buckets: QuotaBucket[];
+};
+export type HarnessCatalog = {
+  harness: "codex" | "claude";
+  models: CatalogModel[];
+  modelsStatus: "available" | "unavailable";
+  modelsMessage: string | null;
+  modelsTruncated: boolean;
+  quota: AccountQuota;
+};
+export type CatalogSnapshot = {
+  projectId: string;
+  checkedAt: string;
+  harnesses: HarnessCatalog[];
+};

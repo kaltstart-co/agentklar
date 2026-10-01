@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import {
   Alert,
+  Autocomplete,
+  Progress,
   Badge,
   Button,
   Checkbox,
@@ -13,6 +15,8 @@ import {
 } from "@mantine/core";
 import type {
   Snapshot,
+  CatalogSnapshot,
+  QuotaWindow,
   Run,
   RunEvent,
   Role,
@@ -20,7 +24,7 @@ import type {
   ProjectContext,
 } from "../src/contracts.js";
 
-type View = "Work" | "Context" | "Team" | "Usage" | "Settings";
+type View = "Work" | "Context" | "Team" | "Models" | "Usage" | "Settings";
 const local = ["127.0.0.1", "localhost"].includes(location.hostname);
 const empty: Snapshot = {
   projects: [],
@@ -71,6 +75,14 @@ const time = (value: string) =>
 export function App() {
   const [view, setView] = useState<View>("Work");
   const [snapshot, setSnapshot] = useState(empty);
+  const [catalogs, setCatalogs] = useState<
+    Record<string, CatalogSnapshot | null>
+  >({});
+  const [catalogBusy, setCatalogBusy] = useState("");
+  const [catalogError, setCatalogError] = useState<{
+    projectId: string;
+    message: string;
+  } | null>(null);
   const [projectId, setProjectId] = useState("");
   const [runId, setRunId] = useState("");
   const [events, setEvents] = useState<RunEvent[]>([]);
@@ -102,6 +114,11 @@ export function App() {
   const run = snapshot.runs.find(
     (r) => r.id === runId && r.projectId === projectId,
   );
+  const catalog = catalogs[projectId];
+  const modelChoices = (id: string) =>
+    catalog?.harnesses
+      .find((h) => h.harness === id)
+      ?.models.map((m) => m.id) || [];
   const workers = snapshot.harnesses.filter((h) => h.workerSupported);
   const selectedRole = project?.roles.find((r) => r.id === roleId);
   const taskHarness = selectedRole?.harness || harness;
@@ -144,6 +161,67 @@ export function App() {
     setRoles(project?.roles.map((r) => ({ ...r })) || []);
     setPreference(project?.preference || "balanced");
   }, [project?.id]);
+  useEffect(() => {
+    setCatalogError(null);
+    if (!local || !projectId) return;
+    let active = true;
+    api<CatalogSnapshot | null>(`/projects/${projectId}/catalog`)
+      .then((data) => {
+        if (active)
+          setCatalogs((current) => {
+            const previous = current[projectId];
+            if (previous && (!data || previous.checkedAt > data.checkedAt))
+              return current;
+            return { ...current, [projectId]: data };
+          });
+      })
+      .catch((e) => {
+        if (active)
+          setCatalogError({ projectId, message: (e as Error).message });
+      });
+    return () => {
+      active = false;
+    };
+  }, [projectId]);
+  async function refreshCatalog() {
+    if (!local || !projectId) return;
+    setCatalogBusy(projectId);
+    setCatalogError(null);
+    try {
+      const data = await api<CatalogSnapshot>(
+        `/projects/${projectId}/catalog`,
+        {},
+      );
+      setCatalogs((current) => ({ ...current, [projectId]: data }));
+    } catch (e) {
+      setCatalogError({ projectId, message: (e as Error).message });
+    } finally {
+      setCatalogBusy((current) => (current === projectId ? "" : current));
+    }
+  }
+  const catalogHeader = (
+    <>
+      <Group justify="space-between">
+        <p className="hint">
+          {catalog
+            ? `Checked ${time(catalog.checkedAt)}`
+            : "No native list has been checked for this project."}
+        </p>
+        <Button
+          size="xs"
+          variant="light"
+          loading={catalogBusy === projectId}
+          disabled={!connected || !projectId}
+          onClick={() => void refreshCatalog()}
+        >
+          Refresh models and allowance
+        </Button>
+      </Group>
+      {catalogError?.projectId === projectId && (
+        <Alert color="red">{catalogError.message}</Alert>
+      )}
+    </>
+  );
   useEffect(() => {
     setRunId("");
     setRoleId(null);
@@ -323,23 +401,25 @@ export function App() {
           ＋ Add existing project
         </button>
         <nav aria-label="Main navigation">
-          {(["Work", "Context", "Team", "Usage", "Settings"] as View[]).map(
-            (item, i) => (
-              <button
-                key={item}
-                className={view === item ? "nav active" : "nav"}
-                aria-current={view === item ? "page" : undefined}
-                onClick={() => setView(item)}
-              >
-                <span aria-hidden="true">{["▦", "≡", "♧", "◷", "⚙"][i]}</span>
-                {item}
-                {item === "Work" &&
-                  snapshot.runs.some((r) => r.state === "running") && (
-                    <span className="nav-dot" />
-                  )}
-              </button>
-            ),
-          )}
+          {(
+            ["Work", "Context", "Team", "Models", "Usage", "Settings"] as View[]
+          ).map((item, i) => (
+            <button
+              key={item}
+              className={view === item ? "nav active" : "nav"}
+              aria-current={view === item ? "page" : undefined}
+              onClick={() => setView(item)}
+            >
+              <span aria-hidden="true">
+                {["▦", "≡", "♧", "◇", "◷", "⚙"][i]}
+              </span>
+              {item}
+              {item === "Work" &&
+                snapshot.runs.some((r) => r.state === "running") && (
+                  <span className="nav-dot" />
+                )}
+            </button>
+          ))}
         </nav>
         <div className="sidebar-bottom">
           <span
@@ -729,16 +809,15 @@ export function App() {
                             )
                           }
                         />
-                        <TextInput
+                        <Autocomplete
+                          data={modelChoices(role.harness)}
                           label="Model (optional)"
                           placeholder={`${harnessName(role.harness)} native default`}
                           value={role.model || ""}
-                          onChange={(e) =>
+                          onChange={(value) =>
                             setRoles(
                               roles.map((r) =>
-                                r.id === role.id
-                                  ? { ...r, model: e.currentTarget.value }
-                                  : r,
+                                r.id === role.id ? { ...r, model: value } : r,
                               ),
                             )
                           }
@@ -816,12 +895,69 @@ export function App() {
                   </Button>
                 </div>
               ))}
+            {view === "Models" && (
+              <section className="content-panel">
+                <h2>Native model list</h2>
+                <p className="muted">
+                  Models offered by your native harness. A listing does not
+                  verify sign-in or account access. Any prices in vendor
+                  descriptions are API prices, not your subscription bill.
+                </p>
+                {catalogHeader}
+                {catalog?.harnesses.map((entry) => (
+                  <div className="role-card" key={entry.harness}>
+                    <h3>{harnessName(entry.harness)}</h3>
+                    {entry.modelsMessage &&
+                      (entry.modelsStatus === "unavailable" ||
+                        entry.modelsTruncated) && (
+                        <p className="hint">{entry.modelsMessage}</p>
+                      )}
+                    {entry.modelsStatus === "unavailable" && (
+                      <p>Model list unavailable.</p>
+                    )}
+                    {entry.modelsTruncated && (
+                      <Alert color="orange">
+                        The native model list was shortened.
+                      </Alert>
+                    )}
+                    {entry.models.map((item) => (
+                      <div className="catalog-model" key={item.id}>
+                        <Group gap="xs">
+                          <strong>{item.name}</strong>
+                          {item.isDefault && (
+                            <Badge size="xs">Native default</Badge>
+                          )}
+                        </Group>
+                        <p className="hint">
+                          {item.id}
+                          {item.resolvedModel
+                            ? ` · Resolves to ${item.resolvedModel}`
+                            : ""}
+                          {" · "}Inputs:{" "}
+                          {item.inputModalities?.length
+                            ? item.inputModalities.join(", ")
+                            : "Unknown"}
+                        </p>
+                        {item.description && <p>{item.description}</p>}
+                      </div>
+                    ))}
+                    {entry.modelsStatus === "available" &&
+                      !entry.models.length && <p>No models were returned.</p>}
+                  </div>
+                ))}
+                <p className="hint">
+                  Choose a listed model or enter a custom model in New task or
+                  Team. Leave it blank to use the saved role model or native
+                  default.
+                </p>
+              </section>
+            )}
             {view === "Usage" && (
               <section className="content-panel">
                 <h2>Reported usage</h2>
                 <p className="muted">
-                  Usage comes from native worker events. Pricing and account
-                  quotas are not available.
+                  Token counts come from native worker events. Dollar cost is
+                  unknown.
                 </p>
                 <div className="usage-grid">
                   <div>
@@ -846,7 +982,7 @@ export function App() {
                     </strong>
                   </div>
                   <div>
-                    <span>Cost / account quota</span>
+                    <span>Dollar cost</span>
                     <strong className="unknown">Unknown</strong>
                   </div>
                 </div>
@@ -854,6 +990,60 @@ export function App() {
                   A zero total means no tokens have been reported. It does not
                   mean the work was free.
                 </p>
+                <h2>Native account allowance</h2>
+                <p className="muted">
+                  These limits apply across your native account. They are not
+                  calculated from the task tokens above.
+                </p>
+                {catalogHeader}
+                {catalog?.harnesses.map((entry) => (
+                  <div className="role-card" key={entry.harness}>
+                    <h3>{harnessName(entry.harness)}</h3>
+                    {entry.quota.message && <p>{entry.quota.message}</p>}
+                    <div>
+                      {entry.quota.ordinaryUsageAllowed === false ? (
+                        <Alert color="orange">
+                          Native included usage is blocked.
+                        </Alert>
+                      ) : entry.quota.ordinaryUsageAllowed === true ? (
+                        "Native included usage is allowed."
+                      ) : (
+                        "Included usage permission: unknown."
+                      )}
+                    </div>
+                    {entry.quota.status === "unavailable" && (
+                      <p>Account allowance unavailable.</p>
+                    )}
+                    {entry.quota.buckets.map((bucket) => (
+                      <div key={bucket.id}>
+                        <h4>{bucket.name || bucket.id}</h4>
+                        {bucket.normalModel && (
+                          <p className="hint">Model: {bucket.normalModel}</p>
+                        )}
+                        <QuotaWindowView
+                          label="Primary window"
+                          window={bucket.primary}
+                        />
+                        <QuotaWindowView
+                          label="Secondary window"
+                          window={bucket.secondary}
+                        />
+                        <p className="hint">
+                          Spend control:{" "}
+                          {bucket.spendControlReached === null
+                            ? "Unknown"
+                            : bucket.spendControlReached
+                              ? "Limit reached"
+                              : "Limit not reached"}
+                        </p>
+                      </div>
+                    ))}
+                    {entry.quota.status === "available" &&
+                      !entry.quota.buckets.length && (
+                        <p>No allowance windows were returned.</p>
+                      )}
+                  </div>
+                ))}
               </section>
             )}
             {view === "Settings" && (
@@ -1041,14 +1231,15 @@ export function App() {
                   : "Install Codex or Claude to start a worker."}
               </Alert>
             )}
-            <TextInput
+            <Autocomplete
+              data={modelChoices(taskHarness)}
               label="Model (optional)"
               placeholder={
                 selectedRole?.model ||
                 `${harnessName(taskHarness)} native default`
               }
               value={model}
-              onChange={(e) => setModel(e.currentTarget.value)}
+              onChange={setModel}
             />
             <Checkbox
               label="Use project context"
@@ -1430,5 +1621,41 @@ function RunContext({ run, connected }: { run: Run; connected: boolean }) {
           <p className="hint">No saved context was included.</p>
         ))}
     </details>
+  );
+}
+
+function QuotaWindowView({
+  label,
+  window,
+}: {
+  label: string;
+  window: QuotaWindow | null;
+}) {
+  if (!window) return <p className="hint">{label}: unknown.</p>;
+  const used = Math.min(100, Math.max(0, window.usedPercent));
+  return (
+    <div>
+      <p>
+        {label}: {window.usedPercent}% used ·{" "}
+        {Math.round((100 - used) * 10) / 10}% remaining
+      </p>
+      <Progress value={used} aria-label={`${label}: ${used}% used`} />
+      <p className="hint">
+        Duration:{" "}
+        {window.windowDurationMins === null
+          ? "Unknown"
+          : window.windowDurationMins % 1440 === 0
+            ? `${window.windowDurationMins / 1440} days`
+            : window.windowDurationMins % 60 === 0
+              ? `${window.windowDurationMins / 60} hours`
+              : `${window.windowDurationMins} minutes`}
+        {" · "}Reset:{" "}
+        {window.resetsAt === null
+          ? "Unknown"
+          : new Date(window.resetsAt * 1000).toLocaleString(undefined, {
+              timeZoneName: "short",
+            })}
+      </p>
+    </div>
   );
 }

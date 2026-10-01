@@ -14,12 +14,18 @@ test("SDK stdio wire lists and calls tools; closing MCP leaves service worker al
   mkdirSync(project);
   const home = join(dir, "home");
   const port = 24000 + Math.floor(Math.random() * 10000);
+  let catalogReads = 0;
   const service = createService(
     home,
     port,
     (cmd, r, p, cb) =>
       new NativeWorker(cmd, r, p, cb, [resolve("tests/fixtures/native.mjs")]),
     process.execPath,
+    null,
+    async (project) => {
+      catalogReads++;
+      return { projectId: project.id, checkedAt: "fixture", harnesses: [] };
+    },
   );
   const http = serve({ fetch: service.app.fetch, hostname: "127.0.0.1", port });
   const transport = new StdioClientTransport({
@@ -36,7 +42,7 @@ test("SDK stdio wire lists and calls tools; closing MCP leaves service worker al
   try {
     await client.connect(transport);
     const list = await client.listTools();
-    assert.equal(list.tools.length, 12);
+    assert.equal(list.tools.length, 13);
     assert.equal(
       list.tools.some((t) => /approve/.test(t.name)),
       false,
@@ -46,6 +52,29 @@ test("SDK stdio wire lists and calls tools; closing MCP leaves service worker al
       arguments: { name: "wire", path: project },
     });
     const p = JSON.parse((pResult.content as { text: string }[])[0].text);
+    const cached = await client.callTool({
+      name: "models_list",
+      arguments: { projectId: p.id, refresh: false },
+    });
+    assert.equal(
+      JSON.parse((cached.content as { text: string }[])[0].text),
+      null,
+    );
+    assert.equal(catalogReads, 0);
+    const models = await client.callTool({
+      name: "models_list",
+      arguments: { projectId: p.id },
+    });
+    assert.equal(
+      JSON.parse((models.content as { text: string }[])[0].text).projectId,
+      p.id,
+    );
+    assert.equal(catalogReads, 1);
+    const unknown = await client.callTool({
+      name: "models_list",
+      arguments: { projectId: "00000000-0000-4000-8000-000000000000" },
+    });
+    assert.equal(unknown.isError, true);
     const started = await client.callTool({
       name: "task_start",
       arguments: {

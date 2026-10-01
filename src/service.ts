@@ -22,6 +22,7 @@ import { Store } from "./store.ts";
 import { harnesses, executable } from "./harnesses.ts";
 import { NativeWorker, type NativeCallbacks } from "./native.ts";
 import { ClaudeWorker } from "./claude.ts";
+import { CatalogCache, readCatalog, type CatalogReader } from "./catalog.ts";
 import type { Run, Project } from "./contracts.ts";
 const role = z
   .object({
@@ -106,6 +107,7 @@ export function createService(
       : new NativeWorker(command, run, path, callbacks),
   nativeCommand: string | null = executable("codex"),
   claudeCommand: string | null = executable("claude"),
+  catalogReader: CatalogReader = readCatalog,
 ) {
   const release = ownHome(home);
   let store: Store;
@@ -116,6 +118,10 @@ export function createService(
     throw e;
   }
   const app = new Hono();
+  const catalogs = new CatalogCache(catalogReader, {
+    codex: nativeCommand,
+    claude: claudeCommand,
+  });
   const workers = new Map<
     string,
     { stop: () => void; closed?: Promise<void> }
@@ -187,6 +193,23 @@ export function createService(
     return c.redirect("/");
   });
   app.get("/api/projects", (c) => c.json(store.projects()));
+  app.get("/api/projects/:id/catalog", (c) => {
+    const id = c.req.param("id");
+    c.header("Cache-Control", "no-store");
+    return store.projects().some((p) => p.id === id)
+      ? c.json(catalogs.get(id))
+      : c.json({ error: "Project not found" }, 404);
+  });
+  app.post("/api/projects/:id/catalog", async (c) => {
+    const project = store.projects().find((p) => p.id === c.req.param("id"));
+    if (!project) return c.json({ error: "Project not found" }, 404);
+    c.header("Cache-Control", "no-store");
+    try {
+      return c.json(await catalogs.refresh(project));
+    } catch {
+      return c.json({ error: "Native catalog could not be read." }, 503);
+    }
+  });
   app.get("/api/projects/:id/context", (c) => {
     const id = c.req.param("id");
     return store.projects().some((p) => p.id === id)
@@ -514,6 +537,7 @@ export function createService(
     bearer,
     setupUrl: `http://127.0.0.1:${port}/setup?token=${setup}`,
     close: async () => {
+      await catalogs.close();
       const current = [...workers.values()];
       for (const w of current) w.stop();
       await Promise.all(current.map((w) => w.closed));

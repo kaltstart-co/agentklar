@@ -20,6 +20,12 @@ Register an existing project folder. Add roles with a harness, optional model, a
 
 Project cost preference is saved as economical, balanced, or best. This first version uses your explicit model pin or native default. It does not infer the best model from benchmarks. Role responsibility is sent with the task, and the role snapshot, worker harness, and actual native model stay in its history. Choose an installed worker harness in the local UI. A selected role chooses its harness. Changing the harness clears the model pin so a model name from another harness is not carried over.
 
+## Native models and account allowance
+
+Open **Models**, choose a project, and select **Refresh models and allowance**. AgentKlar reads the native Codex and Claude model lists. New task and Team let you choose a listed model or type a custom name. Loading the list never changes your model pin. A listed model does not prove that your account can use it or that you are signed in. Prices in native vendor descriptions describe API usage, not your subscription bill.
+
+**Usage** shows native Codex account allowance when available: used and remaining percentages, window duration, and reset time in your local time zone. These limits are shared across the native account; project task tokens do not calculate them. A native included-usage block remains visible even when a percentage window has reset. Claude account allowance is unavailable through the current SDK. Missing information stays unknown. Native reads occur only when you request a refresh; the normal task polling reads no model or quota data. Catalog snapshots are cached per project and refreshes within 30 seconds reuse that cache.
+
 ## Shared project context
 
 Open **Context** to save a project brief, decisions and lessons, and next steps. This is a shared local record that your native harnesses can read and update through MCP. Memory is saved explicitly; AgentKlar does not collect it automatically from chats or project files. The fields allow 2,000, 4,000, and 2,000 characters respectively.
@@ -57,7 +63,7 @@ Private records live in `~/.agentklar/local-v1/`: SQLite state, a private MCP be
 
 On a service restart, unfinished runs become interrupted. Native sessions are recorded, but AgentKlar does not claim to recover a live worker. A possibly surviving owned process group keeps its project blocked until it exits; the service never kills an unverified or reused process ID. Cancellation interrupts the owned turn and terminates its owned subprocess group. Keep the service running for active work.
 
-Results and event tails have character limits and explicit truncation flags. Native token counts are shown when available. Dollar cost, remaining quota, and model quality scores are unknown in this release.
+Results and event tails have character limits and explicit truncation flags. Native token counts are shown when available. Dollar cost and model quality scores remain unknown. Account allowance is shown only when the native harness provides it.
 
 ## Check the code
 
