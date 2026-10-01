@@ -6,6 +6,7 @@ import { isAbsolute, join, dirname, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { DatabaseSync } from "node:sqlite";
 import type { Project, SetupHarness, SetupEntry, SetupStatus, SetupPreview, SetupChange } from "./contracts.ts";
+import { projectRootIdentity } from "./project-root.ts";
 
 export class SetupError extends Error {
   constructor(message: string, public status: 400 | 404 | 409 | 422 | 503 = 422) { super(message); }
@@ -34,10 +35,8 @@ function canonical(value: unknown): unknown {
 function entryHash(value: unknown) { return hash(canonical(value)); }
 function projectRoot(project: Project) {
   try {
-    const st = lstatSync(project.path);
-    if (!st.isDirectory() || st.isSymbolicLink() || realpathSync(project.path) !== project.path) throw new Error();
-    return `${st.dev}:${st.ino}`;
-  } catch { throw new SetupError("Project folder is unavailable or has changed. Register its real folder again."); }
+    return projectRootIdentity(project.path);
+  } catch { throw new SetupError("Project folder is unavailable, changed, or lacks a stable creation time. Use a real folder on a supported filesystem."); }
 }
 // Native config is read only in memory. Never return, log or save it.
 function configRead(path: string): { text: string | null; fingerprint: string } {

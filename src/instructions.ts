@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
   constants, openSync, closeSync, lstatSync, fstatSync, readSync,
-  writeFileSync, fsyncSync, fchmodSync, renameSync, unlinkSync, realpathSync,
+  writeFileSync, fsyncSync, fchmodSync, renameSync, unlinkSync,
 } from "node:fs";
 import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
@@ -10,6 +10,7 @@ import type {
   Project, InstructionFileId, InstructionDocument, InstructionPreview,
   InstructionChange, InstructionSnapshot,
 } from "./contracts.ts";
+import { projectRootIdentity } from "./project-root.ts";
 
 export const instructionNames = { agents: "AGENTS.md", claude: "CLAUDE.md" } as const;
 const maxBytes = 32768;
@@ -35,10 +36,8 @@ function validText(text: string) {
 }
 function rootIdentity(project: Project) {
   try {
-    const st = lstatSync(project.path);
-    if (!st.isDirectory() || st.isSymbolicLink() || realpathSync(project.path) !== project.path) throw new Error();
-    return `${st.dev}:${st.ino}`;
-  } catch { throw new InstructionError("Project folder is unavailable or has changed. Register its real folder again."); }
+    return projectRootIdentity(project.path);
+  } catch { throw new InstructionError("Project folder is unavailable, changed, or lacks a stable creation time. Use a real folder on a supported filesystem."); }
 }
 function read(project: Project, file: InstructionFileId): ReadFile {
   rootIdentity(project);

@@ -143,13 +143,16 @@ test("probe failures stay separate and sanitized; repeated cursors, oversized fr
         [file, mode, log],
         mode === "hang" || mode === "helpers" ? 100 : 2000,
       );
-      assert.throws(() =>
-        process.kill(Number(readFileSync(log + ".pid", "utf8")), 0),
-      );
-      if (mode === "helpers")
-        assert.throws(() =>
-          process.kill(Number(readFileSync(log + ".helper", "utf8")), 0),
-        );
+      const pidText = readFileSync(log + ".pid", "utf8").trim();
+      const pid = Number(pidText);
+      assert.ok(Number.isSafeInteger(pid) && pid > 0, `${mode}: invalid child PID ${JSON.stringify(pidText)}`);
+      assert.throws(() => process.kill(pid, 0), `${mode}: child PID ${pid} is still alive`);
+      if (mode === "helpers") {
+        const helperText = readFileSync(log + ".helper", "utf8").trim();
+        const helper = Number(helperText);
+        assert.ok(Number.isSafeInteger(helper) && helper > 0, `${mode}: invalid helper PID ${JSON.stringify(helperText)}`);
+        assert.throws(() => process.kill(helper, 0), `${mode}: helper PID ${helper} is still alive`);
+      }
       assert.doesNotMatch(JSON.stringify(result), /SECRET|email@example/);
       if (mode === "models-fail") {
         assert.equal(result.modelsStatus, "unavailable");

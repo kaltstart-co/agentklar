@@ -57,6 +57,18 @@ test("instruction create, modify, durable undo and metadata-only inventory start
     assert.equal(f.service.store.context(f.p.id).revision, 0); assert.equal(f.starts, 0); assert.equal(f.service.store.runs().length, 0);
   } finally { await f.cleanup(); }
 });
+test("older saved folder identity cannot authorize instruction undo", async () => {
+  const f = await fixture();
+  try {
+    const applied = await f.apply((await f.preview("keep this text")).id);
+    const row = f.service.store.db.prepare("SELECT data FROM instruction_changes WHERE id=?").get(applied.id) as { data: string };
+    const old = JSON.parse(row.data);
+    old.root = old.root.split(":").slice(1, 3).join(":");
+    f.service.store.db.prepare("UPDATE instruction_changes SET data=? WHERE id=?").run(JSON.stringify(old), applied.id);
+    assert.equal((await f.call(`${f.base}/rollback`, "POST", { changeId: applied.id })).status, 409);
+    assert.equal(readFileSync(join(f.project, "AGENTS.md"), "utf8"), "keep this text");
+  } finally { await f.cleanup(); }
+});
 function statExists(path: string) { try { statSync(path); return true; } catch { return false; } }
 test("external text and permission changes survive preview, apply and rollback conflicts", async () => {
   const f = await fixture(); const path = join(f.project, "AGENTS.md");

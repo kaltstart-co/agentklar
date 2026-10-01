@@ -72,6 +72,8 @@ The generated bridge uses absolute paths for Node 24, the installed tsx loader a
 
 **Undo managed connection** removes only the unchanged entry that this app installed from the selected project. Native entries changed outside AgentKlar are kept. An interrupted change remains visible after restart; **Try undo unchanged entry** is available only when the saved entry still matches. Setup does not start your harness. Start or restart a native session to load or unload MCP, and keep its native trust and permission decisions. A configured entry does not prove that an active session has loaded it.
 
+The folder check now includes its creation time, so a deleted project cannot pass as the same folder if the disk reuses its file number. Older saved changes lack this check. Their undo is refused; inspect the instruction file or native MCP entry and change it through the native tool if needed. A filesystem that cannot report a stable folder creation time cannot use these guarded edits.
+
 For other MCP hosts, use their normal setup. Replace the folder below with the checkout path:
 
 ```json

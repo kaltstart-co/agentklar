@@ -178,7 +178,7 @@ export function createService(
     const mcp = matches(c.req.header("authorization"), `Bearer ${bearer}`);
     if (!ui && !mcp)
       return c.json(
-        { error: "Open the one-time setup URL printed by the local service." },
+        { error: operator ? "Run npm run service -- open to open the local UI." : "Open the one-time setup URL printed by the local service." },
         401,
       );
     if (c.req.path.includes("/setup/") && (!ui || mcp || (c.req.method !== "GET" && (!origin || !origins.has(origin)))))

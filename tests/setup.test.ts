@@ -153,6 +153,17 @@ test("preview freshness and undo protect external edits, changes to other config
     rmSync(file); const fresh=await f.preview(); rmSync(f.project,{recursive:true}); mkdirSync(f.project); assert.equal((await f.apply(fresh.id)).status,409);
   } finally { await f.cleanup(); }
 });
+test("older saved folder identity cannot authorize native setup undo", async () => {
+  const f = await fixture();
+  try {
+    const applied = await (await f.apply((await f.preview("claude")).id, "claude")).json();
+    const row = f.service.store.db.prepare("SELECT data FROM native_setup_changes WHERE id=?").get(applied.id) as { data: string };
+    const old = JSON.parse(row.data);
+    old.root = old.root.split(":").slice(1, 3).join(":");
+    f.service.store.db.prepare("UPDATE native_setup_changes SET data=? WHERE id=?").run(JSON.stringify(old), applied.id);
+    assert.equal((await f.call(`${f.base("claude")}/undo`, "POST", { changeId: applied.id })).status, 409);
+  } finally { await f.cleanup(); }
+});
 test("failed add/remove remain interrupted and recoverable without native output leakage", async () => {
   const f=await fixture();
   try {
