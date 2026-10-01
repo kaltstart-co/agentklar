@@ -31,7 +31,7 @@ test("native handoff uses fixed argv and quotes every POSIX shell value", () => 
       preference: "balanced", roles: [], createdAt: "2026-10-01T00:00:00Z" };
     const run = makeRun(project.id, { readOnly: true, model: "gpt-6-luna", nativeHome });
     const packet = runHandoff(run, project, false, cli);
-    assert.equal(packet.available, true);
+    assert.equal(packet.available, true, packet.reason || "");
     assert.deepEqual(packet.command?.argv, ["resume", "--cd", project.path, "--sandbox", "read-only",
       "--model=gpt-6-luna", run.threadId]);
     assert.deepEqual(packet.command?.env, { CODEX_HOME: nativeHome });
@@ -68,6 +68,45 @@ test("native handoff uses fixed argv and quotes every POSIX shell value", () => 
     assert.deepEqual(contextAlias.command?.argv, ["--resume", run.threadId, "--model=sonnet[1m]"]);
     assert.equal(runHandoff({ ...run, harness: "claude", nativeHomeEnv: "set" }, project, false, cli).available, false);
     assert.match(runHandoff({ ...run, harness: "claude", nativeHomeEnv: "set" }, project, false, cli).reason!, /SDK tool hook/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("Muse handoff pins its recorded XDG data home and safely quotes resume values", () => {
+  const root = mkdtempSync(join(tmpdir(), "agentklar-muse-handoff-"));
+  try {
+    const folder = join(root, "project '$(touch project-injected)'");
+    const data = join(root, "data '$(touch data-injected)'");
+    const museHome = join(data, "muse");
+    const cli = join(root, "muse '$(touch cli-injected)'");
+    const output = join(root, "output");
+    mkdirSync(folder);
+    mkdirSync(museHome, { recursive: true });
+    writeFileSync(cli, "#!/bin/sh\nprintf '%s\\n' \"$PWD\" \"$XDG_DATA_HOME\" \"$@\" > \"$TEST_OUTPUT\"\n");
+    chmodSync(cli, 0o700);
+    const project: Project = { id: randomUUID(), name: "test", path: realpathSync(folder),
+      preference: "balanced", roles: [], createdAt: "2026-10-01T00:00:00Z" };
+    const run = makeRun(project.id, { harness: "muse", nativeHome: museHome, model: "muse-spark-1.3" });
+    const packet = runHandoff(run, project, false, cli);
+    assert.equal(packet.available, true, packet.reason || "");
+    assert.deepEqual(packet.command?.argv, ["resume", run.threadId, "--workspace", project.path, "--model", "muse-spark-1.3"]);
+    assert.deepEqual(packet.command?.env, { XDG_DATA_HOME: data });
+    const shell = spawnSync("sh", ["-c", packet.command!.display], {
+      cwd: root, env: { ...process.env, TEST_OUTPUT: output }, encoding: "utf8" });
+    assert.equal(shell.status, 0, shell.stderr);
+    assert.deepEqual(readFileSync(output, "utf8").trimEnd().split("\n"), [project.path, data, ...packet.command!.argv]);
+    for (const name of ["project-injected", "data-injected", "cli-injected"])
+      assert.equal(existsSync(join(root, name)), false);
+    for (const [patch, reason] of [
+      [{ readOnly: true }, /read-only/],
+      [{ nativeHome: join(data, "other") }, /directory layout/],
+      [{ nativeHome: join(root, "missing", "muse") }, /data home is missing/],
+      [{ nativeHome: "/tmp/unsafe\n/muse" }, /session home/],
+      [{ model: "--unsafe" }, /model name/],
+    ] as const) {
+      const rejected = runHandoff({ ...run, ...patch }, project, false, cli);
+      assert.equal(rejected.available, false);
+      assert.match(rejected.reason!, reason);
+    }
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

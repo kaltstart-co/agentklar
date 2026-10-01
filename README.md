@@ -1,6 +1,6 @@
 # AgentKlar
 
-Keep your native coding harness. AgentKlar gives registered projects a shared local work record, saved project context, team roles, and durable worker runs. Start from Codex, Claude Code, Gemini CLI, Cursor, or OpenCode and connect its MCP client to AgentKlar. Codex and Claude Code have worker adapters. Muse has native model discovery. Other installed CLIs are listed with their current support; worker adapters are planned.
+Keep your native coding harness. AgentKlar gives registered projects a shared local work record, saved project context, team roles, and durable worker runs. Start from Codex, Claude Code, Gemini CLI, Cursor, or OpenCode and connect its MCP client to AgentKlar. Codex, Claude Code and Muse have worker adapters. Muse MCP host setup is unavailable. Other installed CLIs are listed with their current support; worker adapters are planned.
 
 This is a fresh TypeScript rewrite. The old Go application is preserved in Git at `archive/pre-rewrite-2026-10-01`. Old databases and configuration are never imported. A run marked **completed** means the worker finished. Review the changes in your normal editor and harness.
 
@@ -9,7 +9,7 @@ This is a fresh TypeScript rewrite. The old Go application is preserved in Git a
 Requires Node 24 and npm on macOS or Linux. Install this pinned GitHub beta package, then start the local service:
 
 ```sh
-npm install -g https://github.com/kaltstart-co/agentklar/releases/download/v0.1.0-beta.5/agentklar-0.1.0-beta.5.tgz
+npm install -g https://github.com/kaltstart-co/agentklar/releases/download/v0.1.0-beta.6/agentklar-0.1.0-beta.6.tgz
 agentklar start
 ```
 
@@ -52,7 +52,7 @@ Project cost preference is saved as economical, balanced, or best. Optional mode
 
 ## Native models and account allowance
 
-Open **Models**, choose a project, and select **Refresh models and allowance**. AgentKlar reads the native Codex, Claude, and Muse model lists. Muse is discovery only; it cannot receive delegated work yet. New task and Team offer models for supported workers. Loading the list never changes your model pin. A listed model does not prove that your account can use it or that you are signed in. Prices in native vendor descriptions describe API usage, not your subscription bill.
+Open **Models**, choose a project, and select **Refresh models and allowance**. AgentKlar reads the native Codex, Claude, and Muse model lists. New task and Team offer models for supported workers. Muse's native model descriptions can include data-use terms; review them before choosing a model. Loading the list never changes your model pin. A listed model does not prove that your account can use it or that you are signed in. Prices in native vendor descriptions describe API usage, not your subscription bill.
 
 **Usage** shows native Codex account allowance when available: used and remaining percentages, window duration, and reset time in your local time zone. These limits are shared across the native account; project task tokens do not calculate them. A native included-usage block remains visible even when a percentage window has reset. Claude account allowance is unavailable through the current SDK. Muse account allowance is not read by this adapter. Missing information stays unknown. Native reads occur when you request a refresh or model advice; the normal task polling reads no model or quota data. Catalog snapshots are cached per project and refreshes within 30 seconds reuse that cache.
 
@@ -68,11 +68,15 @@ In **New task**, **Choose model automatically** is on by default. Select task co
 
 Your native harness can classify the task with its existing model and call `task_start` with `routing:{complexity,requiresImages,taskType}`. This chooses and starts a worker in one call. `recommend_worker` remains an optional preview. The router itself uses no LLM. Choices use reviewed family profiles and native model lists. Fresh LiveBench reference scores can break ties within the same policy and known-allowance group when every candidate has comparable evidence. Subscription cost and savings remain unknown. Unknown account allowance stays unknown. Model image support does not imply browser or tool access. Claude image support is unknown through the current SDK.
 
+Muse can be selected directly or through a saved Muse role. Automatic advice keeps Muse out of unpinned choices because no reviewed Muse cost or quality tier is available. A specific Muse model pin can receive advice with unknown tier and allowance. A manual Muse task with no model pin uses the native default.
+
 Each routed run keeps a small record of the selected model, task needs and policy reasons. The task detail shows the requested model and the model reported by the native harness separately. A worker failure does not trigger another model automatically. The task detail also shows any selected benchmark reference and whether it broke a tie.
 
 ## Linked review and fix
 
 Open a completed work task and select **Review work**. The draft starts a read-only review of that task. Open a completed review and select **Fix findings** to draft a worker task that can change files. After the fix completes, select **Review work** again. Choose the role, harness, model and task needs for each step before starting it. The task detail links all runs in the chain. Each step starts only when you select **Start worker** or call `task_start` through MCP.
+
+Muse cannot enforce read-only work through its worker interface. Use Codex or Claude Code for a linked review. Muse can run a linked fix when workspace changes are allowed.
 
 The new worker receives the original work prompt and the immediately preceding result, each capped at 8,000 characters. This data is frozen when the linked run starts and marked as untrusted task data. It does not resume the earlier native session or grant permissions. A completed review, including one that says `NO_FINDINGS`, means only that the worker finished; it is not a human acceptance decision.
 
@@ -127,13 +131,13 @@ Start the local service before the MCP connection. The stdio bridge talks to the
 
 ## Native permissions and data
 
-Codex workers use `codex app-server` with your existing authentication and settings. AgentKlar leaves native approval and sandbox settings in place. Selecting read only adds Codex’s read-only filesystem restriction. Claude Code workers reuse the [official Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk/overview) and the installed native CLI with its own authentication and settings. Claude read only permits only the model tools Read, Glob, and Grep; user-configured hooks may still run. It does not add an operating system sandbox. Supported concrete native approvals appear in the authenticated local UI. Allow once, decline, or cancel there. Broader permission changes and unsupported native input requests need attention; stop that run and continue in your native harness.
+Codex workers use `codex app-server` with your existing authentication and settings. AgentKlar leaves native approval and sandbox settings in place. Selecting read only adds Codex’s read-only filesystem restriction. Claude Code workers reuse the [official Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk/overview) and the installed native CLI with its own authentication and settings. Claude read only permits only the model tools Read, Glob, and Grep; user-configured hooks may still run. It does not add an operating system sandbox. Muse workers use the native Muse SDK and installed CLI; native sign-in and permissions still apply. Muse read-only starts are rejected. Supported concrete native approvals appear in the authenticated local UI. Allow once, decline, or cancel there. Broader permission changes and unsupported native input requests need attention; stop that run and continue in your native harness.
 
 Private records live in `~/.agentklar/local-v1/`: SQLite state, a private MCP bearer token, and a separate SQLite service ownership lock. `AGENTKLAR_HOME` can choose a different isolated folder. `AGENTKLAR_PORT` changes the loopback port. Browser writes require an exact allowed local Origin and session cookie. The server binds only to `127.0.0.1`. A hosted static preview has no local connection and shows no invented work.
 
 On a service restart, unfinished runs become interrupted. Native sessions are recorded, but AgentKlar does not claim to recover a live worker. A possibly surviving owned process group keeps its project blocked until it exits; the service never kills an unverified or reused process ID. Cancellation interrupts the owned turn and terminates its owned subprocess group. Keep the service running for active work.
 
-For a finished run, open **Continue in native harness** in its task detail, or call `run_handoff({runId})` through MCP. AgentKlar shows a POSIX terminal command only when it has the saved native session UUID, session home, project folder, and installed CLI, with no active worker in that project. The command keeps the saved model when known and Codex read-only sandbox when selected. For Claude, it also keeps whether `CLAUDE_CONFIG_DIR` was set or unset when the worker started; setting that variable changes where Claude reads its config. Claude read-only runs have no ready command because their SDK tool restriction cannot be carried into native CLI resume. Older runs without saved session scope have no ready command. The command is a snapshot; AgentKlar does not launch or monitor the manual session. Close native work before starting another worker in the same project.
+For a finished run, open **Continue in native harness** in its task detail, or call `run_handoff({runId})` through MCP. AgentKlar shows a POSIX terminal command only when it has the saved native session UUID, session home, project folder, and installed CLI, with no active worker in that project. The command keeps the saved model when known and Codex read-only sandbox when selected. For Claude, it also keeps whether `CLAUDE_CONFIG_DIR` was set or unset when the worker started; setting that variable changes where Claude reads its config. For Muse, it pins `XDG_DATA_HOME` to the parent of the native data home recorded by Muse before resuming. Claude read-only runs have no ready command because their SDK tool restriction cannot be carried into native CLI resume. Older runs without saved session scope have no ready command. The command is a snapshot; AgentKlar does not launch or monitor the manual session. Close native work before starting another worker in the same project.
 
 Results and event tails have character limits and explicit truncation flags. Native token counts are shown when available. Dollar cost and native task quality remain unknown. Account allowance is shown only when the native harness provides it.
 

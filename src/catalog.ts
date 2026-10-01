@@ -297,7 +297,7 @@ async function readJsonRpcCatalog(
         }
         result.modelsTruncated ||= response.models.length > 100;
         result.modelsStatus = "available";
-        result.modelsMessage = `Muse native model list${result.modelsTruncated ? " was shortened or omitted incompatible routes" : ""}. Listing does not verify sign-in or model access. Muse worker execution is unavailable.`;
+        result.modelsMessage = `Muse native model list${result.modelsTruncated ? " was shortened or omitted incompatible routes" : ""}. Listing does not verify sign-in or model access.`;
         return;
       }
       let cursor: string | null = null;

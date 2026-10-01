@@ -29,6 +29,7 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 - [x] Project context
 - [x] Native model list
 - [x] Muse model discovery
+- [x] Muse delegation (native worker write and completion verified)
 - [x] Model advice
 - [x] Quality benchmarks (LiveBench reference)
 - [x] Automatic model choice
@@ -43,7 +44,7 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 
 ## Next
 
-- [ ] Other harness workers
+- [ ] Gemini, Cursor and OpenCode workers
 - [ ] Global skills
 - [ ] Plugin bundles
 - [ ] Wider config preview and rollback

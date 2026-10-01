@@ -22,7 +22,7 @@ function snapshot(project: Project, options: { blocked?: boolean; images?: boole
     }],
   };
 }
-function fixture(reader: (project: Project) => Promise<CatalogSnapshot>, operator = false, claude = false) {
+function fixture(reader: (project: Project) => Promise<CatalogSnapshot>, operator = false, claude = false, muse = false) {
   const dir = mkdtempSync(join(tmpdir(), "agentklar-routing-"));
   const home = join(dir, "home");
   const projectPath = join(dir, "project");
@@ -33,7 +33,8 @@ function fixture(reader: (project: Project) => Promise<CatalogSnapshot>, operato
     return { stop: () => {}, closed: Promise.resolve() };
   };
   const make = () => createService(home, 4317, factory, process.execPath, claude ? process.execPath : null,
-    async (project) => reader(project), {}, operator ? { id: "service", key: "secret" } : undefined);
+    async (project) => reader(project), {}, operator ? { id: "service", key: "secret" } : undefined,
+    {}, {}, muse ? process.execPath : null);
   let service = make();
   const call = (path: string, body?: unknown, headers?: Record<string, string>) => service.app.request(
     `http://127.0.0.1:4317${path}`, {
@@ -145,7 +146,7 @@ test("unpinned routing can select another installed harness, while a blocked Cod
   } finally { await t.cleanup(); }
 });
 
-test("Muse catalog rows do not become worker choices and a Muse role pin is rejected", async () => {
+test("Muse stays out of unpinned advice but explicit Muse pins launch the worker", async () => {
   const t = fixture(async (project) => ({
     ...snapshot(project),
     harnesses: [
@@ -157,7 +158,7 @@ test("Muse catalog rows do not become worker choices and a Muse role pin is reje
         quota: { status: "unavailable", message: null, ordinaryUsageAllowed: null, buckets: [] },
       },
     ],
-  }));
+  }), false, false, true);
   try {
     const p = await t.register();
     const advice = await t.call(`/api/projects/${p.id}/recommend`, { complexity: "standard" });
@@ -170,10 +171,38 @@ test("Muse catalog rows do not become worker choices and a Muse role pin is reje
       body: JSON.stringify({ roles: [{ id: "muse-role", name: "Muse role", harness: "muse", model: "muse-spark-1.3", responsibility: "Research" }] }),
     });
     assert.equal(update.status, 200);
-    const pinned = await t.call("/api/tasks/start", { projectId: p.id, prompt: "Work", idempotencyKey: "muse-pin", roleId: "muse-role", routing: {} });
-    assert.equal(pinned.status, 400);
-    assert.match((await pinned.json()).error, /no worker adapter/i);
-    assert.equal(t.launched.length, 0);
+    const input = { projectId: p.id, prompt: "Work", idempotencyKey: "muse-pin", roleId: "muse-role", routing: {} };
+    const pinned = await t.call("/api/tasks/start", input);
+    assert.equal(pinned.status, 202);
+    const run = await pinned.json() as Run;
+    assert.equal(run.harness, "muse");
+    assert.equal(run.model, "muse-spark-1.3");
+    assert.equal(run.routing?.selected.tier, "unknown");
+    assert.equal((await (await t.call("/api/tasks/start", input)).json()).id, run.id);
+    assert.equal(t.launched.length, 1);
+    await t.restart();
+    const saved = t.service.store.run(run.id)!;
+    t.service.store.saveRun({ ...saved, state: "completed", result: "done" });
+    assert.equal((await t.call("/api/tasks/start", { ...input, harness: "codex", idempotencyKey: "mismatch" })).status, 400);
+    assert.equal((await t.call("/api/tasks/start", { ...input, harness: "gemini", idempotencyKey: "unknown" })).status, 400);
+    assert.equal((await t.call("/api/tasks/start", { ...input, readOnly: true, idempotencyKey: "read-only" })).status, 400);
+    const review = await t.call("/api/tasks/start", { ...input, readOnly: true, followUp: { runId: run.id, kind: "review" }, idempotencyKey: "review" });
+    assert.equal(review.status, 400);
+    assert.match((await review.json()).error, /cannot enforce read-only/);
+    const manual = await t.call("/api/tasks/start", { projectId: p.id, prompt: "Manual Muse", idempotencyKey: "manual", harness: "muse" });
+    assert.equal(manual.status, 202);
+    assert.equal((await manual.json()).harness, "muse");
+  } finally { await t.cleanup(); }
+});
+
+test("Muse launch with a missing CLI keeps the task out of the run store", async () => {
+  const t = fixture(async (p) => snapshot(p));
+  try {
+    const p = await t.register();
+    const response = await t.call("/api/tasks/start", { projectId: p.id, prompt: "Muse", harness: "muse", idempotencyKey: "missing" });
+    assert.equal(response.status, 409);
+    assert.match((await response.json()).error, /Install Muse/);
+    assert.equal(t.service.store.runs().length, 0);
   } finally { await t.cleanup(); }
 });
 

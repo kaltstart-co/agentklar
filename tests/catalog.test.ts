@@ -118,7 +118,7 @@ test("Muse probe reads only the native model list and removes incompatible route
     assert.deepEqual(result.models.map((m) => m.id), ["muse-spark-1.3", "muse-spark-1.3-contributor"]);
     assert.equal(result.models[1].isDefault, true);
     assert.equal(result.modelsTruncated, true);
-    assert.match(result.modelsMessage!, /native model list.*worker execution is unavailable/i);
+    assert.match(result.modelsMessage!, /native model list.*does not verify sign-in or model access/i);
     assert.equal(result.quota.status, "unavailable");
     assert.equal(result.quota.ordinaryUsageAllowed, null);
     const calls = readFileSync(log, "utf8").trim().split("\n").map((line) => JSON.parse(line));

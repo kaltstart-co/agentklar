@@ -38,13 +38,13 @@ export type FollowUpContext = {
   sourceResult: string;
   sourceResultTruncated: boolean;
   sourceRunId: string;
-  sourceHarness: "codex" | "claude";
+  sourceHarness: "codex" | "claude" | "muse";
   sourceModel: string | null;
   sourceState: "completed";
 };
 export type Run = {
   id: string;
-  harness?: "codex" | "claude";
+  harness?: "codex" | "claude" | "muse";
   projectId: string;
   roleId?: string;
   prompt: string;
@@ -84,7 +84,7 @@ export type RunHandoff = {
   runId: string;
   available: boolean;
   reason: string | null;
-  harness: "codex" | "claude" | null;
+  harness: "codex" | "claude" | "muse" | null;
   nativeSessionId: string | null;
   command: null | {
     executable: string;
@@ -166,7 +166,7 @@ export type CatalogSnapshot = {
 export type TaskComplexity = "routine" | "standard" | "hard";
 export type WorkerChoice = {
   benchmark?: BenchmarkEvidence;
-  harness: "codex" | "claude";
+  harness: "codex" | "claude" | "muse";
   model: string;
   roleId?: string;
   basis: "task-pin" | "role-pin" | "policy";

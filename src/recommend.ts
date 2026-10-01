@@ -12,7 +12,7 @@ import type {
 export const recommendationSchema = z
   .object({
     roleId: z.string().min(1).max(80).optional(),
-    harness: z.enum(["codex", "claude"]).optional(),
+    harness: z.enum(["codex", "claude", "muse"]).optional(),
     model: z.string().min(1).max(120).optional(),
     complexity: z.enum(["routine", "standard", "hard"]).default("standard"),
     taskType: z.enum(["coding", "reasoning", "data-analysis", "language"]).default("coding"),
@@ -32,7 +32,7 @@ type Candidate = {
 };
 
 // Reviewed product policy order, not measured coding quality or price.
-const profiles: Record<Harness, Record<Exclude<Tier, "unknown">, string[]>> = {
+const profiles: Record<Exclude<Harness, "muse">, Record<Exclude<Tier, "unknown">, string[]>> = {
   codex: {
     efficient: ["gpt-6-luna", "gpt-5.6-luna"],
     balanced: ["gpt-6.1-sol", "gpt-6-sol", "gpt-5.6-sol", "gpt-5.6-terra"],
@@ -67,6 +67,7 @@ function profile(
   model: CatalogModel | undefined,
   pin?: string,
 ) {
+  if (harness === "muse") return { tier: "unknown" as const, order: 999 };
   const id =
     harness === "claude"
       ? model?.resolvedModel || model?.id || pin
@@ -133,7 +134,7 @@ export function recommendWorker(
   project: Project,
   input: RecommendationInput,
   snapshot: CatalogSnapshot,
-  installed: Record<Harness, boolean>,
+  installed: Record<"codex" | "claude", boolean> & Partial<Record<"muse", boolean>>,
   now = Date.now(),
   benchmarks?: BenchmarkSnapshot,
 ): WorkerAdvice {
@@ -143,7 +144,7 @@ export function recommendWorker(
   if (input.roleId && !role) throw new Error("Role not found");
   if (role && input.harness && input.harness !== role.harness)
     throw new Error("Task harness must match the selected role harness.");
-  if (role && role.harness !== "codex" && role.harness !== "claude")
+  if (role && role.harness !== "codex" && role.harness !== "claude" && role.harness !== "muse")
     throw new Error("This role harness has no worker adapter yet.");
   const harness =
     (role?.harness as Harness | undefined) ||
@@ -249,6 +250,8 @@ export function recommendWorker(
       warnings.push(
         "Pinned model has no reviewed tier; capability, billing and access are unknown.",
       );
+    if (catalog.harness === "muse" && /contributor/i.test(id))
+      warnings.push("Review the native model description for contributor data-use terms before starting work.");
     const wanted = target(project, input, q.headroom);
     if (pinned)
       reasons.unshift(
@@ -278,13 +281,15 @@ export function recommendWorker(
     };
     candidates.push({
       choice,
-      distance: Math.abs(tierIndex - targetIndex),
+      distance: p.tier === "unknown" ? 99 : Math.abs(tierIndex - targetIndex),
       allowed: q.allowed,
       order: p.order,
       benchmarkModel: catalog.harness === "claude" ? model?.resolvedModel || id : id,
     });
   };
   const allowedHarnesses: Harness[] = harness ? [harness] : ["codex", "claude"];
+  if (harness === "muse" && !pin)
+    advice.reasons.push("Choose a specific Muse model to get pin advice, or start Muse manually with its native default. Muse has no reviewed cost or quality tier.");
   for (const h of allowedHarnesses) {
     if (!installed[h]) {
       const message = `${h} worker is not installed or available.`;
@@ -334,7 +339,7 @@ export function recommendWorker(
       let end = start + 1;
       while (end < candidates.length && candidates[end].distance === candidates[start].distance && candidates[end].allowed === candidates[start].allowed) end++;
       const group = candidates.slice(start, end);
-      const evidence = group.map(c => evidenceForModel(benchmarks, c.choice.harness, c.benchmarkModel, input.taskType));
+      const evidence = group.map(c => c.choice.harness === "muse" ? undefined : evidenceForModel(benchmarks, c.choice.harness, c.benchmarkModel, input.taskType));
       if (group.length > 1 && evidence.every(e => e !== undefined)) {
         group.forEach((c, i) => { c.choice.benchmark = evidence[i]; });
         group.sort((a, b) => b.choice.benchmark!.score - a.choice.benchmark!.score);
@@ -353,7 +358,7 @@ export function recommendWorker(
     advice.reasons.push("Policy order is used: no comparable tie needs ranking, or the group lacks fresh, exact LiveBench scores for every candidate.");
   }
   // Report exact references even when they did not affect policy ordering or a pin.
-  if (benchmarks) unique.forEach(c => { c.choice.benchmark ??= evidenceForModel(benchmarks, c.choice.harness, c.benchmarkModel, input.taskType); });
+  if (benchmarks) unique.forEach(c => { if (c.choice.harness !== "muse") c.choice.benchmark ??= evidenceForModel(benchmarks, c.choice.harness, c.benchmarkModel, input.taskType); });
   if (advice.choice?.benchmark) {
     advice.warnings = [benchmarkNotice, ...advice.warnings.filter(w => w !== benchmarkNotice)].slice(0, 8);
     advice.sources.push(advice.choice.benchmark.sourceUrl);

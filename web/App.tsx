@@ -145,6 +145,23 @@ export function App() {
   const selectedRole = taskProject?.roles.find((r) => r.id === roleId);
   const taskHarness = selectedRole?.harness || harness;
   const taskWorker = workers.find((h) => h.id === taskHarness);
+  const museModels = catalogs[draftProjectId]?.harnesses.find((entry) => entry.harness === "muse")?.models || [];
+  const museModel = taskHarness === "muse" ? museModels.find((item) => item.id === (model.trim() || selectedRole?.model)) ||
+    (!model.trim() && !selectedRole?.model ? museModels.find((item) => item.isDefault) : undefined) : undefined;
+  useEffect(() => {
+    if (taskHarness === "muse") setAutomaticRouting(false);
+  }, [taskHarness]);
+  useEffect(() => {
+    if (!taskModal || taskHarness !== "muse" || !connected || !draftProjectId ||
+        catalogs[draftProjectId]?.harnesses.some((entry) => entry.harness === "muse")) return;
+    let active = true;
+    setCatalogBusy(draftProjectId);
+    void api<CatalogSnapshot>(`/projects/${draftProjectId}/catalog`, {})
+      .then((data) => { if (active) setCatalogs((current) => ({ ...current, [draftProjectId]: data })); })
+      .catch((e) => { if (active) setCatalogError({ projectId: draftProjectId, message: (e as Error).message }); })
+      .finally(() => { if (active) setCatalogBusy((current) => current === draftProjectId ? "" : current); });
+    return () => { active = false; };
+  }, [taskModal, taskHarness, connected, draftProjectId]);
   const adviceKey = JSON.stringify([
     draftProjectId, roleId, taskHarness, model, selectedRole?.model,
     taskProject?.preference, complexity, requiresImages, taskType, taskModal, connected,
@@ -431,7 +448,7 @@ export function App() {
           : "This hosted page is a setup guide. Run the local app to see projects, workers and permission requests."}
       </p>
       <p className="hint">Requires Node 24 on macOS or Linux. Install the pinned beta package:</p>
-      <pre>npm install -g https://github.com/kaltstart-co/agentklar/releases/download/v0.1.0-beta.5/agentklar-0.1.0-beta.5.tgz{"\n"}agentklar start</pre>
+      <pre>npm install -g https://github.com/kaltstart-co/agentklar/releases/download/v0.1.0-beta.6/agentklar-0.1.0-beta.6.tgz{"\n"}agentklar start</pre>
       <p>
         Open the setup link from the terminal, then use{" "}
         <code>http://127.0.0.1:4317</code>.
@@ -882,7 +899,7 @@ export function App() {
                   <h2>Roles for {project.name}</h2>
                   <p className="muted">
                     Save who should do what. Your MCP host can choose a role.
-                    Installed Codex and Claude harnesses can run workers.
+                    Installed Codex, Claude Code and Muse harnesses can run workers.
                   </p>
                   <Select
                     label="Cost preference"
@@ -1089,9 +1106,8 @@ export function App() {
                   </div>
                 ))}
                 <p className="hint">
-                  For Codex and Claude Code workers, choose a listed model or
-                  enter a custom model in New task or Team. Muse models are for
-                  discovery only. Leave the worker model blank to use the saved
+                  Choose a listed model or enter a custom model in New task or Team.
+                  Muse model descriptions include native data-use terms. Leave the worker model blank to use the saved
                   role model or native default.
                 </p>
               </section>
@@ -1359,7 +1375,7 @@ export function App() {
               <Alert color="orange">
                 {selectedRole
                   ? "This role does not have an installed, supported worker harness. Choose another role or change it in Team."
-                  : "Install Codex or Claude to start a worker."}
+                  : "Install Codex, Claude Code or Muse to start a worker."}
               </Alert>
             )}
             <Autocomplete
@@ -1377,6 +1393,13 @@ export function App() {
             {selectedRole?.model && !model.trim() && (
               <p className="hint">This role pins {selectedRole.model}. Type a task model to override it.</p>
             )}
+            {taskHarness === "muse" && museModel?.description && (
+              <Alert color="blue" title={`${museModel.name}${museModel.isDefault && !model.trim() && !selectedRole?.model ? " · Native default" : ""}`}>
+                {museModel.description}
+              </Alert>
+            )}
+            {taskHarness === "muse" && catalogBusy === draftProjectId && <p className="hint">Loading Muse model descriptions…</p>}
+            {taskHarness === "muse" && catalogError?.projectId === draftProjectId && <Alert color="orange">Muse model descriptions are unavailable: {catalogError.message}</Alert>}
             <Checkbox
               label="Choose model automatically"
               checked={automaticRouting}
@@ -1509,7 +1532,8 @@ export function App() {
               disabled={!!followUp}
               onChange={(e) => setReadOnly(e.currentTarget.checked)}
             />
-            {readOnly && (
+            {taskHarness === "muse" && <p className="hint">Muse cannot enforce read-only work. Turn off Read only for a regular task, or choose Codex or Claude Code for a review.</p>}
+            {readOnly && taskHarness !== "muse" && (
               <p className="hint">
                 {taskHarness === "claude"
                   ? "Claude can use only Read, Glob and Grep tools. Your configured hooks can still run. This does not add an operating system sandbox."
@@ -1520,7 +1544,7 @@ export function App() {
               Runs a native {harnessName(taskHarness)} worker in {taskProject?.name}
               . Native permission requests appear in the task detail.
             </p>
-            <Button type="submit" loading={busy} disabled={!taskWorker || !taskProject}>
+            <Button type="submit" loading={busy} disabled={!taskWorker || !taskProject || (taskHarness === "muse" && readOnly)}>
               Start worker
             </Button>
           </Stack>

@@ -1,6 +1,6 @@
 import { accessSync, constants, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { isAbsolute, join } from "node:path";
+import { basename, dirname, isAbsolute, join } from "node:path";
 import type { Project, Run, RunHandoff } from "./contracts.ts";
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -8,7 +8,7 @@ const safePath = (value: string) => isAbsolute(value) && value.length <= 4096 &&
 const quote = (value: string) => `'${value.replaceAll("'", "'\"'\"'")}'`;
 
 export function runHandoff(run: Run, project: Project | undefined, busy: boolean, cli: string | null): RunHandoff {
-  const harness = run.harness === "codex" || run.harness === "claude" ? run.harness : null;
+  const harness = run.harness === "codex" || run.harness === "claude" || run.harness === "muse" ? run.harness : null;
   const packet: RunHandoff = { runId: run.id, available: false, reason: null, harness,
     nativeSessionId: typeof run.threadId === "string" && uuid.test(run.threadId) ? run.threadId : null,
     command: null, notes: [] };
@@ -34,6 +34,27 @@ export function runHandoff(run: Run, project: Project | undefined, busy: boolean
   } catch { return unavailable("The native CLI is not installed or executable."); }
   if (!run.nativeHome || !safePath(run.nativeHome))
     return unavailable("The native session home was not recorded as a safe absolute path for this run.");
+  if (harness === "muse") {
+    if (run.readOnly) return unavailable("Muse cannot enforce read-only work in a native continuation.");
+    if (basename(run.nativeHome) !== "muse")
+      return unavailable("The recorded Muse data home does not match its native directory layout.");
+    try {
+      if (!statSync(run.nativeHome).isDirectory())
+        return unavailable("The recorded Muse data home is no longer a directory.");
+    } catch { return unavailable("The recorded Muse data home is missing."); }
+    const model = run.effectiveModel || run.model;
+    if (model && !/^[a-zA-Z0-9][a-zA-Z0-9._:/\[\]-]{0,119}$/.test(model))
+      return unavailable("The saved model name is not safe for a native command.");
+    // Muse 1.4.1 derives museHome from XDG_DATA_HOME; pin the same parent for resume.
+    const env = { XDG_DATA_HOME: dirname(run.nativeHome) };
+    const argv = ["resume", packet.nativeSessionId, "--workspace", project.path, ...(model ? ["--model", model] : [])];
+    const display = `cd ${quote(project.path)} && XDG_DATA_HOME=${quote(env.XDG_DATA_HOME)} ${[cli, ...argv].map(quote).join(" ")}`;
+    const ready: RunHandoff = { ...packet, available: true, reason: null,
+      command: { executable: cli, argv, cwd: project.path, env, envUnset: [], shell: "posix", display },
+      notes: ["Muse will check whether the saved session and model can be opened. Permission choices remain with the native CLI.",
+        "This is a snapshot. AgentKlar does not monitor or take ownership of the manual native session. Close native work before starting another worker in this project."] };
+    return JSON.stringify(ready).length <= 20000 ? ready : unavailable("The native command is too long to copy safely.");
+  }
   if (harness === "claude") {
     if (run.nativeHomeEnv !== "set" && run.nativeHomeEnv !== "unset")
       return unavailable("The Claude config environment scope was not recorded for this run.");
