@@ -30,6 +30,7 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 - [x] Native model list
 - [x] Muse model discovery
 - [x] Muse delegation (native worker write and completion verified)
+- [x] Muse subscription usage snapshots (fixture values; live numeric reading unverified)
 - [x] Model advice
 - [x] Quality benchmarks (LiveBench reference)
 - [x] Automatic model choice
@@ -40,7 +41,7 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 ## In progress
 
 - [ ] Claude delegation
-- [ ] Account quotas (Codex only)
+- [ ] Complete account quotas (Codex initial coverage; Muse snapshots; Claude unavailable)
 
 ## Next
 

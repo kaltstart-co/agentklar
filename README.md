@@ -9,7 +9,7 @@ This is a fresh TypeScript rewrite. The old Go application is preserved in Git a
 Requires Node 24 and npm on macOS or Linux. Install this pinned GitHub beta package, then start the local service:
 
 ```sh
-npm install -g https://github.com/kaltstart-co/agentklar/releases/download/v0.1.0-beta.6/agentklar-0.1.0-beta.6.tgz
+npm install -g https://github.com/kaltstart-co/agentklar/releases/download/v0.1.0-beta.7/agentklar-0.1.0-beta.7.tgz
 agentklar start
 ```
 
@@ -54,7 +54,7 @@ Project cost preference is saved as economical, balanced, or best. Optional mode
 
 Open **Models**, choose a project, and select **Refresh models and allowance**. AgentKlar reads the native Codex, Claude, and Muse model lists. New task and Team offer models for supported workers. Muse's native model descriptions can include data-use terms; review them before choosing a model. Loading the list never changes your model pin. A listed model does not prove that your account can use it or that you are signed in. Prices in native vendor descriptions describe API usage, not your subscription bill.
 
-**Usage** shows native Codex account allowance when available: used and remaining percentages, window duration, and reset time in your local time zone. These limits are shared across the native account; project task tokens do not calculate them. A native included-usage block remains visible even when a percentage window has reset. Claude account allowance is unavailable through the current SDK. Muse account allowance is not read by this adapter. Missing information stays unknown. Native reads occur when you request a refresh or model advice; the normal task polling reads no model or quota data. Catalog snapshots are cached per project and refreshes within 30 seconds reuse that cache.
+**Usage** shows native Codex account allowance when available: used and remaining percentages, window duration, and reset time in your local time zone. These limits are shared across the native account; project task tokens do not calculate them. A native included-usage block remains visible even when a percentage window has reset. Claude account allowance is unavailable through the current SDK. Muse workers make one short account usage read on their owned connection after a turn ends. When Muse has observed usage, task detail and Usage show the last recorded window and weekly percentages with their observation and reset times. The snapshot may include work outside AgentKlar; it is not a live balance, model-specific limit, or dollar cost. Missing information stays unknown. Normal task polling makes no model or quota requests. Catalog snapshots are cached per project and refreshes within 30 seconds reuse that cache.
 
 ## Benchmark references
 

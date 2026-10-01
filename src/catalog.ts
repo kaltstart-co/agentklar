@@ -16,7 +16,7 @@ const quotaFailure =
 const claudeQuota =
   "Claude Code does not expose account quota through this supported native SDK read.";
 const museQuota =
-  "Muse account allowance is not read by this adapter. Remaining usage is unknown.";
+  "Model refresh does not read Muse account usage. A completed Muse task may show an observed account snapshot.";
 const record = (v: unknown): Record<string, unknown> | null =>
   v !== null && typeof v === "object" && !Array.isArray(v)
     ? (v as Record<string, unknown>)

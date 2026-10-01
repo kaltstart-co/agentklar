@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { EXPECTED_SCHEMA_FINGERPRINT } from "@muse-code/sdk";
 import { MuseWorker } from "../src/muse.ts";
@@ -32,6 +32,9 @@ function fixture(readOnly = false) {
   let closed = 0;
   let connected = 0;
   let done = 0;
+  let usageResult: unknown = {};
+  let usageError = false;
+  let usageHung = false;
   const turnId = randomUUID();
   const sessionId = randomUUID();
   const session = {
@@ -62,11 +65,19 @@ function fixture(readOnly = false) {
   const connect = async () => {
     connected++;
     return { client: { startSession: async () => session } as any,
-      close: async () => { closed++; }, home: "/tmp/muse-home" };
+      close: async () => { closed++; }, home: "/tmp/muse-home",
+      readUsage: async () => {
+        if (usageHung) return new Promise<never>(() => {});
+        if (usageError) throw new Error("unsupported");
+        return usageResult;
+      } };
   };
   const start = () => new MuseWorker("muse", run, tmpdir(), callbacks, connect);
   const finish = () => resolveTurn({ kind: "completed", params: { terminal: "completed" } });
   return { start, finish, sessionId, turnId, approvals, events,
+    setUsage: (value: unknown) => { usageResult = value; },
+    failUsage: () => { usageError = true; },
+    hangUsage: () => { usageHung = true; },
     approval: (request: unknown) => approvalHandler!(request),
     run: () => run, closed: () => closed, connected: () => connected, done: () => done,
     session };
@@ -88,6 +99,72 @@ test("Muse uses root turn completion and reports only root output", async () => 
   assert.equal(f.run().tokens, 12);
   assert.equal(f.closed(), 1);
   assert.equal(f.done(), 1);
+});
+
+test("Muse saves only valid subscription counters, including usage above 100 percent", async () => {
+  const f = fixture();
+  const observedAtMs = Date.UTC(2026, 9, 2, 10);
+  f.setUsage({ usage: {
+    observedAtMs, tier: "private-tier", accountId: "private-account",
+    weekly: { resetsAtMs: observedAtMs + 7 * 86_400_000, usedPercent: 121, secret: "private" },
+    window: { resetsAtMs: observedAtMs + 5 * 3_600_000, usedPercent: 205,
+      windowDurationMins: 300, secret: "private" },
+  } });
+  const worker = f.start();
+  await until(() => f.run().turnId === f.turnId);
+  f.finish();
+  await worker.closed;
+  assert.deepEqual(f.run().museSubscriptionUsage, {
+    observedAtMs,
+    weekly: { resetsAtMs: observedAtMs + 7 * 86_400_000, usedPercent: 121 },
+    window: { resetsAtMs: observedAtMs + 5 * 3_600_000, usedPercent: 205,
+      windowDurationMins: 300 },
+  });
+  assert.doesNotMatch(JSON.stringify(f.run()), /private-tier|private-account|secret/);
+});
+
+test("Muse leaves account usage unknown for absent, invalid, or failed metadata reads", async () => {
+  const now = Date.UTC(2026, 9, 2, 10);
+  for (const value of [
+    {},
+    { usage: { observedAtMs: now, weekly: { resetsAtMs: now, usedPercent: -1 },
+      window: { resetsAtMs: now, usedPercent: 50, windowDurationMins: 300 } } },
+    { usage: { observedAtMs: now, weekly: { resetsAtMs: now, usedPercent: 10 },
+      window: { resetsAtMs: Math.floor(now / 1000), usedPercent: 50, windowDurationMins: 300 } } },
+    { usage: { observedAtMs: Number.MAX_SAFE_INTEGER, weekly: { resetsAtMs: now, usedPercent: 10 },
+      window: { resetsAtMs: now, usedPercent: 50, windowDurationMins: 300 } } },
+    { usage: { observedAtMs: now, weekly: { resetsAtMs: now, usedPercent: 10 },
+      window: { resetsAtMs: now, usedPercent: 50, windowDurationMins: 0 } } },
+  ]) {
+    const f = fixture();
+    f.setUsage(value);
+    const worker = f.start();
+    await until(() => f.run().turnId === f.turnId);
+    f.finish();
+    await worker.closed;
+    assert.equal(f.run().state, "completed");
+    assert.equal(f.run().museSubscriptionUsage, undefined);
+  }
+  const f = fixture();
+  f.failUsage();
+  const worker = f.start();
+  await until(() => f.run().turnId === f.turnId);
+  f.finish();
+  await worker.closed;
+  assert.equal(f.run().state, "completed");
+  assert.equal(f.run().museSubscriptionUsage, undefined);
+});
+
+test("Muse completes and closes its host when account usage read hangs", async () => {
+  const f = fixture();
+  f.hangUsage();
+  const worker = f.start();
+  await until(() => f.run().turnId === f.turnId);
+  f.finish();
+  await worker.closed;
+  assert.equal(f.run().state, "completed");
+  assert.equal(f.run().museSubscriptionUsage, undefined);
+  assert.equal(f.closed(), 1);
 });
 
 test("Muse accepts only a concrete native once approval", async () => {
@@ -171,12 +248,15 @@ test("Muse reports the model used by the root turn when it differs from session 
 test("Muse speaks MSP through the SDK and completes from a real wire terminal", async () => {
   const dir = mkdtempSync(join(tmpdir(), "agentklar-muse-wire-"));
   const command = join(dir, "fixture.mjs");
+  const calls = join(dir, "calls.txt");
   writeFileSync(command, `#!/usr/bin/env node
 import { createInterface } from "node:readline";
+import { appendFileSync } from "node:fs";
 const send = (frame) => process.stdout.write(JSON.stringify({ jsonrpc: "2.0", ...frame }) + "\\n");
 const fingerprint = ${JSON.stringify(EXPECTED_SCHEMA_FINGERPRINT)};
 createInterface({ input: process.stdin }).on("line", (line) => {
   const frame = JSON.parse(line);
+  appendFileSync(${JSON.stringify(calls)}, frame.method + "\\n");
   if (frame.method === "initialize") send({ id: frame.id, result: {
     schema: { fingerprint }, museHome: ${JSON.stringify(dir)}, sessionDurability: "ephemeral"
   } });
@@ -200,6 +280,11 @@ createInterface({ input: process.stdin }).on("line", (line) => {
         viewCursor: "v:3", sourceRange, terminal: "completed" } });
     }, 10);
   }
+  if (frame.method === "usage/read") send({ id: frame.id, result: { usage: {
+    observedAtMs: 1790935200000, tier: "wire-secret", private: "do-not-save",
+    weekly: { resetsAtMs: 1791540000000, usedPercent: 104 },
+    window: { resetsAtMs: 1790953200000, usedPercent: 31, windowDurationMins: 300 }
+  } } });
 });
 `, { mode: 0o700 });
   chmodSync(command, 0o700);
@@ -217,9 +302,15 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     assert.equal(run.state, "completed");
     assert.equal(run.result, "wire result");
     assert.equal(run.tokens, 7);
+    assert.equal(run.museSubscriptionUsage?.weekly.usedPercent, 104);
+    assert.equal(run.museSubscriptionUsage?.window.windowDurationMins, 300);
+    assert.doesNotMatch(JSON.stringify(run), /wire-secret|do-not-save/);
     assert.equal(run.threadId, "fixture-session");
     assert.equal(run.workerPid, undefined);
     assert.deepEqual(events, ["wire result"]);
+    const methods = readFileSync(calls, "utf8").trim().split("\n");
+    assert.equal(methods.filter((method) => method === "turn/start").length, 1);
+    assert.equal(methods.filter((method) => method === "usage/read").length, 1);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

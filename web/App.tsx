@@ -29,6 +29,7 @@ import type {
   ProjectContext,
   WorkerAdvice,
   RunHandoff,
+  MuseSubscriptionUsage,
 } from "../src/contracts.js";
 
 type View = "Work" | "Instructions" | "Context" | "Team" | "Models" | "Usage" | "Settings";
@@ -214,6 +215,13 @@ export function App() {
         (status === "all" || r.state === status),
     )
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const museUsage = snapshot.runs
+    .filter((item) => !projectId || item.projectId === projectId)
+    .reduce<MuseSubscriptionUsage | undefined>((latest, item) =>
+      item.museSubscriptionUsage && (!latest || item.museSubscriptionUsage.observedAtMs > latest.observedAtMs)
+        ? item.museSubscriptionUsage : latest, undefined);
+  const hasMuseRuns = snapshot.runs.some((item) =>
+    item.harness === "muse" && (!projectId || item.projectId === projectId));
   const linkedRuns = run ? snapshot.runs.filter((item) =>
     item.projectId === run.projectId &&
     (item.id === (run.followUp?.rootRunId || run.id) ||
@@ -448,7 +456,7 @@ export function App() {
           : "This hosted page is a setup guide. Run the local app to see projects, workers and permission requests."}
       </p>
       <p className="hint">Requires Node 24 on macOS or Linux. Install the pinned beta package:</p>
-      <pre>npm install -g https://github.com/kaltstart-co/agentklar/releases/download/v0.1.0-beta.6/agentklar-0.1.0-beta.6.tgz{"\n"}agentklar start</pre>
+      <pre>npm install -g https://github.com/kaltstart-co/agentklar/releases/download/v0.1.0-beta.7/agentklar-0.1.0-beta.7.tgz{"\n"}agentklar start</pre>
       <p>
         Open the setup link from the terminal, then use{" "}
         <code>http://127.0.0.1:4317</code>.
@@ -713,6 +721,7 @@ export function App() {
                             {run.effectiveModel || run.model || "Harness default model"}{" "}
                             · {time(run.createdAt)}
                           </p>
+                          {run.harness === "muse" && <MuseSubscriptionUsageView usage={run.museSubscriptionUsage} />}
                           {linkedRuns.length > 1 && (
                             <div>
                               <strong>Linked work</strong>
@@ -1150,6 +1159,10 @@ export function App() {
                   A zero total means no tokens have been reported. It does not
                   mean the work was free.
                 </p>
+                {hasMuseRuns && <>
+                  <h2>Muse subscription usage</h2>
+                  <MuseSubscriptionUsageView usage={museUsage} />
+                </>}
                 <h2>Native account allowance</h2>
                 <p className="muted">
                   These limits apply across your native account. They are not
@@ -1552,6 +1565,17 @@ export function App() {
       </Modal>
     </div>
   );
+}
+
+function MuseSubscriptionUsageView({ usage }: { usage?: MuseSubscriptionUsage }) {
+  return <div className="subscription-usage">
+    <strong>{usage ? `Account snapshot as of ${new Date(usage.observedAtMs).toLocaleString()}` : "Account snapshot unknown"}</strong>
+    {usage ? <div>
+      {usage.window.windowDurationMins}-minute window: {usage.window.usedPercent}% used; resets {new Date(usage.window.resetsAtMs).toLocaleString()}.<br />
+      Weekly: {usage.weekly.usedPercent}% used; resets {new Date(usage.weekly.resetsAtMs).toLocaleString()}.
+    </div> : <div>No Muse subscription usage was observed for this work.</div>}
+    <div className="hint">This account snapshot may include work outside AgentKlar. It is a past reading, not a live balance or dollar cost.</div>
+  </div>;
 }
 
 function PermissionDetails({

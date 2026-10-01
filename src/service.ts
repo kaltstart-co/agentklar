@@ -817,6 +817,7 @@ export function createService(
           resultTruncated: !!r.resultTruncated,
           error: r.error,
           tokens: r.tokens,
+          museSubscriptionUsage: r.museSubscriptionUsage,
           threadId: r.threadId,
           turnId: r.turnId,
           effectiveModel: r.effectiveModel,

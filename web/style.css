@@ -382,6 +382,13 @@ p {
   padding: 21px;
   margin-top: 20px;
 }
+.subscription-usage {
+  border: 1px solid #e9ebf1;
+  border-radius: 10px;
+  padding: 12px 15px;
+  margin: 16px 0;
+  line-height: 1.7;
+}
 .role-card h3 {
   margin: 0;
 }

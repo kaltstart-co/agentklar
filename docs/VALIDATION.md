@@ -2,6 +2,14 @@
 
 Verified on 2026-10-01 and 2026-10-02 using Node 24.21.0. The old application was not used.
 
+## Muse subscription usage snapshot — beta.7
+
+The owned Muse worker now asks `usage/read` once after its root turn ends and waits at most 750 ms. Valid observations save only the reading time, window and weekly used percentages, reset times, and window duration on that run. Missing or failed reads leave usage unknown without changing the task result. Task detail and Usage show the reading as an account snapshot. It may include work outside AgentKlar and does not determine model access, a live balance, or cost. Catalog refresh and normal task polling make no Muse usage request; routing does not use these snapshots. The SDK client owns the connection's single notification handler, so the worker does not replace SDK event routing to watch `usage/changed`.
+
+A live metadata-only probe against installed Muse 1.4.1 used `muse serve --no-session-log`, initialized with `experimentalApi:true`, and sent `usage/read` with `{}`. It returned `{}` in 0.243 seconds. No native session, turn, prompt, or model call was created. This confirms truthful absence on that host at that time; a live numeric observation is still unverified. Numeric values shown in tests and the seeded desktop UI check were fixtures, not native account readings.
+
+The fake MSP wire test confirms one root `turn/start` and one `usage/read`, including a percentage above 100. Other fixtures cover absent, malformed, seconds-based and unsafe dates, private-field stripping, a hung read that still completes and closes the host, and storage/API visibility after reopening SQLite. The desktop task detail and Usage page showed seeded window and weekly values. The Usage page at 384px and task detail at 320px had no horizontal overflow; browser error logs were empty. Evidence: `/tmp/agentklar-allowance-qa/usage-desktop.png` and `usage-mobile.png`. `npm run check`, all 107 tests, `npm run build`, and `git diff --check` passed. The beta.7 package smoke test installed the package in a temporary prefix and verified the built UI and all 17 MCP tools. These checks made no native model call.
+
 ## Muse worker integration — beta.6
 
 Muse is now an explicit worker choice through `task_start`, the local UI, and saved Muse roles. A Muse model pin receives advice with an unknown policy tier; unpinned policy advice still excludes Muse. Read-only Muse starts, including linked reviews, are rejected. Muse MCP host setup remains unavailable. The Models page and New task form show the native model descriptions, including contributor data-use terms when offered by Muse.

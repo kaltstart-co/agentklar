@@ -149,6 +149,36 @@ test("durable runs, explicit project scope, idempotency, busy, canonical paths a
     throw e;
   }
 });
+
+test("Muse account snapshot survives storage and appears only as whitelisted run data", async () => {
+  const t = setup();
+  try {
+    const observedAtMs = Date.UTC(2026, 9, 2, 10);
+    const usage = {
+      observedAtMs,
+      weekly: { resetsAtMs: observedAtMs + 7 * 86_400_000, usedPercent: 110 },
+      window: { resetsAtMs: observedAtMs + 5 * 3_600_000, usedPercent: 35, windowDurationMins: 300 },
+    };
+    const run: Run = { id: randomUUID(), projectId: randomUUID(), harness: "muse", prompt: "done",
+      readOnly: false, state: "completed", result: "ok", tokens: null,
+      createdAt: new Date(observedAtMs).toISOString(), updatedAt: new Date(observedAtMs).toISOString(),
+      museSubscriptionUsage: usage };
+    t.s.store.insertRun(run, "observed");
+    const older: Run = { ...run, id: randomUUID(), museSubscriptionUsage: undefined };
+    t.s.store.insertRun(older, "unknown");
+    const snapshot = await (await t.call("/api/snapshot")).json();
+    assert.deepEqual(snapshot.runs.find((item: Run) => item.id === run.id).museSubscriptionUsage, usage);
+    assert.equal(snapshot.runs.find((item: Run) => item.id === older.id).museSubscriptionUsage, undefined);
+    const result = await (await t.call(`/api/runs/${run.id}/result`)).json();
+    assert.deepEqual(result.museSubscriptionUsage, usage);
+    assert.doesNotMatch(JSON.stringify(snapshot) + JSON.stringify(result), /tier|accountId|credential/);
+    const restored = new Store(t.home);
+    assert.deepEqual(restored.run(run.id)?.museSubscriptionUsage, usage);
+    restored.close();
+  } finally {
+    await t.cleanup();
+  }
+});
 test("local ownership is exclusive before recovery and restart marks active work interrupted", async () => {
   const t = setup();
   try {

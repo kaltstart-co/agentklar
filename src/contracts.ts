@@ -42,6 +42,11 @@ export type FollowUpContext = {
   sourceModel: string | null;
   sourceState: "completed";
 };
+export type MuseSubscriptionUsage = {
+  observedAtMs: number;
+  weekly: { resetsAtMs: number; usedPercent: number };
+  window: { resetsAtMs: number; usedPercent: number; windowDurationMins: number };
+};
 export type Run = {
   id: string;
   harness?: "codex" | "claude" | "muse";
@@ -62,6 +67,7 @@ export type Run = {
   createdAt: string;
   updatedAt: string;
   tokens: number | null;
+  museSubscriptionUsage?: MuseSubscriptionUsage;
   threadId?: string;
   turnId?: string;
   nativeHome?: string;

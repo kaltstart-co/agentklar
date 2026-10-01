@@ -11,11 +11,11 @@ import {
   type Turn,
 } from "@muse-code/sdk";
 import type { ApprovalRequestParams } from "@muse-code/sdk/dist/src/msp.js";
-import type { Run } from "./contracts.ts";
+import type { MuseSubscriptionUsage, Run } from "./contracts.ts";
 import type { NativeCallbacks } from "./native.ts";
 import { composeWorkerPrompt } from "./prompt.ts";
 
-type Host = { client: MuseClient; close: () => Promise<void>; pid?: number; home?: string; schemaWarning?: boolean };
+type Host = { client: MuseClient; close: () => Promise<void>; readUsage?: () => Promise<unknown>; pid?: number; home?: string; schemaWarning?: boolean };
 type Connect = (command: string, cwd: string, onSpawn: (pid: number | undefined, close: () => Promise<void>) => void) => Promise<Host>;
 
 const wait = (ms: number) => new Promise<void>((resolve) => {
@@ -23,6 +23,28 @@ const wait = (ms: number) => new Promise<void>((resolve) => {
   timer.unref();
 });
 const validCount = (n: unknown): n is number => Number.isSafeInteger(n) && (n as number) >= 0;
+const record = (value: unknown): Record<string, unknown> | null =>
+  value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown> : null;
+const validStamp = (n: unknown): n is number =>
+  validCount(n) && (n as number) >= Date.UTC(2000, 0, 1) && (n as number) <= 8_640_000_000_000_000;
+
+function subscriptionUsage(value: unknown): MuseSubscriptionUsage | null {
+  const usage = record(record(value)?.usage);
+  const weekly = record(usage?.weekly);
+  const window = record(usage?.window);
+  if (!usage || !weekly || !window ||
+      !validStamp(usage.observedAtMs) || !validStamp(weekly.resetsAtMs) ||
+      !validStamp(window.resetsAtMs) || !validCount(weekly.usedPercent) ||
+      !validCount(window.usedPercent) || !validCount(window.windowDurationMins) ||
+      window.windowDurationMins === 0) return null;
+  return {
+    observedAtMs: usage.observedAtMs,
+    weekly: { resetsAtMs: weekly.resetsAtMs, usedPercent: weekly.usedPercent },
+    window: { resetsAtMs: window.resetsAtMs, usedPercent: window.usedPercent,
+      windowDurationMins: window.windowDurationMins },
+  };
+}
 
 function processGroupAlive(pid: number) {
   try {
@@ -76,7 +98,7 @@ async function connectMuse(command: string, cwd: string, onSpawn: (pid: number |
     const initialized = await Promise.race([
       connection.request("initialize", {
         clientInfo: { name: "agentklar", title: "AgentKlar", version: "0.1.0" },
-        capabilities: { experimentalApi: false, userInputDialogs: false },
+        capabilities: { experimentalApi: true, userInputDialogs: false },
       }),
       new Promise<never>((_, reject) => {
         handshakeTimer = setTimeout(() => reject(new Error("Muse handshake timed out")), 15000);
@@ -90,6 +112,7 @@ async function connectMuse(command: string, cwd: string, onSpawn: (pid: number |
     return {
       client: new MuseClient(connection, { durability: readSessionDurability(initialized) }),
       close: () => connection.close(),
+      readUsage: () => connection.request("usage/read", {}),
       pid: child.pid,
       home: isAbsolute(initialized.museHome) ? initialized.museHome : undefined,
       schemaWarning: !!checkServedFingerprint(initialized.schema.fingerprint),
@@ -180,6 +203,7 @@ export class MuseWorker {
       if (outcome.kind === "completed") {
         this.updateResult();
         this.updateUsage(session);
+        await this.untilStopped(this.updateSubscriptionUsage(host));
         const terminal = outcome.params.terminal;
         if (terminal === "completed") this.finish("completed");
         else if (terminal === "cancelled" || terminal === "interrupted") this.finish("interrupted");
@@ -243,6 +267,20 @@ export class MuseWorker {
       item.kind === "subagent" || item.kind === "workflow");
     const total = usage?.cumulative?.totalTokens;
     this.callbacks.update({ tokens: !children && validCount(total) ? total : null });
+  }
+
+  private async updateSubscriptionUsage(host: Host) {
+    if (!host.readUsage) return;
+    try {
+      const result = await Promise.race([
+        host.readUsage().catch(() => undefined),
+        wait(750).then(() => undefined),
+      ]);
+      const usage = subscriptionUsage(result);
+      if (!this.finished && usage &&
+          usage.observedAtMs >= (this.run.museSubscriptionUsage?.observedAtMs ?? 0))
+        this.callbacks.update({ museSubscriptionUsage: usage });
+    } catch {} // Account metadata must not change the root turn result.
   }
 
   private approval(request: ApprovalRequestParams): Promise<{ choiceId: string }> {
