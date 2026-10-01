@@ -523,13 +523,16 @@ code {
   }
   nav {
     display: flex;
+    flex-wrap: wrap;
     margin-top: 10px;
     gap: 5px;
   }
   .nav {
     justify-content: center;
     padding: 9px 6px;
-    flex: 1;
+    flex: 0 0 auto;
+    min-height: 44px;
+    white-space: nowrap;
     font-size: 12px;
     gap: 5px;
   }
@@ -595,15 +598,6 @@ code {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-@media (max-width: 650px) {
-  nav {
-    flex-wrap: wrap;
-  }
-  .nav {
-    min-width: 58px;
-  }
-}
-
 .catalog-model {
   padding: 10px 0;
   border-top: 1px solid #e8ebef;

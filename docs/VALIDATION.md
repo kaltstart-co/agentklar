@@ -123,3 +123,9 @@ The new offline test groups use the real pinned `skills@1.7.0` CLI against tempo
 A SQLite failure fixture blocks the final update save and verifies that the previous tree is restored with its original identity and ownership. A second fixture edits the replacement during that save: AgentKlar keeps the user edit, the complete previous tree in a backup, and a durable interrupted record with its recovery location. Restart preserves these files and makes no recovery writes. These fixtures use no worker, provider call, real upstream installation in a user project, or native auth/config change. They do not establish crash recovery after a power loss, skill execution by a model, or live upstream update behavior.
 
 Browser QA used a disposable project and local upstream fixture through the pinned Skills CLI. An unchanged source showed “Already up to date” with no apply button. A changed source showed both versions, applied the reviewed files, and removed its temporary backup. A local edit made after the next preview blocked apply; the edit remained byte-for-byte and refresh disabled update and remove. Browser errors were empty. Evidence: `/var/folders/bx/7z3_cmzs3g77dlrl7f0kxl1w0000gn/T/agentklar-skill-update-qa-psp83p68/` (`file-checks.json`, `review.png`, `updated.png`, `local-edit-kept.png`). The beta.3 package smoke also passed with the built UI and installed MCP bridge exposing 16 tools. No model calls were used.
+
+## Responsive navigation
+
+On 2026-10-02, beta.4 browser checks covered widths of 320, 384, 650, 651, and 1280 CSS pixels. On Work, there was no navigation label overflow, button overlap, or horizontal page overflow. The Instructions button opened its view at 320 pixels.
+
+Local checks passed `npm run check`, all 85 tests, `npm run build`, and `git diff --check`. The navigation fix uses only CSS. These checks made no model calls.
