@@ -22,6 +22,7 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 - [x] Restart detection
 - [x] Support dashboard
 - [x] Independent review
+- [x] Linked review and fix
 - [x] Shared memory
 - [x] Project context
 - [x] Native model list
@@ -47,4 +48,3 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 - [ ] Device pairing
 - [ ] Remote work
 - [ ] Parallel worktrees
-- [ ] Review and fix loop

@@ -107,6 +107,8 @@ export function App() {
   const [notice, setNotice] = useState("");
   const [projectModal, setProjectModal] = useState(false);
   const [taskModal, setTaskModal] = useState(false);
+  const [draftProjectId, setDraftProjectId] = useState("");
+  const [followUp, setFollowUp] = useState<{ runId: string; kind: "review" | "fix" } | null>(null);
   const [name, setName] = useState("");
   const [path, setPath] = useState("");
   const [prompt, setPrompt] = useState("");
@@ -125,21 +127,22 @@ export function App() {
   const [roles, setRoles] = useState<Role[]>([]);
   const [preference, setPreference] = useState<Preference>("balanced");
   const project = snapshot.projects.find((p) => p.id === projectId);
+  const taskProject = snapshot.projects.find((p) => p.id === draftProjectId);
   const run = snapshot.runs.find(
     (r) => r.id === runId && r.projectId === projectId,
   );
   const catalog = catalogs[projectId];
-  const modelChoices = (id: string) =>
-    catalog?.harnesses
+  const modelChoices = (id: string, forProjectId = projectId) =>
+    catalogs[forProjectId]?.harnesses
       .find((h) => h.harness === id)
       ?.models.map((m) => m.id) || [];
   const workers = snapshot.harnesses.filter((h) => h.workerSupported);
-  const selectedRole = project?.roles.find((r) => r.id === roleId);
+  const selectedRole = taskProject?.roles.find((r) => r.id === roleId);
   const taskHarness = selectedRole?.harness || harness;
   const taskWorker = workers.find((h) => h.id === taskHarness);
   const adviceKey = JSON.stringify([
-    projectId, roleId, taskHarness, model, selectedRole?.model,
-    project?.preference, complexity, requiresImages, taskModal, connected,
+    draftProjectId, roleId, taskHarness, model, selectedRole?.model,
+    taskProject?.preference, complexity, requiresImages, taskModal, connected,
   ]);
   const currentAdviceKey = useRef(adviceKey);
   currentAdviceKey.current = adviceKey;
@@ -161,7 +164,7 @@ export function App() {
     setAdviceError(null);
     setAdviceBusy(key);
     try {
-      const data = await api<WorkerAdvice>(`/projects/${projectId}/recommend`, {
+      const data = await api<WorkerAdvice>(`/projects/${draftProjectId}/recommend`, {
         roleId: roleId || undefined,
         harness: taskHarness,
         model: model.trim() || undefined,
@@ -188,6 +191,23 @@ export function App() {
         (status === "all" || r.state === status),
     )
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const linkedRuns = run ? snapshot.runs.filter((item) =>
+    item.projectId === run.projectId &&
+    (item.id === (run.followUp?.rootRunId || run.id) ||
+      item.followUp?.rootRunId === (run.followUp?.rootRunId || run.id)))
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt)) : [];
+  function openTask(source?: Run) {
+    const kind = source?.followUp?.kind === "review" ? "fix" : "review";
+    setDraftProjectId(source?.projectId || projectId);
+    setFollowUp(source ? { runId: source.id, kind } : null);
+    setPrompt(source ? (kind === "review"
+      ? "Review the linked work. Check the changes and report concrete findings with file paths and lines."
+      : "Fix the findings in the linked review. Check the result and explain what changed.") : "");
+    setReadOnly(source ? kind === "review" : true);
+    setRoleId(null);
+    setModel("");
+    setTaskModal(true);
+  }
   async function refresh() {
     if (!local) return;
     try {
@@ -506,7 +526,7 @@ export function App() {
           {view === "Work" && (
             <Button
               disabled={!connected || !project}
-              onClick={() => setTaskModal(true)}
+              onClick={() => openTask()}
             >
               ＋ New task
             </Button>
@@ -617,7 +637,7 @@ export function App() {
                           {!search && status === "all" && (
                             <Button
                               variant="light"
-                              onClick={() => setTaskModal(true)}
+                              onClick={() => openTask()}
                             >
                               Start a task
                             </Button>
@@ -676,6 +696,25 @@ export function App() {
                             {run.effectiveModel || run.model || "Harness default model"}{" "}
                             · {time(run.createdAt)}
                           </p>
+                          {linkedRuns.length > 1 && (
+                            <div>
+                              <strong>Linked work</strong>
+                              <Group gap="xs" mt="xs">
+                                {linkedRuns.map((item) => (
+                                  <Button key={item.id} size="xs" variant={item.id === run.id ? "filled" : "light"}
+                                    onClick={() => setRunId(item.id)}>
+                                    {item.followUp?.kind === "review" ? "Review" : item.followUp?.kind === "fix" ? "Fix" : "Original"} · {labels[item.state]}
+                                  </Button>
+                                ))}
+                              </Group>
+                            </div>
+                          )}
+                          {run.state === "completed" && run.followUp?.kind !== "review" && (
+                            <Button size="xs" variant="light" onClick={() => openTask(run)}>Review work</Button>
+                          )}
+                          {run.state === "completed" && run.followUp?.kind === "review" && (
+                            <Button size="xs" variant="light" onClick={() => openTask(run)}>Fix findings</Button>
+                          )}
                           {run.routing && (
                             <details>
                               <summary>Model choice at launch</summary>
@@ -1243,7 +1282,7 @@ export function App() {
       <Modal
         opened={taskModal}
         onClose={() => setTaskModal(false)}
-        title="Start a task"
+        title={followUp ? (followUp.kind === "review" ? "Review work" : "Fix findings") : "Start a task"}
         classNames={{ body: "task-modal-body" }}
         yOffset="5vh"
         centered
@@ -1253,7 +1292,7 @@ export function App() {
             e.preventDefault();
             void act(async () => {
               const task = await api<Run>("/tasks/start", {
-                projectId,
+                projectId: draftProjectId,
                 prompt,
                 idempotencyKey: crypto.randomUUID(),
                 roleId: roleId || undefined,
@@ -1262,15 +1301,19 @@ export function App() {
                 ...(automaticRouting ? { routing: { complexity, requiresImages } } : {}),
                 readOnly,
                 includeProjectContext,
+                ...(followUp ? { followUp } : {}),
               });
+              setProjectId(draftProjectId);
               setRunId(task.id);
               setTaskModal(false);
+              setFollowUp(null);
               setPrompt("");
             });
           }}
         >
           <Stack gap="sm">
             {error && <Alert color="red">{error}</Alert>}
+            {followUp && <p className="hint">Linked to a completed run in {taskProject?.name || "this project"}. {followUp.kind === "review" ? "Review is read only." : "Fix can change workspace files."} Choose the worker and model below.</p>}
             <Textarea
               label="What should the worker do?"
               placeholder="Describe the task and what a good result looks like."
@@ -1289,7 +1332,7 @@ export function App() {
                 setModel("");
               }}
               data={
-                project?.roles.map((r) => ({ value: r.id, label: r.name })) ||
+                taskProject?.roles.map((r) => ({ value: r.id, label: r.name })) ||
                 []
               }
             />
@@ -1315,7 +1358,7 @@ export function App() {
               </Alert>
             )}
             <Autocomplete
-              data={modelChoices(taskHarness)}
+              data={modelChoices(taskHarness, draftProjectId)}
               label="Model (optional)"
               placeholder={
                 selectedRole?.model ||
@@ -1343,9 +1386,9 @@ export function App() {
               <summary>Task needs and model preview</summary>
               <Stack gap="sm" mt="sm">
                 <p className="hint">
-                  Saved preference: {project?.preference === "best"
+                  Saved preference: {taskProject?.preference === "best"
                     ? "Best capability"
-                    : project?.preference === "economical" ? "Economical" : "Balanced"}.
+                    : taskProject?.preference === "economical" ? "Economical" : "Balanced"}.
                   Change and save it in Team.
                 </p>
                 <Select
@@ -1370,7 +1413,7 @@ export function App() {
                 <Button
                   variant="light"
                   loading={adviceBusy === adviceKey}
-                  disabled={!connected || !projectId}
+                  disabled={!connected || !draftProjectId}
                   onClick={() => void suggestModel()}
                 >
                   Suggest a model
@@ -1454,6 +1497,7 @@ export function App() {
             <Checkbox
               label="Read only"
               checked={readOnly}
+              disabled={!!followUp}
               onChange={(e) => setReadOnly(e.currentTarget.checked)}
             />
             {readOnly && (
@@ -1464,10 +1508,10 @@ export function App() {
               </p>
             )}
             <p className="hint">
-              Runs a native {harnessName(taskHarness)} worker in {project?.name}
+              Runs a native {harnessName(taskHarness)} worker in {taskProject?.name}
               . Native permission requests appear in the task detail.
             </p>
-            <Button type="submit" loading={busy} disabled={!taskWorker}>
+            <Button type="submit" loading={busy} disabled={!taskWorker || !taskProject}>
               Start worker
             </Button>
           </Stack>

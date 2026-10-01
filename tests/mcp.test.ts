@@ -6,6 +6,7 @@ import { serve } from "@hono/node-server";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { randomUUID } from "node:crypto";
 import { createService } from "../src/service.ts";
 import { NativeWorker } from "../src/native.ts";
 test("SDK stdio wire lists and calls tools; closing MCP leaves service worker alive", async () => {
@@ -150,6 +151,24 @@ test("SDK stdio wire lists and calls tools; closing MCP leaves service worker al
     assert.equal(routedRun.model, "gpt-6-luna");
     assert.equal(routedRun.routing.selected.basis, "policy");
     assert.equal(catalogReads, 2);
+    const linkedPath = join(dir, "linked");
+    mkdirSync(linkedPath);
+    const linkedProjectReply = await client.callTool({ name: "project_register", arguments: { name: "linked", path: linkedPath } });
+    const linkedProject = JSON.parse((linkedProjectReply.content as { text: string }[])[0].text);
+    const sourceId = randomUUID();
+    service.store.insertRun({ ...service.store.run(routedRun.id)!, id: sourceId, projectId: linkedProject.id,
+      prompt: "Original work", state: "completed", result: "Source finding data", workerPid: undefined }, "seeded-source");
+    const linkedReply = await client.callTool({ name: "task_start", arguments: {
+      projectId: linkedProject.id, prompt: "Review the source", idempotencyKey: "linked-wire",
+      readOnly: true, followUp: { runId: sourceId, kind: "review" },
+    } });
+    assert.equal(linkedReply.isError, false);
+    const linkedRun = JSON.parse((linkedReply.content as { text: string }[])[0].text);
+    assert.deepEqual(linkedRun.followUp, { kind: "review", parentRunId: sourceId, rootRunId: sourceId });
+    assert.equal(linkedRun.followUpContext, undefined);
+    const linkedContext = await client.callTool({ name: "run_context_read", arguments: { runId: linkedRun.id } });
+    assert.equal(JSON.parse((linkedContext.content as { text: string }[])[0].text).followUpContext.sourceResult,
+      "Source finding data");
     await client.close();
     await new Promise((r) => setTimeout(r, 100));
     assert.equal(service.store.run(r.id)?.state, "running");

@@ -30,6 +30,17 @@ export type RunState =
   | "failed"
   | "cancelled"
   | "interrupted";
+export type FollowUp = { kind: "review" | "fix"; parentRunId: string; rootRunId: string };
+export type FollowUpContext = {
+  originalPrompt: string;
+  originalPromptTruncated: boolean;
+  sourceResult: string;
+  sourceResultTruncated: boolean;
+  sourceRunId: string;
+  sourceHarness: "codex" | "claude";
+  sourceModel: string | null;
+  sourceState: "completed";
+};
 export type Run = {
   id: string;
   harness?: "codex" | "claude";
@@ -55,6 +66,8 @@ export type Run = {
   workerPid?: number;
   launchHash?: string;
   routing?: RoutingDecision;
+  followUp?: FollowUp;
+  followUpContext?: FollowUpContext;
 };
 export type RunEvent = {
   id: number;

@@ -48,6 +48,12 @@ Your native harness can classify the task with its existing model and call `task
 
 Each routed run keeps a small record of the selected model, task needs and policy reasons. The task detail shows the requested model and the model reported by the native harness separately. A worker failure does not trigger another model automatically. Quality benchmarks remain planned.
 
+## Linked review and fix
+
+Open a completed work task and select **Review work**. The draft starts a read-only review of that task. Open a completed review and select **Fix findings** to draft a worker task that can change files. After the fix completes, select **Review work** again. Choose the role, harness, model and task needs for each step before starting it. The task detail links all runs in the chain. Each step starts only when you select **Start worker** or call `task_start` through MCP.
+
+The new worker receives the original work prompt and the immediately preceding result, each capped at 8,000 characters. This data is frozen when the linked run starts and marked as untrusted task data. It does not resume the earlier native session or grant permissions. A completed review, including one that says `NO_FINDINGS`, means only that the worker finished; it is not a human acceptance decision.
+
 ## Shared project context
 
 Open **Context** to save a project brief, decisions and lessons, and next steps. This is a shared local record that your native harnesses can read and update through MCP. Memory is saved explicitly; AgentKlar does not collect it automatically from chats or project files. The fields allow 2,000, 4,000, and 2,000 characters respectively.

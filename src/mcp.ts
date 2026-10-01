@@ -162,7 +162,7 @@ Use projects_list or project_register for the folder, then project_context_read 
     "task_start",
     {
       description:
-        "Start one durable native Codex or Claude Code worker for a registered project. Includes saved project context by default; includeProjectContext:false opts out. Pass routing:{complexity,requiresImages} for automatic model choice and launch in this call. Omit routing for native default or an explicit manual model. Role, harness and model pins constrain routing. Returns promptly. Completion means worker finished; review is separate. Keep the run ID.",
+        "Start one durable native worker. For a linked review pass followUp:{runId,kind:'review'} for a completed implementation or fix and readOnly:true. For a linked fix pass followUp:{runId,kind:'fix'} for a completed review and readOnly:false. The run saves a bounded source snapshot; no loop or native session resume occurs. Includes saved project context by default. Pass routing:{complexity,requiresImages} for automatic model choice; role, harness and model pins still apply. Completion means only that the worker finished.",
       inputSchema: startSchema,
     },
     (args) => call("/api/tasks/start", "POST", args),
@@ -172,7 +172,7 @@ Use projects_list or project_register for the folder, then project_context_read 
     [
       "run_context_read",
       "/context",
-      "Inspect the immutable saved project context captured when this run started, or null if absent or disabled.",
+      "Inspect immutable project context and bounded linked source context captured when this run started, or null for either absent part.",
     ],
     [
       "run_result",

@@ -23,7 +23,7 @@ import { harnesses, executable } from "./harnesses.ts";
 import { NativeWorker, type NativeCallbacks } from "./native.ts";
 import { ClaudeWorker } from "./claude.ts";
 import { CatalogCache, readCatalog, type CatalogReader } from "./catalog.ts";
-import type { Run, Project, RoutingDecision } from "./contracts.ts";
+import type { Run, Project, RoutingDecision, FollowUpContext } from "./contracts.ts";
 import { recommendationSchema, recommendWorker } from "./recommend.ts";
 import { Instructions, InstructionError, instructionFileSchema, instructionPreviewSchema } from "./instructions.ts";
 import { NativeSetup, SetupError, type NativeSetupOptions } from "./setup.ts";
@@ -38,7 +38,7 @@ const role = z
   })
   .strict();
 function compactRun(r: Run): Run {
-  const { contextSnapshot, ...metadata } = r;
+  const { contextSnapshot, followUpContext, ...metadata } = r;
   return {
     ...metadata,
     contextRevision: contextSnapshot?.revision ?? null,
@@ -74,6 +74,7 @@ export const startSchema = z
       complexity: z.enum(["routine", "standard", "hard"]).default("standard"),
       requiresImages: z.boolean().default(false),
     }).strict().optional(),
+    followUp: z.object({ runId: z.uuid(), kind: z.enum(["review", "fix"]) }).strict().optional(),
   })
   .strict();
 export function processGroupAlive(pid: number) {
@@ -137,6 +138,18 @@ export function createService(
     codex: nativeCommand,
     claude: claudeCommand,
   });
+  function linkedSource(projectId: string, link: { runId: string; kind: "review" | "fix" }) {
+    const source = store.run(link.runId);
+    if (!source || source.projectId !== projectId)
+      return { error: "Linked run not found in this project" } as const;
+    if (source.state !== "completed")
+      return { error: "Linked run must be completed" } as const;
+    if (link.kind === "fix" && source.followUp?.kind !== "review")
+      return { error: "A fix must follow a completed review" } as const;
+    if (link.kind === "review" && source.followUp?.kind === "review")
+      return { error: "A review must follow implementation or a fix" } as const;
+    return { source } as const;
+  }
   const workers = new Map<
     string,
     { stop: () => void; closed?: Promise<void> }
@@ -527,6 +540,12 @@ export function createService(
         );
       return c.json(compactRun(prior));
     }
+    if (data.followUp && data.readOnly !== (data.followUp.kind === "review"))
+      return c.json({ error: "Reviews must be read only; fixes must allow workspace changes" }, 400);
+    if (data.followUp) {
+      const linked = linkedSource(p.id, data.followUp);
+      if (linked.error) return c.json({ error: linked.error }, 409);
+    }
     if (
       store
         .runs()
@@ -584,6 +603,10 @@ export function createService(
       const latest = store.projects().find((item) => item.id === p.id);
       if (!latest || JSON.stringify(latest) !== JSON.stringify(p))
         return c.json({ error: "Project settings changed during model selection. Start again." }, 409);
+      if (data.followUp) {
+        const linked = linkedSource(p.id, data.followUp);
+        if (linked.error) return c.json({ error: linked.error }, 409);
+      }
       if (!advice.choice) return c.json({
         error: "No suitable model found. Review native access, model pins, and task requirements.",
         reasons: advice.reasons.slice(0, 4),
@@ -614,6 +637,22 @@ export function createService(
         },
         409,
       );
+    const source = data.followUp ? linkedSource(p.id, data.followUp).source : undefined;
+    if (data.followUp && !source)
+      return c.json({ error: "Linked run changed before launch" }, 409);
+    const clip = (value: string) => ({ text: value.slice(0, 8000), truncated: value.length > 8000 });
+    const original = source && clip(source.followUpContext?.originalPrompt ?? source.prompt);
+    const result = source && clip(source.result);
+    const followUpContext: FollowUpContext | undefined = source && original && result ? {
+      originalPrompt: original.text,
+      originalPromptTruncated: !!source.followUpContext?.originalPromptTruncated || original.truncated,
+      sourceResult: result.text,
+      sourceResultTruncated: !!source.resultTruncated || result.truncated,
+      sourceRunId: source.id,
+      sourceHarness: source.harness || "codex",
+      sourceModel: source.effectiveModel || source.model || null,
+      sourceState: "completed",
+    } : undefined;
     const now = new Date().toISOString();
     const context = data.includeProjectContext
       ? store.context(p.id)
@@ -626,6 +665,10 @@ export function createService(
       prompt: data.prompt,
       model,
       ...(routing ? { routing } : {}),
+      ...(source && data.followUp ? {
+        followUp: { kind: data.followUp.kind, parentRunId: source.id, rootRunId: source.followUp?.rootRunId || source.id },
+        followUpContext,
+      } : {}),
       roleSnapshot: selected,
       ...(context && (context.brief || context.memory || context.handoff)
         ? { contextSnapshot: context }
@@ -696,7 +739,7 @@ export function createService(
   app.get("/api/runs/:id/context", (c) => {
     const r = store.run(c.req.param("id"));
     return r
-      ? c.json({ runId: r.id, contextSnapshot: r.contextSnapshot ?? null })
+      ? c.json({ runId: r.id, contextSnapshot: r.contextSnapshot ?? null, followUpContext: r.followUpContext ?? null })
       : c.json({ error: "Run not found" }, 404);
   });
   app.get("/api/runs/:id/tail", (c) => {
@@ -731,6 +774,7 @@ export function createService(
           effectiveModel: r.effectiveModel,
           harness: r.harness || "codex",
           contextRevision: r.contextSnapshot?.revision ?? null,
+          followUp: r.followUp ?? null,
         })
       : c.json({ error: "Run not found" }, 404);
   });
