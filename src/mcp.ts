@@ -142,7 +142,7 @@ Use projects_list or project_register, then project_context_read. Read roles and
   server.registerTool(
     "project_instructions_list",
     {
-      description: "Read presence, hash and bounded change history for root Codex AGENTS.md and Claude Code CLAUDE.md. File presence does not prove native loading. Returns metadata only; instruction text and writes are available only in the trusted local UI. This starts no worker.",
+      description: "Read presence, hash and bounded change history for root AGENTS.md (Codex and Muse) and CLAUDE.md (Claude Code; Muse fallback). Muse checks AGENTS.md first at each folder level and loads only trusted project rules. File presence does not prove native loading. Returns metadata only; instruction text and writes are available only in the trusted local UI. This starts no worker.",
       inputSchema: z.object({ projectId: z.uuid() }).strict(),
     },
     ({ projectId }) => call(`/api/projects/${projectId}/instructions`),

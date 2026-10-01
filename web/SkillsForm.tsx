@@ -148,24 +148,24 @@ export function SkillsForm({
     <section className="content-panel instructions-panel">
       <h2>Project skills</h2>
       <p className="muted">
-        Add one skill from a GitHub repo to this project's native skill folder.
-        Codex uses .agents/skills. Claude Code uses .claude/skills. Codex's
-        folder may also be read by other native tools.
+        Add one skill from a GitHub repo to a project folder. Codex and Muse
+        can read .agents/skills. Claude Code uses .claude/skills, which Muse can
+        also read.
       </p>
       <p className="hint">
         Review the skill text and full file list before installing or updating.
         Updates use the saved source and need your review each time. Skills may
-        tell a future agent to run commands. Start a new native session after a
-        change.
+        tell a future agent to run commands. Native trust, compatibility, and
+        activation affect loading. Start a new native session after a change.
       </p>
       <Stack gap="sm">
         <Select
-          label="Native harness"
+          label="Project skill folder"
           value={harness}
           disabled={Boolean(busy)}
           data={[
-            { value: "codex", label: "Codex" },
-            { value: "claude", label: "Claude Code" },
+            { value: "codex", label: "Shared · .agents/skills" },
+            { value: "claude", label: "Claude · .claude/skills" },
           ]}
           allowDeselect={false}
           onChange={(v) => {
@@ -319,7 +319,7 @@ export function SkillsForm({
               </div>
             ))
         ) : (
-          <p className="hint">No project skills found for this harness.</p>
+          <p className="hint">No project skills found in this folder.</p>
         )}
       </Stack>
     </section>

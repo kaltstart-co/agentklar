@@ -3,7 +3,7 @@ import { Alert, Badge, Button, Group, Select, Stack, Textarea } from "@mantine/c
 import type { InstructionChange, InstructionDocument, InstructionFileId, InstructionPreview, InstructionSnapshot } from "../src/contracts.js";
 
 const filenames = { agents: "AGENTS.md", claude: "CLAUDE.md" };
-const harnesses = { agents: "Codex", claude: "Claude Code" };
+const fileUsers = { agents: "Codex + Muse", claude: "Claude Code" };
 async function request<T>(projectId: string, suffix = "", body?: unknown): Promise<T> {
   const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/instructions${suffix}`, {
     credentials: "same-origin",
@@ -43,11 +43,11 @@ export function InstructionsForm({ projectId, connected }: { projectId: string; 
   const metadata = snapshot?.files.find((entry) => entry.id === file);
   return <section className="content-panel instructions-panel">
     <h2>Native project instructions</h2>
-    <p className="muted">Edit the instruction files in this project's root folder. Codex uses AGENTS.md. Claude Code uses CLAUDE.md. Each harness has its own file.</p>
-    <p className="hint">Native settings and parent files can change what loads. Start a new native session to check.</p>
+    <p className="muted">Edit this project's root instruction files. Codex and Muse can read AGENTS.md. Claude Code reads CLAUDE.md. Muse checks AGENTS.md first and can use CLAUDE.md when AGENTS.md is absent.</p>
+    <p className="hint">Muse loads trusted project rules. Native settings, parent files, and active sessions can affect what loads. Start a new native session to check.</p>
     <Group justify="space-between">
-      <Select style={{ width: "min(100%, 360px)" }} label="Native harness" value={file} onChange={(value) => setFile(value as InstructionFileId)} allowDeselect={false}
-        data={Object.entries(filenames).map(([value, label]) => ({ value, label: `${harnesses[value as InstructionFileId]} · ${label} · ${snapshot?.files.find((entry) => entry.id === value)?.status || "unchecked"}` }))} />
+      <Select style={{ width: "min(100%, 360px)" }} label="Instruction file" value={file} onChange={(value) => setFile(value as InstructionFileId)} allowDeselect={false}
+        data={Object.entries(filenames).map(([value, label]) => ({ value, label: `${label} · ${fileUsers[value as InstructionFileId]}` }))} />
       <Button variant="subtle" size="xs" disabled={!connected} loading={loading} onClick={() => void refresh()}>Refresh file status</Button>
     </Group>
     {error && <Alert color="red">{error}</Alert>}
@@ -58,14 +58,15 @@ export function InstructionsForm({ projectId, connected }: { projectId: string; 
         <InstructionEditor projectId={projectId} file={editorFile} connected={connected} active={editorFile === file}
           unavailable={snapshot?.files.find((entry) => entry.id === editorFile)?.status === "unavailable"}
           agentsPresent={snapshot?.files.some((entry) => entry.id === "agents" && entry.status === "present") || false}
+          claudePresent={snapshot?.files.some((entry) => entry.id === "claude" && entry.status === "present") || false}
           changes={snapshot?.changes || []} refresh={refresh} />
       </div>
     ))}
   </section>;
 }
 
-function InstructionEditor({ projectId, file, connected, active, unavailable, agentsPresent, changes, refresh }: {
-  projectId: string; file: InstructionFileId; connected: boolean; active: boolean; unavailable: boolean; agentsPresent: boolean; changes: InstructionChange[]; refresh: () => Promise<void>;
+function InstructionEditor({ projectId, file, connected, active, unavailable, agentsPresent, claudePresent, changes, refresh }: {
+  projectId: string; file: InstructionFileId; connected: boolean; active: boolean; unavailable: boolean; agentsPresent: boolean; claudePresent: boolean; changes: InstructionChange[]; refresh: () => Promise<void>;
 }) {
   const [document, setDocument] = useState<InstructionDocument | null>(null);
   const [draft, setDraft] = useState("");
@@ -141,6 +142,7 @@ function InstructionEditor({ projectId, file, connected, active, unavailable, ag
     {preview && <div className="instruction-preview">
       <h3>Proposed change</h3>
       <p className="instruction-path"><code>{preview.path}</code></p>
+      {file === "agents" && preview.before === null && claudePresent && <Alert color="orange">Creating AGENTS.md makes Muse read it before CLAUDE.md in this folder.</Alert>}
       {file === "claude" && preview.before === null && agentsPresent && <Alert color="orange">Creating CLAUDE.md may stop Claude from loading AGENTS.md under its default settings.</Alert>}
       <details open={preview.before !== preview.after}>
         <summary>{preview.before === preview.after ? "No content change · show file" : "Before and after"}</summary>

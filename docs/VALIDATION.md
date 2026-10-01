@@ -2,6 +2,14 @@
 
 Verified on 2026-10-01 and 2026-10-02 using Node 24.21.0. The old application was not used.
 
+## Shared project setup — beta.9
+
+The instruction editor now identifies real files and their native readers. AGENTS.md is shared by Codex and Muse; the UI explains Muse's CLAUDE.md fallback and shows a preview note before creating AGENTS.md beside an existing CLAUDE.md. The skill selector identifies the shared `.agents/skills` folder and the `.claude/skills` folder. Both use the existing guarded writers and ownership records. There is no duplicate Muse file or install record. Loading rules come from [Muse configuration docs](https://dev.meta.ai/docs/muse-code/configuration) and [native skills docs](https://meta-models.github.io/muse-code-sdk/next/guides/extend/skills/).
+
+Browser QA used a disposable project and local skill source. The new preview note appeared before creating AGENTS.md. Apply wrote the exact draft; undo removed that managed file and preserved CLAUDE.md byte for byte. A shared skill was previewed and installed through the UI using the pinned Skills CLI. Muse 1.4.1 `skills validate` reported the skill compatible. `skills list --source project` skipped it with an untrusted-workspace diagnostic; the one-run `--trust-workspace` option listed it with activation on. No trust decision was saved. A separate external Claude-folder fixture appeared alongside it. Removing the managed shared skill left that external skill present in Muse's next native listing.
+
+These checks used no model inference and changed no real project or native user settings. Native listing and validation prove discovery and format support, not model use or instruction adherence. Evidence in `/tmp/agentklar-shared-setup-qa/`: `native-skills-evidence.json`, `both-folders-evidence.json`, `removal-evidence.json`, `instruction-preview.png`, `overview.png`, and `mobile.png`. The 320-pixel view had no horizontal overflow or overlapping navigation; browser error logs were empty. TypeScript checking, all 114 tests, the production build, and diff checks passed.
+
 ## Muse MCP host setup — beta.8
 
 The trusted local UI now offers Muse User scope preview, apply, and undo for `mcpServers.agentklar` in Muse's `settings.json`. The guarded write keeps unrelated JSON settings and file permissions. A new settings file uses mode 0600. Existing entries are not adopted or overwritten. Project `.mcp.json` entries, changed settings, unsafe files, old schemas, and replaced settings folders block the change. An unchanged managed entry can still be undone after the AgentKlar service port changes.

@@ -9,7 +9,7 @@ This is a fresh TypeScript rewrite. The old Go application is preserved in Git a
 Requires Node 24 and npm on macOS or Linux. Install this pinned GitHub beta package, then start the local service:
 
 ```sh
-npm install -g https://github.com/kaltstart-co/agentklar/releases/download/v0.1.0-beta.8/agentklar-0.1.0-beta.8.tgz
+npm install -g https://github.com/kaltstart-co/agentklar/releases/download/v0.1.0-beta.9/agentklar-0.1.0-beta.9.tgz
 agentklar start
 ```
 
@@ -88,15 +88,15 @@ Each save creates a revision. If another harness saves first, the UI keeps your 
 
 ## Native project instructions
 
-Open **Instructions** and choose **Codex · AGENTS.md** or **Claude Code · CLAUDE.md**. AgentKlar shows the status and actual path of that file in the project root. Select **Load file**, edit the text, then **Preview changes** to read the before and after. **Apply change** writes that file. Files must fit within 32 KiB of UTF-8 text. Nothing is saved automatically.
+Open **Instructions** and choose **AGENTS.md** (Codex and Muse) or **CLAUDE.md** (Claude Code and Muse fallback). AgentKlar shows the status and actual path of that file in the project root. Select **Load file**, edit the text, then **Preview changes** to read the before and after. **Apply change** writes that file. Files must fit within 32 KiB of UTF-8 text. Nothing is saved automatically.
 
-Each harness keeps its own native instruction file. These files are separate from the shared project context above. Native settings and parent files can change what loads. Start a new native session to check. Creating CLAUDE.md may stop Claude from loading AGENTS.md under its default settings; AgentKlar does not copy the instructions between files.
+These files are separate from the shared project context above. [Muse checks AGENTS.md before CLAUDE.md](https://dev.meta.ai/docs/muse-code/configuration) at each folder level and loads only trusted project rules. Creating root AGENTS.md when CLAUDE.md exists changes which root file Muse reads. Native settings and parent files can change what loads. Start a new native session to check. Creating CLAUDE.md may stop Claude from loading AGENTS.md under its default settings; AgentKlar does not copy the instructions between files.
 
 Drafts stay in the open app when you switch views or harnesses, or the local service briefly disconnects. If a file changes on disk, the UI keeps your draft. **Reload file (replaces draft)** loads the current file. **Undo latest change** restores the saved prior contents only when the current file still matches that change. Recent changes remain visible in the local UI. An interrupted change has a **Try undo** action with the same file check. Instruction editing is available through the trusted local UI; MCP can read file status and change metadata.
 
 ## Project skills
 
-Open **Instructions → Project skills**. Choose Codex or Claude Code, then enter a GitHub `owner/repo` (optionally `#ref`) and one exact skill name. **Preview skill** shows its target folder, source hash, full `SKILL.md` text, and a list of every file and folder with sizes. **Install reviewed skill** copies those exact staged bytes into `.agents/skills/<name>` for Codex or `.claude/skills/<name>` for Claude Code. Codex's `.agents/skills` folder can also be read by other native tools. Start a new native session to check whether the skill loads.
+Open **Instructions → Project skills**. Choose **Shared · .agents/skills** or **Claude · .claude/skills**, then enter a GitHub `owner/repo` (optionally `#ref`) and one exact skill name. **Preview skill** shows its target folder, source hash, full `SKILL.md` text, and a list of every file and folder with sizes. **Install reviewed skill** copies those exact staged bytes into the chosen folder. The API still calls these targets `codex` and `claude`; the IDs identify the folders, not exclusive harness ownership. [Muse reads project skills](https://meta-models.github.io/muse-code-sdk/next/guides/extend/skills/) from both folders; Codex reads `.agents/skills` and Claude Code reads `.claude/skills`. Native trust, skill compatibility, and activation affect whether a skill loads. Start a new native session to check.
 
 For a managed skill, choose **Preview upstream update**. AgentKlar stages the same saved repository, ref and skill name. Review the upstream text and file list alongside the current install, then choose **Apply reviewed update**. A matching tree shows **Already up to date** and makes no project write. A pinned ref stays pinned; updating does not select a newer tag.
 

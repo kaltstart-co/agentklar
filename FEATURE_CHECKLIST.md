@@ -34,8 +34,8 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 - [x] Model advice
 - [x] Quality benchmarks (LiveBench reference)
 - [x] Automatic model choice
-- [x] Native instructions (Codex and Claude Code)
-- [x] Project skills
+- [x] Shared instruction files
+- [x] Shared skill folders
 - [x] Reviewed skill updates
 
 ## In progress
