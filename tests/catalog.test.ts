@@ -69,6 +69,23 @@ function snapshot(p: Project): CatalogSnapshot {
   return { projectId: p.id, checkedAt: "fixture", harnesses: [] };
 }
 
+function assertStopped(pid: number, label: string) {
+  if (process.platform === "linux") {
+    let stat: string;
+    try {
+      stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+      throw error;
+    }
+    // A killed orphan can remain as a zombie until PID 1 reaps it. It cannot run or hold pipes.
+    const state = stat.charAt(stat.lastIndexOf(") ") + 2);
+    assert.ok(["Z", "X", "x"].includes(state), `${label}: PID ${pid} is still running (Linux state ${state})`);
+    return;
+  }
+  assert.throws(() => process.kill(pid, 0), `${label}: PID ${pid} is still alive`);
+}
+
 test("Codex metadata probe sends only discovery methods, pages and deduplicates; quota uses map without private fields", async () => {
   const dir = mkdtempSync(join(tmpdir(), "agentklar-catalog-"));
   const file = join(dir, "native.mjs"),
@@ -119,6 +136,7 @@ test("Codex metadata probe sends only discovery methods, pages and deduplicates;
 });
 
 test("probe failures stay separate and sanitized; repeated cursors, oversized frames and timeout are bounded", async () => {
+  assert.throws(() => assertStopped(process.pid, "live control"));
   const dir = mkdtempSync(join(tmpdir(), "agentklar-probe-"));
   const file = join(dir, "native.mjs");
   writeFileSync(file, fixture);
@@ -152,7 +170,7 @@ test("probe failures stay separate and sanitized; repeated cursors, oversized fr
         const helperText = readFileSync(log + ".helper", "utf8").trim();
         const helper = Number(helperText);
         assert.ok(Number.isSafeInteger(helper) && helper > 0, `${mode}: invalid helper PID ${JSON.stringify(helperText)}`);
-        assert.throws(() => process.kill(helper, 0), `${mode}: helper PID ${helper} is still alive`);
+        assertStopped(helper, `${mode}: helper`);
       }
       assert.doesNotMatch(JSON.stringify(result), /SECRET|email@example/);
       if (mode === "models-fail") {
