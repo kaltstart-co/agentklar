@@ -129,3 +129,13 @@ Browser QA used a disposable project and local upstream fixture through the pinn
 On 2026-10-02, beta.4 browser checks covered widths of 320, 384, 650, 651, and 1280 CSS pixels. On Work, there was no navigation label overflow, button overlap, or horizontal page overflow. The Instructions button opened its view at 320 pixels.
 
 Local checks passed `npm run check`, all 85 tests, `npm run build`, and `git diff --check`. The navigation fix uses only CSS. These checks made no model calls.
+
+## LiveBench reference integration
+
+The benchmark API fixture checks authenticated cached reads without network access, strict empty refresh input, cookie/Origin rules, fixed public source URLs without private payloads, shared concurrent refresh, last-good preservation after failure, SQLite persistence across restart, coding versus reasoning advice, and compact chosen evidence in saved routing. It uses synthetic public response data and simulated workers with no model calls. MCP wire coverage reads the bundled scores with refresh disabled, rejects arbitrary URL input, and saves the requested task type. Source comparison and browser checks are separate from these local fixture checks.
+
+Browser checks on 2026-10-02 used the real bundled source and a successful public refresh with a fixed native catalog and simulated workers. Models showed the exact `gpt-6-luna` Agentic Coding score of 51.21/100. Economical coding advice selected `gpt-6-luna`; reasoning selected `gpt-5.6-luna` with 85.64/100. One simulated launch completed and saved the chosen metric, release, source row, checked time, decision method and task type. Browser error logs were empty, and a 384-pixel viewport had no horizontal page or navigation overflow. These checks made no native inference calls and do not establish native output quality or savings. Evidence is in `/tmp/agentklar-benchmarks-qa/`: `models.png`, `reasoning-advice.png`, `saved-choice.png`, and `mobile-choice.png`.
+
+An independent source comparison confirmed all 77 category scores across 11 mapped rows and both source hashes against the public CSV and category definitions.
+
+Final beta.5 local checks passed: `npm run check`, all 93 tests, `npm run build`, and `git diff --check`.

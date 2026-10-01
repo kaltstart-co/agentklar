@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { NativeSetupForm } from "./NativeSetupForm.js";
 import { InstructionsForm } from "./InstructionsForm.js";
+import { Benchmarks, BenchmarkDetail, BenchmarkEvidenceView } from "./Benchmarks.js";
+import type { BenchmarkSnapshot, TaskType } from "../src/benchmarks.js";
 import { SkillsForm } from "./SkillsForm.js";
 import {
   Alert,
@@ -85,6 +87,7 @@ export function App() {
   const [catalogs, setCatalogs] = useState<
     Record<string, CatalogSnapshot | null>
   >({});
+  const [benchmarks, setBenchmarks] = useState<BenchmarkSnapshot | null>(null);
   const [catalogBusy, setCatalogBusy] = useState("");
   const [catalogError, setCatalogError] = useState<{
     projectId: string;
@@ -118,6 +121,7 @@ export function App() {
   const [model, setModel] = useState("");
   const [automaticRouting, setAutomaticRouting] = useState(true);
   const [complexity, setComplexity] = useState<WorkerAdvice["complexity"]>("standard");
+  const [taskType, setTaskType] = useState<TaskType>("coding");
   const [requiresImages, setRequiresImages] = useState(false);
   const [advice, setAdvice] = useState<{ key: string; data: WorkerAdvice } | null>(null);
   const [adviceBusy, setAdviceBusy] = useState("");
@@ -143,7 +147,7 @@ export function App() {
   const taskWorker = workers.find((h) => h.id === taskHarness);
   const adviceKey = JSON.stringify([
     draftProjectId, roleId, taskHarness, model, selectedRole?.model,
-    taskProject?.preference, complexity, requiresImages, taskModal, connected,
+    taskProject?.preference, complexity, requiresImages, taskType, taskModal, connected,
   ]);
   const currentAdviceKey = useRef(adviceKey);
   currentAdviceKey.current = adviceKey;
@@ -171,6 +175,7 @@ export function App() {
         model: model.trim() || undefined,
         complexity,
         requiresImages,
+        taskType,
       });
       if (request === adviceRequest.current && key === currentAdviceKey.current)
         setAdvice({ key, data });
@@ -426,7 +431,7 @@ export function App() {
           : "This hosted page is a setup guide. Run the local app to see projects, workers and permission requests."}
       </p>
       <p className="hint">Requires Node 24 on macOS or Linux. Install the pinned beta package:</p>
-      <pre>npm install -g https://github.com/kaltstart-co/agentklar/releases/download/v0.1.0-beta.4/agentklar-0.1.0-beta.4.tgz{"\n"}agentklar start</pre>
+      <pre>npm install -g https://github.com/kaltstart-co/agentklar/releases/download/v0.1.0-beta.5/agentklar-0.1.0-beta.5.tgz{"\n"}agentklar start</pre>
       <p>
         Open the setup link from the terminal, then use{" "}
         <code>http://127.0.0.1:4317</code>.
@@ -558,8 +563,8 @@ export function App() {
         )}
         {project && (
           <div hidden={view !== "Instructions" || !connected}>
-            <InstructionsForm key={project.id} projectId={project.id} connected={connected} />
-            <SkillsForm key={project.id} projectId={project.id} connected={connected} />
+            <InstructionsForm key={`instructions-${project.id}`} projectId={project.id} connected={connected} />
+            <SkillsForm key={`skills-${project.id}`} projectId={project.id} connected={connected} />
           </div>
         )}
         {!loaded ? (
@@ -719,10 +724,11 @@ export function App() {
                                   run.routing.selected.basis === "role-pin" ? " · Saved role model pin" : " · Policy choice"}
                               </p>
                               <p className="hint">
-                                Saved preference: {run.routing.preference}. Task: {run.routing.complexity}
+                                Saved preference: {run.routing.preference}. Task: {run.routing.taskType || "coding"}, {run.routing.complexity}
                                 {run.routing.requiresImages ? ", images needed" : ""}.
                                 Native list checked {time(run.routing.catalogCheckedAt)}. Policy {run.routing.policyVersion}.
                               </p>
+                              {run.routing.selected.benchmark && <BenchmarkEvidenceView evidence={run.routing.selected.benchmark} method={run.routing.benchmarkMethod} />}
                               {run.routing.reasons.length > 0 && <ul>{run.routing.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>}
                               {run.routing.warnings.length > 0 && <ul>{run.routing.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>}
                               <p className="hint">Requested model: {run.model || "native default"}. Native reported model: {run.effectiveModel || "not reported"}.</p>
@@ -1039,6 +1045,7 @@ export function App() {
                   descriptions are API prices, not your subscription bill.
                 </p>
                 {catalogHeader}
+                <Benchmarks connected={connected} snapshot={benchmarks} onChange={setBenchmarks} />
                 {catalog?.harnesses.map((entry) => (
                   <div className="role-card" key={entry.harness}>
                     <h3>{harnessName(entry.harness)}</h3>
@@ -1074,6 +1081,7 @@ export function App() {
                             : "Unknown"}
                         </p>
                         {item.description && <p>{item.description}</p>}
+                        <BenchmarkDetail snapshot={benchmarks} harness={entry.harness} model={item.resolvedModel || item.id} />
                       </div>
                     ))}
                     {entry.modelsStatus === "available" &&
@@ -1295,7 +1303,7 @@ export function App() {
                 roleId: roleId || undefined,
                 harness: taskHarness,
                 model: model.trim() || undefined,
-                ...(automaticRouting ? { routing: { complexity, requiresImages } } : {}),
+                ...(automaticRouting ? { routing: { complexity, requiresImages, taskType } } : {}),
                 readOnly,
                 includeProjectContext,
                 ...(followUp ? { followUp } : {}),
@@ -1398,6 +1406,9 @@ export function App() {
                     { value: "hard", label: "Hard" },
                   ]}
                 />
+                <Select label="Task type" value={taskType} allowDeselect={false}
+                  data={[{ value: "coding", label: "Coding" }, { value: "reasoning", label: "Reasoning" }, { value: "data-analysis", label: "Data analysis" }, { value: "language", label: "Language" }]}
+                  onChange={(value) => setTaskType(value as TaskType)} />
                 <Checkbox
                   label="Images needed"
                   checked={requiresImages}
@@ -1438,8 +1449,9 @@ export function App() {
                     {adviceChoice?.warnings.filter((warning) => warning.includes("headroom is low"))
                       .map((warning) => <Alert color="orange" key={warning}>{warning}</Alert>)}
                     <p className="hint">
-                      Limited policy advice. Quality and subscription cost are unmeasured.
+                      Native policy advice may use LiveBench reference scores to break ties. Subscription cost remains unknown.
                     </p>
+                    {adviceChoice?.benchmark && <BenchmarkEvidenceView evidence={adviceChoice.benchmark} method={currentAdvice.benchmarkMethod} />}
                     {adviceChoice && (
                       <Button
                         size="xs"

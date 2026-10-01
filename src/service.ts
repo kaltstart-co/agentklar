@@ -24,6 +24,7 @@ import { harnesses, executable } from "./harnesses.ts";
 import { NativeWorker, type NativeCallbacks } from "./native.ts";
 import { ClaudeWorker } from "./claude.ts";
 import { CatalogCache, readCatalog, type CatalogReader } from "./catalog.ts";
+import { BenchmarkCache } from "./benchmarks.ts";
 import type { Run, Project, RoutingDecision, FollowUpContext } from "./contracts.ts";
 import { recommendationSchema, recommendWorker } from "./recommend.ts";
 import { Instructions, InstructionError, instructionFileSchema, instructionPreviewSchema } from "./instructions.ts";
@@ -75,6 +76,7 @@ export const startSchema = z
     routing: z.object({
       complexity: z.enum(["routine", "standard", "hard"]).default("standard"),
       requiresImages: z.boolean().default(false),
+      taskType: z.enum(["coding", "reasoning", "data-analysis", "language"]).default("coding"),
     }).strict().optional(),
     followUp: z.object({ runId: z.uuid(), kind: z.enum(["review", "fix"]) }).strict().optional(),
   })
@@ -123,6 +125,7 @@ export function createService(
   setupOptions: NativeSetupOptions = {},
   operator?: Operator,
   skillOptions: { timeoutMs?: number; sourceOverride?: (source: string) => string } = {},
+  benchmarkOptions: { fetcher?: typeof fetch; timeoutMs?: number } = {},
 ) {
   const release = ownHome(home);
   let store: Store;
@@ -132,6 +135,15 @@ export function createService(
     release();
     throw e;
   }
+  store.db.exec("CREATE TABLE IF NOT EXISTS benchmark_cache (id INTEGER PRIMARY KEY CHECK(id=1), snapshot TEXT NOT NULL)");
+  let cachedBenchmarks: unknown;
+  try {
+    const row = store.db.prepare("SELECT snapshot FROM benchmark_cache WHERE id=1").get() as { snapshot: string } | undefined;
+    if (row) cachedBenchmarks = JSON.parse(row.snapshot);
+  } catch { /* A damaged cache falls back to reviewed bundled data. */ }
+  const benchmarks = new BenchmarkCache((snapshot) => {
+    store.db.prepare("INSERT INTO benchmark_cache(id,snapshot) VALUES(1,?) ON CONFLICT(id) DO UPDATE SET snapshot=excluded.snapshot").run(JSON.stringify(snapshot));
+  }, cachedBenchmarks, benchmarkOptions.fetcher, benchmarkOptions.timeoutMs);
   const app = new Hono();
   const instructions = new Instructions(store.db);
   const skills = new ProjectSkills(store.db, home, skillOptions);
@@ -272,6 +284,20 @@ export function createService(
     c.header("Cache-Control", "no-store");
     return c.redirect("/");
   });
+  app.get("/api/benchmarks", (c) => {
+    if (new URL(c.req.url).search) return c.json({ error: "Benchmark queries are not supported." }, 400);
+    c.header("Cache-Control", "no-store");
+    return c.json(benchmarks.get());
+  });
+  app.post("/api/benchmarks/refresh", async (c) => {
+    if (new URL(c.req.url).search) return c.json({ error: "Benchmark queries are not supported." }, 400);
+    const parsed = z.object({}).strict().safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: "Provide an empty JSON object." }, 400);
+    if (stopping) return c.json({ error: "Local service is stopping." }, 503);
+    c.header("Cache-Control", "no-store");
+    try { return c.json(await benchmarks.refresh()); }
+    catch { return c.json({ error: "Public benchmark refresh failed. The last good scores are still available." }, 503); }
+  });
   app.get("/api/projects", (c) => c.json(store.projects()));
   app.get("/api/projects/:id/setup/:harness", async (c) => {
     const project = store.projects().find((p) => p.id === c.req.param("id"));
@@ -397,7 +423,7 @@ export function createService(
         recommendWorker(project, parsed.data, catalog, {
           codex: !!nativeCommand,
           claude: !!claudeCommand,
-        }),
+        }, Date.now(), benchmarks.get()),
       );
     } catch {
       return c.json(
@@ -582,7 +608,7 @@ export function createService(
           harness: data.harness,
           model: data.model,
           ...data.routing,
-        }, catalog, { codex: !!nativeCommand, claude: !!claudeCommand });
+        }, catalog, { codex: !!nativeCommand, claude: !!claudeCommand }, Date.now(), benchmarks.get());
       } catch {
         if (quiesced || stopping) return c.json({ error: "Local service is stopping." }, 503);
         return c.json({ error: "Native routing evidence could not be read. Retry or choose a model manually." }, 503);
@@ -614,9 +640,12 @@ export function createService(
         selected: {
           harness: choice.harness, model: choice.model, roleId: choice.roleId,
           basis: choice.basis, tier: choice.tier,
+          ...(choice.benchmark ? { benchmark: choice.benchmark } : {}),
         },
         preference: advice.preference,
         complexity: advice.complexity,
+        taskType: advice.taskType,
+        benchmarkMethod: advice.benchmarkMethod,
         requiresImages: advice.requiresImages,
         catalogCheckedAt: advice.catalogCheckedAt,
         policyVersion: advice.policyVersion,
@@ -831,6 +860,7 @@ export function createService(
         await skills.close();
         await nativeSetup.close();
         await catalogs.close();
+        await benchmarks.close();
         const current = [...workers.values()];
         for (const w of current) w.stop();
         await Promise.all(current.map((w) => w.closed));

@@ -1,3 +1,4 @@
+import type { BenchmarkEvidence, TaskType } from "./benchmarks.ts";
 export type Preference = "economical" | "balanced" | "best";
 export type Role = {
   id: string;
@@ -164,6 +165,7 @@ export type CatalogSnapshot = {
 
 export type TaskComplexity = "routine" | "standard" | "hard";
 export type WorkerChoice = {
+  benchmark?: BenchmarkEvidence;
   harness: "codex" | "claude";
   model: string;
   roleId?: string;
@@ -173,6 +175,8 @@ export type WorkerChoice = {
   warnings: string[];
 };
 export type WorkerAdvice = {
+  taskType?: TaskType;
+  benchmarkMethod?: "reference-tie-break" | "policy-fallback" | "pin";
   projectId: string;
   createdAt: string;
   catalogCheckedAt: string;
@@ -190,7 +194,9 @@ export type WorkerAdvice = {
 
 // Saved with a run. Keep native catalog and quota details out of run polling.
 export type RoutingDecision = {
-  selected: Pick<WorkerChoice, "harness" | "model" | "roleId" | "basis" | "tier">;
+  taskType?: TaskType;
+  benchmarkMethod?: "reference-tie-break" | "policy-fallback" | "pin";
+  selected: Pick<WorkerChoice, "harness" | "model" | "roleId" | "basis" | "tier" | "benchmark">;
   preference: Preference;
   complexity: TaskComplexity;
   requiresImages: boolean;

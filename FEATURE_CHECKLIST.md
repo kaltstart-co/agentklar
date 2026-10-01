@@ -30,6 +30,7 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 - [x] Native model list
 - [x] Muse model discovery
 - [x] Model advice
+- [x] Quality benchmarks (LiveBench reference)
 - [x] Automatic model choice
 - [x] Native instructions (Codex and Claude Code)
 - [x] Project skills
@@ -43,7 +44,6 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 ## Next
 
 - [ ] Other harness workers
-- [ ] Quality benchmarks
 - [ ] Global skills
 - [ ] Plugin bundles
 - [ ] Wider config preview and rollback

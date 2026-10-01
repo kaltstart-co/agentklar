@@ -1,3 +1,4 @@
+import { benchmarksFresh, evidenceForModel, benchmarkNotice, type BenchmarkSnapshot } from "./benchmarks.ts";
 import { z } from "zod";
 import type {
   CatalogModel,
@@ -14,6 +15,7 @@ export const recommendationSchema = z
     harness: z.enum(["codex", "claude"]).optional(),
     model: z.string().min(1).max(120).optional(),
     complexity: z.enum(["routine", "standard", "hard"]).default("standard"),
+    taskType: z.enum(["coding", "reasoning", "data-analysis", "language"]).default("coding"),
     requiresImages: z.boolean().default(false),
   })
   .strict();
@@ -26,6 +28,7 @@ type Candidate = {
   distance: number;
   allowed: boolean;
   order: number;
+  benchmarkModel: string;
 };
 
 // Reviewed product policy order, not measured coding quality or price.
@@ -132,6 +135,7 @@ export function recommendWorker(
   snapshot: CatalogSnapshot,
   installed: Record<Harness, boolean>,
   now = Date.now(),
+  benchmarks?: BenchmarkSnapshot,
 ): WorkerAdvice {
   const role = input.roleId
     ? project.roles.find((r) => r.id === input.roleId)
@@ -153,6 +157,8 @@ export function recommendWorker(
     catalogCheckedAt: snapshot.checkedAt,
     preference: project.preference,
     complexity: input.complexity,
+    taskType: input.taskType,
+    benchmarkMethod: pin ? "pin" : "policy-fallback",
     requiresImages: input.requiresImages,
     choice: null,
     alternatives: [],
@@ -160,9 +166,9 @@ export function recommendWorker(
     warnings: [
       "Limited policy advice. Model access, coding quality and actual subscription cost are not verified.",
     ],
-    policyVersion: "2026-10-01.1",
+    policyVersion: "2026-10-02.1",
     confidence: "limited",
-    sources,
+    sources: [...sources],
   };
   const warn = (message: string) => {
     if (advice.warnings.length < 8 && !advice.warnings.includes(message))
@@ -275,6 +281,7 @@ export function recommendWorker(
       distance: Math.abs(tierIndex - targetIndex),
       allowed: q.allowed,
       order: p.order,
+      benchmarkModel: catalog.harness === "claude" ? model?.resolvedModel || id : id,
     });
   };
   const allowedHarnesses: Harness[] = harness ? [harness] : ["codex", "claude"];
@@ -319,22 +326,47 @@ export function recommendWorker(
       a.choice.harness.localeCompare(b.choice.harness) ||
       a.choice.model.localeCompare(b.choice.model),
   );
-  // Resolved Claude aliases may duplicate a concrete model. Return it once.
-  const unique = candidates.filter(
-    (c, i) =>
-      candidates.findIndex(
-        (other) =>
-          other.choice.harness === c.choice.harness &&
-          other.choice.model === c.choice.model,
-      ) === i,
-  );
+  // Native aliases can resolve to the same model; rank that identity once.
+  candidates.splice(0, candidates.length, ...candidates.filter((c, i) => candidates.findIndex(other => other.choice.harness === c.choice.harness && other.choice.model === c.choice.model) === i));
+  // Compare whole groups only: mixing scored and unknown pairs breaks sort consistency.
+  if (!pin && benchmarks && benchmarksFresh(benchmarks, now)) {
+    for (let start = 0; start < candidates.length;) {
+      let end = start + 1;
+      while (end < candidates.length && candidates[end].distance === candidates[start].distance && candidates[end].allowed === candidates[start].allowed) end++;
+      const group = candidates.slice(start, end);
+      const evidence = group.map(c => evidenceForModel(benchmarks, c.choice.harness, c.benchmarkModel, input.taskType));
+      if (group.length > 1 && evidence.every(e => e !== undefined)) {
+        group.forEach((c, i) => { c.choice.benchmark = evidence[i]; });
+        group.sort((a, b) => b.choice.benchmark!.score - a.choice.benchmark!.score);
+        candidates.splice(start, group.length, ...group);
+      }
+      start = end;
+    }
+  }
+  const unique = candidates;
   advice.choice = unique[0]?.choice || null;
+  if (advice.choice?.benchmark) {
+    advice.benchmarkMethod = "reference-tie-break";
+    advice.reasons.push(`Fresh LiveBench ${advice.choice.benchmark.metric} reference scores break this equal policy fit after native included usage priority.`);
+
+  } else if (!pin) {
+    advice.reasons.push("Policy order is used: no comparable tie needs ranking, or the group lacks fresh, exact LiveBench scores for every candidate.");
+  }
+  // Report exact references even when they did not affect policy ordering or a pin.
+  if (benchmarks) unique.forEach(c => { c.choice.benchmark ??= evidenceForModel(benchmarks, c.choice.harness, c.benchmarkModel, input.taskType); });
+  if (advice.choice?.benchmark) {
+    advice.warnings = [benchmarkNotice, ...advice.warnings.filter(w => w !== benchmarkNotice)].slice(0, 8);
+    advice.sources.push(advice.choice.benchmark.sourceUrl);
+    if (!benchmarksFresh(benchmarks!, now)) warn("LiveBench reference data is older than seven days or has a future check time; it was excluded from routing.");
+  }
   advice.alternatives = pin ? [] : unique.slice(1, 4).map((c) => c.choice);
   advice.reasons.push(
     advice.choice
       ? pin
         ? "Advice preserves the model pin. Starting a worker still needs an explicit task_start call."
-        : "Choices prefer the target tier, then the nearest reviewed tier; equal fits prefer known native included usage, then the reviewed policy order."
+        : advice.benchmarkMethod === "reference-tie-break"
+          ? "Choices prefer the target tier, then the nearest reviewed tier; equal fits prefer known native included usage, then fresh comparable LiveBench reference scores."
+          : "Choices prefer the target tier, then the nearest reviewed tier; equal fits prefer known native included usage, then the reviewed policy order."
       : "No supported choice has enough evidence for this request. Inspect native settings or change the request explicitly.",
   );
   return advice;

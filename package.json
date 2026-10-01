@@ -1,16 +1,25 @@
 {
   "name": "agentklar",
-  "version": "0.1.0-beta.4",
+  "version": "0.1.0-beta.5",
   "private": true,
   "type": "module",
   "bin": {
     "agentklar": "bin/agentklar.mjs"
   },
-  "files": ["bin", "dist", "LICENSE", "README.md"],
+  "files": [
+    "bin",
+    "dist",
+    "LICENSE",
+    "README.md",
+    "THIRD_PARTY_NOTICES.md"
+  ],
   "engines": {
     "node": ">=24 <25"
   },
-  "os": ["darwin", "linux"],
+  "os": [
+    "darwin",
+    "linux"
+  ],
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "tsc -p tsconfig.build.json && vite build",
@@ -20,7 +29,8 @@
     "start": "node dist/server/server.js",
     "service": "node dist/server/launchd.js",
     "mcp": "node dist/server/mcp.js",
-    "check": "tsc --noEmit"
+    "check": "tsc --noEmit",
+    "refresh:benchmarks": "node --import tsx scripts/refresh-benchmarks.ts"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.3.286",

@@ -63,11 +63,19 @@ test("SDK stdio wire lists and calls tools; closing MCP leaves service worker al
     assert.equal(service.store.runs().length, 0);
     assert.equal(catalogReads, 0);
     const list = await client.listTools();
-    assert.equal(list.tools.length, 16);
+    assert.equal(list.tools.length, 17);
     assert.equal(
       list.tools.some((t) => /approve/.test(t.name)),
       false,
     );
+    const scores = await client.callTool({ name: "benchmarks_list", arguments: {} });
+    const benchmark = JSON.parse((scores.content as { text: string }[])[0].text);
+    assert.equal(benchmark.release, "2026-06-25");
+    assert.ok(benchmark.models.length > 0);
+    assert.equal(catalogReads, 0);
+    assert.equal(service.store.runs().length, 0);
+    const badBenchmark = await client.callTool({ name: "benchmarks_list", arguments: { url: "https://example.com" } });
+    assert.equal(badBenchmark.isError, true);
     const pResult = await client.callTool({
       name: "project_register",
       arguments: { name: "wire", path: project },
@@ -150,12 +158,13 @@ test("SDK stdio wire lists and calls tools; closing MCP leaves service worker al
     const routedStart = await client.callTool({
       name: "task_start",
       arguments: { projectId: routedProject.id, prompt: "complete", idempotencyKey: "routed-wire",
-        routing: { complexity: "routine", requiresImages: false } },
+        routing: { complexity: "routine", requiresImages: false, taskType: "reasoning" } },
     });
     assert.equal(routedStart.isError, false);
     const routedRun = JSON.parse((routedStart.content as { text: string }[])[0].text);
     assert.equal(routedRun.model, "gpt-6-luna");
     assert.equal(routedRun.routing.selected.basis, "policy");
+    assert.equal(routedRun.routing.taskType, "reasoning");
     assert.equal(catalogReads, 2);
     const linkedPath = join(dir, "linked");
     mkdirSync(linkedPath);

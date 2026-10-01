@@ -9,7 +9,7 @@ This is a fresh TypeScript rewrite. The old Go application is preserved in Git a
 Requires Node 24 and npm on macOS or Linux. Install this pinned GitHub beta package, then start the local service:
 
 ```sh
-npm install -g https://github.com/kaltstart-co/agentklar/releases/download/v0.1.0-beta.4/agentklar-0.1.0-beta.4.tgz
+npm install -g https://github.com/kaltstart-co/agentklar/releases/download/v0.1.0-beta.5/agentklar-0.1.0-beta.5.tgz
 agentklar start
 ```
 
@@ -48,7 +48,7 @@ To update, stop the service, install a new pinned release tarball, then start it
 
 Register an existing project folder. Add roles with a harness, optional model, and responsibility. Start a task from your native harness through MCP or from the local UI. Only registered projects can run workers. Each project allows one worker at a time; a busy request returns an error. Repeating the same task with the same idempotency key returns its original run.
 
-Project cost preference is saved as economical, balanced, or best. Optional model advice uses that saved preference, task complexity, native availability and model family profiles. Your explicit task or role model pin takes priority. Role responsibility is sent with the task, and the role snapshot, worker harness, and actual native model stay in its history. Choose an installed worker harness in the local UI. A selected role chooses its harness. Changing the harness clears the model pin so a model name from another harness is not carried over.
+Project cost preference is saved as economical, balanced, or best. Optional model advice uses that saved preference, task type, complexity, native availability and model family profiles. Fresh comparable LiveBench reference scores can break policy ties. Your explicit task or role model pin takes priority. Role responsibility is sent with the task, and the role snapshot, worker harness, and actual native model stay in its history. Choose an installed worker harness in the local UI. A selected role chooses its harness. Changing the harness clears the model pin so a model name from another harness is not carried over.
 
 ## Native models and account allowance
 
@@ -56,13 +56,19 @@ Open **Models**, choose a project, and select **Refresh models and allowance**. 
 
 **Usage** shows native Codex account allowance when available: used and remaining percentages, window duration, and reset time in your local time zone. These limits are shared across the native account; project task tokens do not calculate them. A native included-usage block remains visible even when a percentage window has reset. Claude account allowance is unavailable through the current SDK. Muse account allowance is not read by this adapter. Missing information stays unknown. Native reads occur when you request a refresh or model advice; the normal task polling reads no model or quota data. Catalog snapshots are cached per project and refreshes within 30 seconds reuse that cache.
 
+## Benchmark references
+
+Models shows cached [LiveBench scores](https://livebench.ai/table_2026_06_25.csv) from reviewed release 2026-06-25. Expand a model to see its category scores and source row. Refresh benchmarks downloads only fixed public sources; it sends no project data and makes no model call. The last good snapshot stays available if refresh fails. Advice and launches use bundled or cached scores without downloading them. Scores checked more than seven days ago are excluded from tie breaking. Automatic discovery of a new benchmark release is not implemented.
+
+Task type selects Agentic Coding (default), Reasoning, Data Analysis or Language. Exact reviewed model IDs use max-effort benchmark rows. Native settings and task environments can differ, so the scores are reference evidence and do not promise native performance or subscription savings. Explicit pins and native limits still take priority. See [third-party notices](THIRD_PARTY_NOTICES.md) for source attribution.
+
 ## Model advice
 
 In **New task**, **Choose model automatically** is on by default. Select task complexity and **Images needed** under **Task needs and model preview**, then select **Start worker**. AgentKlar reads native model and allowance metadata, applies the saved Team preference, records its choice and starts one worker. The selected worker harness and task or role model pin stay fixed. Turn automatic choice off to use a typed model or native default. **Suggest a model** is an optional preview; **Use suggestion** copies that model into the form and makes it a task pin. A failed choice leaves the draft open and starts no worker.
 
-Your native harness can classify the task with its existing model and call `task_start` with `routing:{complexity,requiresImages}`. This chooses and starts a worker in one call. `recommend_worker` remains an optional preview. The router itself uses no LLM. Choices use source-based family profiles and native model lists; they are policy decisions without measured quality scores, savings or subscription cost. Unknown account allowance stays unknown. Model image support does not imply browser or tool access. Claude image support is unknown through the current SDK.
+Your native harness can classify the task with its existing model and call `task_start` with `routing:{complexity,requiresImages,taskType}`. This chooses and starts a worker in one call. `recommend_worker` remains an optional preview. The router itself uses no LLM. Choices use reviewed family profiles and native model lists. Fresh LiveBench reference scores can break ties within the same policy and known-allowance group when every candidate has comparable evidence. Subscription cost and savings remain unknown. Unknown account allowance stays unknown. Model image support does not imply browser or tool access. Claude image support is unknown through the current SDK.
 
-Each routed run keeps a small record of the selected model, task needs and policy reasons. The task detail shows the requested model and the model reported by the native harness separately. A worker failure does not trigger another model automatically. Quality benchmarks remain planned.
+Each routed run keeps a small record of the selected model, task needs and policy reasons. The task detail shows the requested model and the model reported by the native harness separately. A worker failure does not trigger another model automatically. The task detail also shows any selected benchmark reference and whether it broke a tie.
 
 ## Linked review and fix
 
@@ -129,7 +135,7 @@ On a service restart, unfinished runs become interrupted. Native sessions are re
 
 For a finished run, open **Continue in native harness** in its task detail, or call `run_handoff({runId})` through MCP. AgentKlar shows a POSIX terminal command only when it has the saved native session UUID, session home, project folder, and installed CLI, with no active worker in that project. The command keeps the saved model when known and Codex read-only sandbox when selected. For Claude, it also keeps whether `CLAUDE_CONFIG_DIR` was set or unset when the worker started; setting that variable changes where Claude reads its config. Claude read-only runs have no ready command because their SDK tool restriction cannot be carried into native CLI resume. Older runs without saved session scope have no ready command. The command is a snapshot; AgentKlar does not launch or monitor the manual session. Close native work before starting another worker in the same project.
 
-Results and event tails have character limits and explicit truncation flags. Native token counts are shown when available. Dollar cost and model quality scores remain unknown. Account allowance is shown only when the native harness provides it.
+Results and event tails have character limits and explicit truncation flags. Native token counts are shown when available. Dollar cost and native task quality remain unknown. Account allowance is shown only when the native harness provides it.
 
 ## Check the code
 

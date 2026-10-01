@@ -47,13 +47,14 @@ try {
   const packOutput = run("npm", ["pack", "--json", "--pack-destination", temp]);
   const pack = JSON.parse(packOutput.slice(packOutput.lastIndexOf("\n[\n") + 1));
   assert.equal(pack.length, 1);
-  assert.ok(pack[0].files.every(({ path }) => path === "package.json" || path === "README.md" || path === "LICENSE" || path.startsWith("bin/") || path.startsWith("dist/")));
+  assert.ok(pack[0].files.every(({ path }) => path === "package.json" || path === "README.md" || path === "LICENSE" || path === "THIRD_PARTY_NOTICES.md" || path.startsWith("bin/") || path.startsWith("dist/")));
   const tarball = join(temp, `agentklar-${version}.tgz`);
   assert.ok(existsSync(tarball));
   run("npm", ["install", "-g", "--prefix", prefix, "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund", tarball], foreign);
   const cli = join(prefix, "bin", "agentklar");
   const packageDir = join(prefix, "lib", "node_modules", "agentklar");
   assert.ok(existsSync(cli));
+  assert.match(readFileSync(join(packageDir, "THIRD_PARTY_NOTICES.md"), "utf8"), /LiveBench/);
   assert.ok(!existsSync(join(packageDir, "node_modules", "tsx")));
   assert.ok(!existsSync(join(packageDir, "node_modules", "vite")));
   assert.equal(run(cli, ["--version"], foreign), version);
