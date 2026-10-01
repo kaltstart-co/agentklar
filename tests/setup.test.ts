@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, rmSync, readFileSync, writeFileSync, existsSync, realpathSync, symlinkSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, readFileSync, writeFileSync, existsSync, realpathSync, symlinkSync, linkSync, statSync, chmodSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "node:net";
@@ -10,10 +10,10 @@ import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import { createService } from "../src/service.ts";
 import { nativeSetupCommand } from "../src/setup.ts";
 
-async function fixture(port = 4317) {
+async function fixture(port = 4317, homeName = "agentklar home") {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "agentklar-setup-test-")));
-  const home = join(dir, "agentklar home"), codex = join(dir, "codex home"), claude = join(dir, "claude home"), project = join(dir, "project with spaces ' $()");
-  for (const path of [home, codex, claude, project]) mkdirSync(path);
+  const home = join(dir, homeName), codex = join(dir, "codex home"), claude = join(dir, "claude home"), xdg = join(dir, "xdg home"), project = join(dir, "project with spaces ' $()");
+  for (const path of [home, codex, claude, xdg, project]) mkdirSync(path);
   const command = join(dir, "native cli.mjs"), mode = join(dir, "mode"), calls = join(dir, "calls");
   writeFileSync(mode, "");
   writeFileSync(command, `#!${process.execPath}\n` + String.raw`
@@ -62,20 +62,126 @@ if(args[0]==='app-server') {
 }
 `, { mode: 0o700 });
   let starts = 0;
-  const nativeEnv = { ...process.env, CODEX_HOME: codex, CLAUDE_CONFIG_DIR: claude, SETUP_MODE: mode, SETUP_CALLS: calls };
-  let service = createService(home, port, () => { starts++; return { stop() {} }; }, command, command, undefined, { env: nativeEnv, timeoutMs: 1200 });
+  const nativeEnv = { ...process.env, CODEX_HOME: codex, CLAUDE_CONFIG_DIR: claude, XDG_CONFIG_HOME: xdg, SETUP_MODE: mode, SETUP_CALLS: calls };
+  let currentPort = port;
+  let service = createService(home, currentPort, () => { starts++; return { stop() {} }; }, command, command, undefined, { env: nativeEnv, timeoutMs: 1200 }, undefined, {}, {}, command);
   let cookie = "";
   async function auth() { const response = await service.app.request(service.setupUrl); cookie = response.headers.get("set-cookie")!.split(";")[0]; }
   await auth();
-  const headers = () => ({ Cookie: cookie, Origin: `http://127.0.0.1:${port}`, "Content-Type": "application/json" });
-  const call = (path: string, method = "GET", body?: unknown, authHeaders: Record<string,string> = headers()) => service.app.request(`http://127.0.0.1:${port}${path}`, { method, headers: authHeaders, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+  const headers = () => ({ Cookie: cookie, Origin: `http://127.0.0.1:${currentPort}`, "Content-Type": "application/json" });
+  const call = (path: string, method = "GET", body?: unknown, authHeaders: Record<string,string> = headers()) => service.app.request(`http://127.0.0.1:${currentPort}${path}`, { method, headers: authHeaders, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
   const p = await (await call("/api/projects", "POST", { name: "setup test", path: project })).json();
   const base = (harness = "codex") => `/api/projects/${p.id}/setup/${harness}`;
   const preview = async (harness = "codex") => (await call(`${base(harness)}/preview`, "POST", {})).json();
   const apply = async (id: string, harness = "codex") => call(`${base(harness)}/apply`, "POST", { previewId: id });
-  return { dir, home, codex, claude, project, p, command, mode, calls, base, call, preview, apply, get service() { return service; }, get cookie() { return cookie; }, get starts() { return starts; }, restart: async () => { await service.close(); service = createService(home, port, () => { starts++; return { stop() {} }; }, command, command, undefined, { env: nativeEnv, timeoutMs: 1200 }); await auth(); }, cleanup: async () => { await service.close(); rmSync(dir, { recursive: true, force: true }); } };
+  return { dir, home, codex, claude, xdg, project, p, command, mode, calls, base, call, preview, apply, get service() { return service; }, get cookie() { return cookie; }, get starts() { return starts; }, restart: async (nextPort = port) => { await service.close(); currentPort = nextPort; service = createService(home, currentPort, () => { starts++; return { stop() {} }; }, command, command, undefined, { env: nativeEnv, timeoutMs: 1200 }, undefined, {}, {}, command); await auth(); }, cleanup: async () => { await service.close(); rmSync(dir, { recursive: true, force: true }); } };
 }
 function config(path: string) { return JSON.parse(readFileSync(path,"utf8")); }
+test("Muse setup writes only its user MCP entry and restores other settings after restart", async () => {
+  const f = await fixture();
+  try {
+    const file = join(f.xdg, "muse", "settings.json"); mkdirSync(join(f.xdg, "muse"));
+    const original = { schema_version: 1, modes: { custom: { description: "NATIVE_PRIVATE_SECRET" } }, mcpServers: { other: { type: "stdio", command: "/bin/true", args: [] } } };
+    writeFileSync(file, JSON.stringify(original), { mode: 0o660 }); chmodSync(file, 0o660);
+    const before = await (await f.call(f.base("muse"))).json(); assert.equal(before.status, "missing"); assert.equal(before.scope, "User");
+    const preview = await f.preview("muse"); assert.equal(preview.command, null); assert.equal(preview.cwd, null); assert.equal(preview.configPath, file);
+    assert.equal(JSON.stringify(preview).includes("NATIVE_PRIVATE_SECRET"), false);
+    const applied = await (await f.apply(preview.id, "muse")).json(); assert.equal(applied.state, "applied");
+    assert.deepEqual(config(file).modes, original.modes); assert.deepEqual(config(file).mcpServers.other, original.mcpServers.other);
+    assert.deepEqual(config(file).mcpServers.agentklar, preview.entry); assert.equal(statSync(file).mode & 0o777, 0o660);
+    assert.equal((await (await f.call(f.base("muse"))).json()).canUndo, true);
+    await f.restart();
+    assert.equal((await f.call(`${f.base("muse")}/undo`, "POST", { changeId: applied.id })).status, 200);
+    assert.deepEqual(config(file), original); assert.equal(statSync(file).mode & 0o777, 0o660);
+    assert.equal(existsSync(f.calls), false);
+    assert.equal(JSON.stringify(f.service.store.db.prepare("SELECT data FROM native_setup_changes").all()).includes("NATIVE_PRIVATE_SECRET"), false);
+  } finally { await f.cleanup(); }
+});
+test("Muse setup creates private settings and refuses old schemas and foreign entries", async () => {
+  const f = await fixture();
+  try {
+    const file = join(f.xdg, "muse", "settings.json");
+    const applied = await (await f.apply((await f.preview("muse")).id, "muse")).json();
+    assert.equal(statSync(file).mode & 0o777, 0o600); assert.equal(config(file).schema_version, 1);
+    assert.equal((await f.call(`${f.base("muse")}/undo`, "POST", { changeId: applied.id })).status, 200);
+    for (const body of [{ mcpServers: {} }, { schema_version: 1, mcp_servers: {} }, { schema_version: 2 }, { schema_version: 1, mcpServers: [] }]) {
+      writeFileSync(file, JSON.stringify(body));
+      assert.equal((await (await f.call(f.base("muse"))).json()).status, "unavailable");
+      assert.equal((await f.call(`${f.base("muse")}/preview`, "POST", {})).status, 422);
+    }
+    writeFileSync(file, JSON.stringify({ schema_version: 1, mcpServers: { agentklar: { type: "stdio", command: "foreign", args: [], env: {} } } }));
+    assert.equal((await (await f.call(f.base("muse"))).json()).status, "conflict");
+    assert.equal((await f.call(`${f.base("muse")}/preview`, "POST", {})).status, 409);
+  } finally { await f.cleanup(); }
+});
+test("Muse undo removes its unchanged saved entry after the service port changes", async () => {
+  const f = await fixture();
+  try {
+    const file = join(f.xdg, "muse", "settings.json");
+    const applied = await (await f.apply((await f.preview("muse")).id, "muse")).json();
+    assert.equal(config(file).mcpServers.agentklar.env.AGENTKLAR_PORT, "4317");
+    await f.restart(4318);
+    const status = await (await f.call(f.base("muse"))).json();
+    assert.equal(status.canUndo, true);
+    assert.equal((await f.call(`${f.base("muse")}/undo`, "POST", { changeId: applied.id })).status, 200);
+    assert.equal(Object.hasOwn(config(file).mcpServers, "agentklar"), false);
+  } finally { await f.cleanup(); }
+});
+test("Muse setup rejects stale settings, project overrides and unsafe files", async () => {
+  const f = await fixture();
+  try {
+    const folder = join(f.xdg, "muse"), file = join(folder, "settings.json"); mkdirSync(folder);
+    const first = await f.preview("muse"); writeFileSync(file, JSON.stringify({ schema_version: 1, unrelated: true }));
+    assert.equal((await f.apply(first.id, "muse")).status, 409);
+    mkdirSync(join(f.dir, ".git"));
+    const second = await f.preview("muse");
+    writeFileSync(join(f.dir, ".mcp.json"), JSON.stringify({ mcpServers: { agentklar: { type: "stdio", command: "foreign" } } }));
+    assert.equal((await f.apply(second.id, "muse")).status, 409);
+    assert.equal((await (await f.call(f.base("muse"))).json()).status, "conflict");
+    mkdirSync(join(f.project, ".git"));
+    assert.equal((await (await f.call(f.base("muse"))).json()).status, "missing");
+    const third = await f.preview("muse"); const applied = await (await f.apply(third.id, "muse")).json();
+    const settings = config(file); settings.mcpServers.agentklar.env.EXTRA = "foreign"; writeFileSync(file, JSON.stringify(settings));
+    assert.equal((await (await f.call(f.base("muse"))).json()).canUndo, false);
+    assert.equal((await f.call(`${f.base("muse")}/undo`, "POST", { changeId: applied.id })).status, 409);
+    rmSync(file); symlinkSync(join(f.dir, ".mcp.json"), file);
+    assert.equal((await (await f.call(f.base("muse"))).json()).status, "unavailable");
+    rmSync(file); writeFileSync(file, JSON.stringify({ schema_version: 1 })); linkSync(file, join(f.dir, "hardlinked-settings"));
+    assert.equal((await (await f.call(f.base("muse"))).json()).status, "unavailable");
+  } finally { await f.cleanup(); }
+});
+test("Muse setup rejects a replaced settings folder before creating a missing file", async () => {
+  const f = await fixture();
+  try {
+    const folder = join(f.xdg, "muse"); mkdirSync(folder);
+    const preview = await f.preview("muse");
+    rmSync(folder, { recursive: true }); mkdirSync(folder);
+    assert.equal((await f.apply(preview.id, "muse")).status, 409);
+    assert.equal(existsSync(join(folder, "settings.json")), false);
+  } finally { await f.cleanup(); }
+});
+test("Muse setup rejects data paths that Muse would expand as environment variables", async () => {
+  const f = await fixture(4317, "agentklar ${HOME}");
+  try {
+    assert.equal((await (await f.call(f.base("muse"))).json()).status, "unavailable");
+    assert.equal((await f.call(`${f.base("muse")}/preview`, "POST", {})).status, 422);
+    assert.equal(existsSync(join(f.xdg, "muse", "settings.json")), false);
+  } finally { await f.cleanup(); }
+});
+test("Muse setup leaves bounded input unchanged when formatted output would exceed 2 MiB", async () => {
+  const f = await fixture();
+  try {
+    const folder = join(f.xdg, "muse"), file = join(folder, "settings.json"); mkdirSync(folder);
+    const original = JSON.stringify({ schema_version: 1, dense: Array(300000).fill(0) });
+    assert.ok(Buffer.byteLength(original) < 2 * 1024 * 1024);
+    writeFileSync(file, original);
+    const preview = await f.preview("muse");
+    assert.equal((await f.apply(preview.id, "muse")).status, 503);
+    assert.equal(readFileSync(file, "utf8"), original);
+    assert.deepEqual(readdirSync(folder), ["settings.json"]);
+    assert.equal(Object.hasOwn(config(file), "mcpServers"), false);
+  } finally { await f.cleanup(); }
+});
 test("native setup previews exact absolute bridge argv, installs per harness and undoes only owned entry after restart", async () => {
   const f = await fixture();
   try {
@@ -118,9 +224,9 @@ test("setup rejects MCP-only and mixed credentials, absent Origin, extra paths a
   const f = await fixture();
   try {
     const bearer = {Authorization:`Bearer ${f.service.bearer}`,Origin:"http://127.0.0.1:4317","Content-Type":"application/json"};
-    for(const auth of [bearer,{...bearer,Cookie:f.cookie}]) {
-      assert.equal((await f.call(f.base(),"GET",undefined,auth)).status,403);
-      for(const op of ["preview","apply","undo"]) assert.equal((await f.call(`${f.base()}/${op}`,"POST",{},auth)).status,403);
+    for(const auth of [bearer,{...bearer,Cookie:f.cookie}]) for (const harness of ["codex", "muse"]) {
+      assert.equal((await f.call(f.base(harness),"GET",undefined,auth)).status,403);
+      for(const op of ["preview","apply","undo"]) assert.equal((await f.call(`${f.base(harness)}/${op}`,"POST",{},auth)).status,403);
     }
     assert.equal((await f.call(`${f.base()}/preview`,"POST",{}, { Cookie:f.cookie,"Content-Type":"application/json" })).status,403);
     assert.equal((await f.call(`${f.base()}/preview`,"POST",{}, { Cookie:f.cookie,Origin:"https://evil.example","Content-Type":"application/json" })).status,403);

@@ -2,6 +2,16 @@
 
 Verified on 2026-10-01 and 2026-10-02 using Node 24.21.0. The old application was not used.
 
+## Muse MCP host setup — beta.8
+
+The trusted local UI now offers Muse User scope preview, apply, and undo for `mcpServers.agentklar` in Muse's `settings.json`. The guarded write keeps unrelated JSON settings and file permissions. A new settings file uses mode 0600. Existing entries are not adopted or overwritten. Project `.mcp.json` entries, changed settings, unsafe files, old schemas, and replaced settings folders block the change. An unchanged managed entry can still be undone after the AgentKlar service port changes.
+
+Automated checks used temporary native homes and did not change the user's Muse settings. A test confirms that a valid input file stays byte for byte unchanged when adding the entry would make the formatted file exceed the 2 MiB read limit. `npm run check`, all 114 tests, `npm run build`, and `git diff --check` passed.
+
+An isolated native check applied the generated built bridge entry through the setup API. The official MCP client listed all 17 tools and `projects_list` read the registered test project from the running service. Muse 1.4.1 then loaded the same command, arguments and environment with its offline echo provider and exited successfully. Only the test config set `required:true` so a failed MCP startup would fail the check. Removing that test-only flag allowed guarded undo, and status returned to missing. No paid inference or real user config change occurred. Evidence: `/tmp/agentklar-muse-setup-qa/generated-entry-evidence.json`.
+
+Browser QA in a separate temporary config verified Muse selection, the User scope preview, apply, the configured notice, and undo. Settings had no horizontal overflow or clipped navigation labels at 320 pixels; browser error logs were empty. Evidence in the same folder: `setup-configured.png` and `setup-mobile.png`. These checks establish native MCP loading and bridge access, not autonomous delegation by a Muse model.
+
 ## Muse subscription usage snapshot — beta.7
 
 The owned Muse worker now asks `usage/read` once after its root turn ends and waits at most 750 ms. Valid observations save only the reading time, window and weekly used percentages, reset times, and window duration on that run. Missing or failed reads leave usage unknown without changing the task result. Task detail and Usage show the reading as an account snapshot. It may include work outside AgentKlar and does not determine model access, a live balance, or cost. Catalog refresh and normal task polling make no Muse usage request; routing does not use these snapshots. The SDK client owns the connection's single notification handler, so the worker does not replace SDK event routing to watch `usage/changed`.

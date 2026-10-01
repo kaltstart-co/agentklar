@@ -11,7 +11,7 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 - [x] Cost preference
 - [x] Harness discovery
 - [x] MCP connection
-- [x] Native MCP setup
+- [x] Native MCP setup (Codex, Claude Code, Muse)
 - [x] Background startup (macOS)
 - [x] Package install
 - [x] Codex delegation

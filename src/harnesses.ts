@@ -62,14 +62,14 @@ export function harnesses(): Harness[] {
       available: !!path,
       executable: path,
       workerSupported: ["codex", "claude", "muse"].includes(id) && !!path,
-      hostSupported: id === "muse" ? false : !!path,
+      hostSupported: !!path,
       reason:
         id === "codex"
           ? "Native app-server worker adapter"
           : id === "claude"
             ? "Official Claude Agent SDK worker adapter; native sign-in required"
             : id === "muse"
-              ? "Native MSP worker adapter; MCP host setup is unavailable"
+              ? "Native MSP worker adapter; MCP host setup uses Muse settings"
             : "Discovered host CLI; worker adapter is planned",
     };
   });

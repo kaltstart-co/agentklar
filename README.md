@@ -1,6 +1,6 @@
 # AgentKlar
 
-Keep your native coding harness. AgentKlar gives registered projects a shared local work record, saved project context, team roles, and durable worker runs. Start from Codex, Claude Code, Gemini CLI, Cursor, or OpenCode and connect its MCP client to AgentKlar. Codex, Claude Code and Muse have worker adapters. Muse MCP host setup is unavailable. Other installed CLIs are listed with their current support; worker adapters are planned.
+Keep your native coding harness. AgentKlar gives registered projects a shared local work record, saved project context, team roles, and durable worker runs. Start from Codex, Claude Code, Muse, Gemini CLI, Cursor, or OpenCode and connect its MCP client to AgentKlar. Codex, Claude Code and Muse have worker adapters and managed MCP host setup. Other installed CLIs are listed with their current support; worker adapters are planned.
 
 This is a fresh TypeScript rewrite. The old Go application is preserved in Git at `archive/pre-rewrite-2026-10-01`. Old databases and configuration are never imported. A run marked **completed** means the worker finished. Review the changes in your normal editor and harness.
 
@@ -9,7 +9,7 @@ This is a fresh TypeScript rewrite. The old Go application is preserved in Git a
 Requires Node 24 and npm on macOS or Linux. Install this pinned GitHub beta package, then start the local service:
 
 ```sh
-npm install -g https://github.com/kaltstart-co/agentklar/releases/download/v0.1.0-beta.7/agentklar-0.1.0-beta.7.tgz
+npm install -g https://github.com/kaltstart-co/agentklar/releases/download/v0.1.0-beta.8/agentklar-0.1.0-beta.8.tgz
 agentklar start
 ```
 
@@ -104,11 +104,11 @@ The trusted local UI can stage, install, update, and remove skills. The authenti
 
 ## Connect MCP
 
-Open **Settings**, select a registered project, then choose **Codex** or **Claude Code**. **Refresh native status** reads the current `agentklar` entry. **Preview connection** shows the exact native add command, config path, scope and generated bridge entry. **Add to Codex/Claude Code** runs that command. This is an explicit local UI action; MCP cannot install itself.
+Open **Settings**, select a registered project, then choose **Codex**, **Claude Code**, or **Muse**. **Refresh native status** reads the current `agentklar` entry. **Preview connection** shows the config path, scope and generated bridge entry. Codex and Claude Code also show their native add command. **Add** makes the reviewed change. This is an explicit local UI action; MCP cannot install itself.
 
-Codex uses **User** scope, shared across projects. Claude Code uses **Local project** scope in the selected project's real folder. AgentKlar respects `CODEX_HOME` and `CLAUDE_CONFIG_DIR`. A different existing `agentklar` entry, or an entry in another native scope, needs handling in native MCP settings. An exact existing entry is shown as configured and is never adopted for undo.
+Codex and Muse use **User** scope, shared across projects. Claude Code uses **Local project** scope in the selected project's real folder. AgentKlar respects `CODEX_HOME`, `CLAUDE_CONFIG_DIR`, and Muse's `XDG_CONFIG_HOME` (default `~/.config`). Muse setup changes only `mcpServers.agentklar` in `muse/settings.json`; it keeps other settings and uses a private new file when needed. An existing `agentklar` entry, or an entry in another native scope, needs handling in native MCP settings. An exact existing entry is shown as configured and is never adopted for undo.
 
-The generated bridge uses absolute paths for Node 24 and `dist/server/mcp.js`. It passes this running service's `AGENTKLAR_HOME` and `AGENTKLAR_PORT`, and reads the private local token file. Native settings contain no AgentKlar token. Keep the installed package and local service available. Native add/remove commands own their config serialization and migrations; unknown native keys may change under those rules.
+The generated bridge uses absolute paths for Node 24 and `dist/server/mcp.js`. It passes this running service's `AGENTKLAR_HOME` and `AGENTKLAR_PORT`, and reads the private local token file. Native settings contain no AgentKlar token. Keep the installed package and local service available. Codex and Claude Code use native add/remove commands. Muse settings are updated through a guarded file write that preserves unrelated JSON settings.
 
 **Undo managed connection** removes only the unchanged entry that this app installed from the selected project. Native entries changed outside AgentKlar are kept. An interrupted change remains visible after restart; **Try undo unchanged entry** is available only when the saved entry still matches. Setup does not start your harness. Start or restart a native session to load or unload MCP, and keep its native trust and permission decisions. A configured entry does not prove that an active session has loaded it.
 

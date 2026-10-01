@@ -58,8 +58,8 @@ export function NativeSetupForm({ projectId, connected }: { projectId: string; c
   }
   return <Stack gap="sm">
     <Select label="Native harness" value={harness} allowDeselect={false} disabled={Boolean(busy) && busy !== "status"}
-      data={[{ value: "codex", label: "Codex" }, { value: "claude", label: "Claude Code" }]} onChange={(value) => setHarness(value as SetupHarness)} />
-    <p className="hint">{harness === "codex" ? "User scope · available to your Codex projects." : "Local project scope · only this project's Claude Code sessions."} Setup adds MCP access. Your native session keeps its trust and permission settings.</p>
+      data={[{ value: "codex", label: "Codex" }, { value: "claude", label: "Claude Code" }, { value: "muse", label: "Muse" }]} onChange={(value) => setHarness(value as SetupHarness)} />
+    <p className="hint">{harness === "codex" ? "User scope · available to your Codex projects." : harness === "muse" ? "User scope · available to your Muse projects." : "Local project scope · only this project's Claude Code sessions."} Setup adds MCP access. Your native session keeps its trust and permission settings.</p>
     {status && <div aria-live="polite"><Badge color={status.status === "configured" ? "teal" : status.status === "conflict" ? "orange" : "gray"} variant="light">{status.status === "configured" ? "Entry configured" : status.status}</Badge><p className="hint">{status.message}</p></div>}
     {error && <Alert color="red">{error}</Alert>}
     {notice && <Alert color="teal">{notice}</Alert>}
@@ -70,13 +70,13 @@ export function NativeSetupForm({ projectId, connected }: { projectId: string; c
       {status?.canUndo && <Button size="xs" variant="subtle" disabled={!connected || Boolean(busy)} loading={busy === "undo"} onClick={() => void change("undo")}>{status.change?.state === "interrupted" ? "Try undo unchanged entry" : "Undo managed connection"}</Button>}
     </Group>
     {preview && <div className="instruction-preview">
-      <h3>Native add command · {preview.scope} scope</h3>
+      <h3>{preview.command ? "Native add command" : "Native settings change"} · {preview.scope} scope</h3>
       <p className="instruction-path">Native config <code>{preview.configPath}</code></p>
       {preview.cwd && <p className="instruction-path">Run in <code>{preview.cwd}</code></p>}
-      <pre>{preview.command}</pre>
+      {preview.command && <pre>{preview.command}</pre>}
       <details><summary>AgentKlar entry</summary><pre>{JSON.stringify(preview.entry, null, 2)}</pre></details>
       <p className="hint">The bridge uses this service's data home and port. It reads the private local token file. No token is added to native settings.</p>
-      <Button mt="sm" disabled={!connected || Boolean(busy)} loading={busy === "apply"} onClick={() => void change("apply")}>Add to {harness === "codex" ? "Codex" : "Claude Code"}</Button>
+      <Button mt="sm" disabled={!connected || Boolean(busy)} loading={busy === "apply"} onClick={() => void change("apply")}>Add to {harness === "codex" ? "Codex" : harness === "muse" ? "Muse" : "Claude Code"}</Button>
     </div>}
   </Stack>;
 }
