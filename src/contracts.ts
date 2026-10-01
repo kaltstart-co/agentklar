@@ -54,6 +54,7 @@ export type Run = {
   turnId?: string;
   workerPid?: number;
   launchHash?: string;
+  routing?: RoutingDecision;
 };
 export type RunEvent = {
   id: number;
@@ -153,6 +154,18 @@ export type WorkerAdvice = {
   policyVersion: string;
   confidence: "limited";
   sources: string[];
+};
+
+// Saved with a run. Keep native catalog and quota details out of run polling.
+export type RoutingDecision = {
+  selected: Pick<WorkerChoice, "harness" | "model" | "roleId" | "basis" | "tier">;
+  preference: Preference;
+  complexity: TaskComplexity;
+  requiresImages: boolean;
+  catalogCheckedAt: string;
+  policyVersion: string;
+  reasons: string[];
+  warnings: string[];
 };
 
 export type InstructionFileId = "agents" | "claude";

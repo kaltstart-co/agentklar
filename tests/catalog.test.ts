@@ -141,7 +141,8 @@ test("probe failures stay separate and sanitized; repeated cursors, oversized fr
         dir,
         new AbortController().signal,
         [file, mode, log],
-        mode === "hang" || mode === "helpers" ? 100 : 2000,
+        // Parallel test startup can take over 100 ms before this fixture writes its PID.
+        2000,
       );
       const pidText = readFileSync(log + ".pid", "utf8").trim();
       const pid = Number(pidText);

@@ -62,7 +62,9 @@ async function api<T>(
   if (!response.ok)
     throw Object.assign(
       new Error(
-        data.error || "The local service could not complete this request.",
+        [data.error || "The local service could not complete this request.",
+          ...(Array.isArray(data.warnings) ? data.warnings.slice(0, 2) : []),
+          ...(Array.isArray(data.reasons) ? data.reasons.slice(0, 1) : [])].join(" "),
       ),
       { status: response.status },
     );
@@ -110,6 +112,7 @@ export function App() {
   const [roleId, setRoleId] = useState<string | null>(null);
   const [harness, setHarness] = useState("codex");
   const [model, setModel] = useState("");
+  const [automaticRouting, setAutomaticRouting] = useState(true);
   const [complexity, setComplexity] = useState<WorkerAdvice["complexity"]>("standard");
   const [requiresImages, setRequiresImages] = useState(false);
   const [advice, setAdvice] = useState<{ key: string; data: WorkerAdvice } | null>(null);
@@ -668,11 +671,27 @@ export function App() {
                               ? "Read only"
                               : "Workspace changes allowed"}{" "}
                             ·{" "}
-                            {run.effectiveModel ||
-                              run.model ||
-                              "Harness default model"}{" "}
+                            {run.effectiveModel || run.model || "Harness default model"}{" "}
                             · {time(run.createdAt)}
                           </p>
+                          {run.routing && (
+                            <details>
+                              <summary>Model choice at launch</summary>
+                              <p className="hint">
+                                {harnessName(run.routing.selected.harness)} · {run.routing.selected.model}
+                                {run.routing.selected.basis === "task-pin" ? " · Task model pin" :
+                                  run.routing.selected.basis === "role-pin" ? " · Saved role model pin" : " · Policy choice"}
+                              </p>
+                              <p className="hint">
+                                Saved preference: {run.routing.preference}. Task: {run.routing.complexity}
+                                {run.routing.requiresImages ? ", images needed" : ""}.
+                                Native list checked {time(run.routing.catalogCheckedAt)}. Policy {run.routing.policyVersion}.
+                              </p>
+                              {run.routing.reasons.length > 0 && <ul>{run.routing.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>}
+                              {run.routing.warnings.length > 0 && <ul>{run.routing.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>}
+                              <p className="hint">Requested model: {run.model || "native default"}. Native reported model: {run.effectiveModel || "not reported"}.</p>
+                            </details>
+                          )}
                           <RunContext
                             key={run.id}
                             run={run}
@@ -829,8 +848,8 @@ export function App() {
                     ]}
                   />
                   <p className="hint">
-                    Model advice uses this saved preference. It does not enforce
-                    a budget or change a model automatically.
+                    Automatic model choice uses this saved preference when you
+                    start a task with it enabled. It does not enforce a budget.
                   </p>
                   {roles.map((role, index) => (
                     <div className="role-card" key={role.id}>
@@ -1238,6 +1257,7 @@ export function App() {
                 roleId: roleId || undefined,
                 harness: taskHarness,
                 model: model.trim() || undefined,
+                ...(automaticRouting ? { routing: { complexity, requiresImages } } : {}),
                 readOnly,
                 includeProjectContext,
               });
@@ -1297,13 +1317,28 @@ export function App() {
               label="Model (optional)"
               placeholder={
                 selectedRole?.model ||
-                `${harnessName(taskHarness)} native default`
+                (automaticRouting
+                  ? "Chosen from saved preference on Start"
+                  : `${harnessName(taskHarness)} native default`)
               }
               value={model}
               onChange={setModel}
             />
+            {selectedRole?.model && !model.trim() && (
+              <p className="hint">This role pins {selectedRole.model}. Type a task model to override it.</p>
+            )}
+            <Checkbox
+              label="Choose model automatically"
+              checked={automaticRouting}
+              onChange={(e) => setAutomaticRouting(e.currentTarget.checked)}
+            />
+            <p className="hint">
+              {automaticRouting
+                ? "Uses the saved cost preference and task needs when you select Start worker. The worker harness and any model pin above stay fixed."
+                : "Uses the model above, or the native harness default if none is set."}
+            </p>
             <details>
-              <summary>Model advice</summary>
+              <summary>Task needs and model preview</summary>
               <Stack gap="sm" mt="sm">
                 <p className="hint">
                   Saved preference: {project?.preference === "best"

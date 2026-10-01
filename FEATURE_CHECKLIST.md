@@ -26,6 +26,7 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 - [x] Project context
 - [x] Native model list
 - [x] Model advice
+- [x] Automatic model choice
 - [x] Native instructions (Codex and Claude Code)
 
 ## In progress
@@ -37,7 +38,6 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 ## Next
 
 - [ ] Other harness workers
-- [ ] Automatic routing
 - [ ] Quality benchmarks
 - [ ] Configs, skills, plugins
 - [ ] Wider config preview and rollback

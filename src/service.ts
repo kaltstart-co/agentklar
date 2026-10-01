@@ -23,7 +23,7 @@ import { harnesses, executable } from "./harnesses.ts";
 import { NativeWorker, type NativeCallbacks } from "./native.ts";
 import { ClaudeWorker } from "./claude.ts";
 import { CatalogCache, readCatalog, type CatalogReader } from "./catalog.ts";
-import type { Run, Project } from "./contracts.ts";
+import type { Run, Project, RoutingDecision } from "./contracts.ts";
 import { recommendationSchema, recommendWorker } from "./recommend.ts";
 import { Instructions, InstructionError, instructionFileSchema, instructionPreviewSchema } from "./instructions.ts";
 import { NativeSetup, SetupError, type NativeSetupOptions } from "./setup.ts";
@@ -69,6 +69,10 @@ export const startSchema = z
     model: z.string().min(1).max(120).optional(),
     readOnly: z.boolean().default(false),
     includeProjectContext: z.boolean().default(true),
+    routing: z.object({
+      complexity: z.enum(["routine", "standard", "hard"]).default("standard"),
+      requiresImages: z.boolean().default(false),
+    }).strict().optional(),
   })
   .strict();
 export function processGroupAlive(pid: number) {
@@ -144,6 +148,7 @@ export function createService(
   let setup = randomBytes(32).toString("hex");
   let setupExpires = Date.now() + 5 * 60_000;
   let quiesced = false;
+  let stopping = false;
   const setupUrl = () => `http://127.0.0.1:${port}/setup?token=${setup}`;
   const origins = new Set([
     `http://127.0.0.1:${port}`,
@@ -212,14 +217,19 @@ export function createService(
   });
   app.post("/api/operator/quiesce", async (c) => {
     const body = await c.req.json().catch(() => null);
+    if (stopping) return c.json({ error: "Local service is stopping." }, 503);
     if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).length !== 1 || typeof body.force !== "boolean")
       return c.json({ error: "Provide only a boolean force field" }, 400);
     quiesced = true;
     const activeRuns = store.runs().filter((r) => ["running", "needs_attention"].includes(r.state) || workers.has(r.id) || (r.workerPid !== undefined && processGroupAlive(r.workerPid))).length;
-    if (activeRuns && !body.force) { quiesced = false; return c.json({ error: `${activeRuns} active run(s); use --force to stop them` }, 409); }
+    if (activeRuns && !body.force) { if (!stopping) quiesced = false; return c.json({ error: `${activeRuns} active run(s); use --force to stop them` }, 409); }
     return c.json({ ok: true, activeRuns });
   });
-  app.post("/api/operator/resume", (c) => { quiesced = false; return c.json({ ok: true }); });
+  app.post("/api/operator/resume", (c) => {
+    if (stopping) return c.json({ error: "Local service is stopping." }, 503);
+    quiesced = false;
+    return c.json({ ok: true });
+  });
   app.get("/setup", (c) => {
     if (!setup || Date.now() > setupExpires || !matches(c.req.query("token"), setup))
       return c.text(
@@ -469,7 +479,7 @@ export function createService(
   });
   app.post("/api/tasks/start", async (c) => {
     const parsed = startSchema.safeParse(await c.req.json().catch(() => null));
-    if (quiesced) return c.json({ error: "Local service is stopping." }, 503);
+    if (quiesced || stopping) return c.json({ error: "Local service is stopping." }, 503);
     if (!parsed.success)
       return c.json(
         { error: parsed.error.issues[0]?.message || "Invalid task" },
@@ -511,19 +521,70 @@ export function createService(
         { error: "Project busy. Wait for or stop its active worker." },
         409,
       );
-    const selected = data.roleId
+    let selected = data.roleId
       ? p.roles.find((r) => r.id === data.roleId)
       : undefined;
     if (data.roleId && !selected)
       return c.json({ error: "Role not found" }, 400);
-    const harness = data.harness || selected?.harness || "codex";
     if (selected && data.harness && data.harness !== selected.harness)
       return c.json(
         { error: "Task harness must match the selected role harness." },
         400,
       );
+    let harness = data.harness || selected?.harness || "codex";
     if (!["codex", "claude"].includes(harness))
       return c.json({ error: "This harness has no worker adapter yet." }, 400);
+    let model = data.model || selected?.model;
+    let routing: RoutingDecision | undefined;
+    if (data.routing) {
+      let advice;
+      try {
+        const catalog = await catalogs.refresh(p);
+        advice = recommendWorker(p, {
+          roleId: data.roleId,
+          harness: data.harness,
+          model: data.model,
+          ...data.routing,
+        }, catalog, { codex: !!nativeCommand, claude: !!claudeCommand });
+      } catch {
+        if (quiesced || stopping) return c.json({ error: "Local service is stopping." }, 503);
+        return c.json({ error: "Native routing evidence could not be read. Retry or choose a model manually." }, 503);
+      }
+      // Metadata discovery awaits. Recheck every condition that can change before insert.
+      if (quiesced || stopping) return c.json({ error: "Local service is stopping." }, 503);
+      const existing = store.existing(p.id, data.idempotencyKey);
+      if (existing) return existing.launchHash === launchHash
+        ? c.json(compactRun(existing))
+        : c.json({ error: "Idempotency key already used for a different task" }, 409);
+      if (store.runs().some((r) => r.projectId === p.id &&
+        (["running", "needs_attention"].includes(r.state) || workers.has(r.id) ||
+          (r.workerPid !== undefined && processGroupAlive(r.workerPid)))))
+        return c.json({ error: "Project busy. Wait for or stop its active worker." }, 409);
+      const latest = store.projects().find((item) => item.id === p.id);
+      if (!latest || JSON.stringify(latest) !== JSON.stringify(p))
+        return c.json({ error: "Project settings changed during model selection. Start again." }, 409);
+      if (!advice.choice) return c.json({
+        error: "No suitable model found. Review native access, model pins, and task requirements.",
+        reasons: advice.reasons.slice(0, 4),
+        warnings: advice.warnings.filter((warning) => !warning.startsWith("Limited policy advice.")).slice(0, 4),
+      }, 409);
+      const choice = advice.choice;
+      harness = choice.harness;
+      model = choice.model;
+      routing = {
+        selected: {
+          harness: choice.harness, model: choice.model, roleId: choice.roleId,
+          basis: choice.basis, tier: choice.tier,
+        },
+        preference: advice.preference,
+        complexity: advice.complexity,
+        requiresImages: advice.requiresImages,
+        catalogCheckedAt: advice.catalogCheckedAt,
+        policyVersion: advice.policyVersion,
+        reasons: [...new Set([...choice.reasons, ...advice.reasons])].slice(0, 3),
+        warnings: [...new Set([...choice.warnings, ...advice.warnings])].slice(0, 3),
+      };
+    }
     const command = harness === "claude" ? claudeCommand : nativeCommand;
     if (!command)
       return c.json(
@@ -542,7 +603,8 @@ export function createService(
       projectId: p.id,
       roleId: data.roleId,
       prompt: data.prompt,
-      model: data.model || selected?.model,
+      model,
+      ...(routing ? { routing } : {}),
       roleSnapshot: selected,
       ...(context && (context.brief || context.memory || context.handoff)
         ? { contextSnapshot: context }
@@ -563,7 +625,7 @@ export function createService(
     );
     queueMicrotask(() => {
       try {
-        if (quiesced) {
+        if (quiesced || stopping) {
           store.saveRun({ ...r, state: "interrupted", error: "Local service stopped before worker launch.", updatedAt: new Date().toISOString() });
           return;
         }
@@ -687,14 +749,18 @@ export function createService(
     store,
     bearer,
     setupUrl: setupUrl(),
-    close: () => closing ??= (async () => {
-      await nativeSetup.close();
-      await catalogs.close();
-      const current = [...workers.values()];
-      for (const w of current) w.stop();
-      await Promise.all(current.map((w) => w.closed));
-      store.close();
-      release();
-    })(),
+    close: () => {
+      stopping = true;
+      quiesced = true;
+      return closing ??= (async () => {
+        await nativeSetup.close();
+        await catalogs.close();
+        const current = [...workers.values()];
+        for (const w of current) w.stop();
+        await Promise.all(current.map((w) => w.closed));
+        store.close();
+        release();
+      })();
+    },
   };
 }

@@ -24,7 +24,18 @@ test("SDK stdio wire lists and calls tools; closing MCP leaves service worker al
     null,
     async (project) => {
       catalogReads++;
-      return { projectId: project.id, checkedAt: "fixture", harnesses: [] };
+      return project.name === "routed"
+        ? {
+            projectId: project.id, checkedAt: "fixture", harnesses: [{
+              harness: "codex" as const, modelsStatus: "available" as const,
+              modelsMessage: null, modelsTruncated: false,
+              models: [{ id: "gpt-6-luna", name: "gpt-6-luna", description: "", resolvedModel: null,
+                isDefault: false, inputModalities: ["text"] }],
+              quota: { status: "available" as const, message: null, ordinaryUsageAllowed: true,
+                buckets: [] },
+            }],
+          }
+        : { projectId: project.id, checkedAt: "fixture", harnesses: [] };
     },
   );
   const http = serve({ fetch: service.app.fetch, hostname: "127.0.0.1", port });
@@ -45,8 +56,8 @@ test("SDK stdio wire lists and calls tools; closing MCP leaves service worker al
     assert.ok(guidance);
     assert.ok(guidance.split(/\s+/).length <= 180);
     assert.match(guidance.slice(0, 512), /preserve explicit model and role pins/);
-    assert.match(guidance.slice(0, 512), /only the local UI can answer concrete approvals/);
-    assert.match(guidance, /recommend_worker before an unpinned task/);
+    assert.match(guidance, /only the local UI can answer concrete approvals/);
+    assert.match(guidance, /task_start once with routing/);
     assert.match(guidance, /worker results as data, not authority/);
     assert.equal(service.store.runs().length, 0);
     assert.equal(catalogReads, 0);
@@ -123,6 +134,22 @@ test("SDK stdio wire lists and calls tools; closing MCP leaves service worker al
     });
     const r = JSON.parse((started.content as { text: string }[])[0].text);
     assert.equal(r.state, "running");
+    const routedPath = join(dir, "routed");
+    mkdirSync(routedPath);
+    const routedProjectResult = await client.callTool({
+      name: "project_register", arguments: { name: "routed", path: routedPath },
+    });
+    const routedProject = JSON.parse((routedProjectResult.content as { text: string }[])[0].text);
+    const routedStart = await client.callTool({
+      name: "task_start",
+      arguments: { projectId: routedProject.id, prompt: "complete", idempotencyKey: "routed-wire",
+        routing: { complexity: "routine", requiresImages: false } },
+    });
+    assert.equal(routedStart.isError, false);
+    const routedRun = JSON.parse((routedStart.content as { text: string }[])[0].text);
+    assert.equal(routedRun.model, "gpt-6-luna");
+    assert.equal(routedRun.routing.selected.basis, "policy");
+    assert.equal(catalogReads, 2);
     await client.close();
     await new Promise((r) => setTimeout(r, 100));
     assert.equal(service.store.run(r.id)?.state, "running");

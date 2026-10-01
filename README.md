@@ -42,11 +42,11 @@ Open **Models**, choose a project, and select **Refresh models and allowance**. 
 
 ## Model advice
 
-In **New task**, open **Model advice**, choose Routine, Standard or Hard, and select **Images needed** if the model must read images. **Suggest a model** returns a model, reasons and known limits. **Use suggestion** copies it into the task form. It does not start a worker. Changing the project, role, harness, model or advice inputs clears the previous advice. The saved preference shown here comes from Team.
+In **New task**, **Choose model automatically** is on by default. Select task complexity and **Images needed** under **Task needs and model preview**, then select **Start worker**. AgentKlar reads native model and allowance metadata, applies the saved Team preference, records its choice and starts one worker. The selected worker harness and task or role model pin stay fixed. Turn automatic choice off to use a typed model or native default. **Suggest a model** is an optional preview; **Use suggestion** copies that model into the form and makes it a task pin. A failed choice leaves the draft open and starts no worker.
 
-Your native harness can classify the task with its existing model, call `recommend_worker`, then choose whether to call `task_start`. The router itself uses no LLM. Suggestions use source-based family profiles and native model lists; they are policy advice, without measured quality scores, savings or subscription cost. Unknown account allowance stays unknown. Model image support does not imply browser or tool access. Claude image support is unknown through the current SDK.
+Your native harness can classify the task with its existing model and call `task_start` with `routing:{complexity,requiresImages}`. This chooses and starts a worker in one call. `recommend_worker` remains an optional preview. The router itself uses no LLM. Choices use source-based family profiles and native model lists; they are policy decisions without measured quality scores, savings or subscription cost. Unknown account allowance stays unknown. Model image support does not imply browser or tool access. Claude image support is unknown through the current SDK.
 
-Automatic routing and quality benchmarks remain planned. Advice does not change task launch behavior unless you apply a suggestion or pass the chosen model explicitly.
+Each routed run keeps a small record of the selected model, task needs and policy reasons. The task detail shows the requested model and the model reported by the native harness separately. A worker failure does not trigger another model automatically. Quality benchmarks remain planned.
 
 ## Shared project context
 
