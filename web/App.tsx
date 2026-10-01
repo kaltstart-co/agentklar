@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Alert,
   Autocomplete,
@@ -22,6 +22,7 @@ import type {
   Role,
   Preference,
   ProjectContext,
+  WorkerAdvice,
 } from "../src/contracts.js";
 
 type View = "Work" | "Context" | "Team" | "Models" | "Usage" | "Settings";
@@ -106,6 +107,12 @@ export function App() {
   const [roleId, setRoleId] = useState<string | null>(null);
   const [harness, setHarness] = useState("codex");
   const [model, setModel] = useState("");
+  const [complexity, setComplexity] = useState<WorkerAdvice["complexity"]>("standard");
+  const [requiresImages, setRequiresImages] = useState(false);
+  const [advice, setAdvice] = useState<{ key: string; data: WorkerAdvice } | null>(null);
+  const [adviceBusy, setAdviceBusy] = useState("");
+  const [adviceError, setAdviceError] = useState<{ key: string; message: string } | null>(null);
+  const adviceRequest = useRef(0);
   const [readOnly, setReadOnly] = useState(true);
   const [includeProjectContext, setIncludeProjectContext] = useState(true);
   const [roles, setRoles] = useState<Role[]>([]);
@@ -123,6 +130,47 @@ export function App() {
   const selectedRole = project?.roles.find((r) => r.id === roleId);
   const taskHarness = selectedRole?.harness || harness;
   const taskWorker = workers.find((h) => h.id === taskHarness);
+  const adviceKey = JSON.stringify([
+    projectId, roleId, taskHarness, model, selectedRole?.model,
+    project?.preference, complexity, requiresImages, taskModal, connected,
+  ]);
+  const currentAdviceKey = useRef(adviceKey);
+  currentAdviceKey.current = adviceKey;
+  const currentAdvice = advice?.key === adviceKey ? advice.data : null;
+  const adviceChoice = currentAdvice?.choice;
+  const canUseAdvice = Boolean(adviceChoice && connected &&
+    workers.some((worker) => worker.id === adviceChoice.harness) &&
+    (!selectedRole || selectedRole.harness === adviceChoice.harness));
+  useEffect(() => {
+    adviceRequest.current++;
+    setAdvice(null);
+    setAdviceError(null);
+    setAdviceBusy("");
+  }, [adviceKey]);
+  async function suggestModel() {
+    const key = adviceKey;
+    const request = ++adviceRequest.current;
+    setAdvice(null);
+    setAdviceError(null);
+    setAdviceBusy(key);
+    try {
+      const data = await api<WorkerAdvice>(`/projects/${projectId}/recommend`, {
+        roleId: roleId || undefined,
+        harness: taskHarness,
+        model: model.trim() || undefined,
+        complexity,
+        requiresImages,
+      });
+      if (request === adviceRequest.current && key === currentAdviceKey.current)
+        setAdvice({ key, data });
+    } catch (e) {
+      if (request === adviceRequest.current && key === currentAdviceKey.current)
+        setAdviceError({ key, message: (e as Error).message });
+    } finally {
+      if (request === adviceRequest.current && key === currentAdviceKey.current)
+        setAdviceBusy("");
+    }
+  }
   const harnessName = (id: string) =>
     snapshot.harnesses.find((h) => h.id === id)?.name || id;
   const runs = snapshot.runs
@@ -756,8 +804,8 @@ export function App() {
                     ]}
                   />
                   <p className="hint">
-                    This preference is shared with your orchestrator. It does
-                    not enforce a budget or change a model automatically.
+                    Model advice uses this saved preference. It does not enforce
+                    a budget or change a model automatically.
                   </p>
                   {roles.map((role, index) => (
                     <div className="role-card" key={role.id}>
@@ -1241,6 +1289,108 @@ export function App() {
               value={model}
               onChange={setModel}
             />
+            <details>
+              <summary>Model advice</summary>
+              <Stack gap="sm" mt="sm">
+                <p className="hint">
+                  Saved preference: {project?.preference === "best"
+                    ? "Best capability"
+                    : project?.preference === "economical" ? "Economical" : "Balanced"}.
+                  Change and save it in Team.
+                </p>
+                <Select
+                  label="Task complexity"
+                  value={complexity}
+                  onChange={(value) => setComplexity(value as WorkerAdvice["complexity"])}
+                  data={[
+                    { value: "routine", label: "Routine" },
+                    { value: "standard", label: "Standard" },
+                    { value: "hard", label: "Hard" },
+                  ]}
+                />
+                <Checkbox
+                  label="Images needed"
+                  checked={requiresImages}
+                  onChange={(e) => setRequiresImages(e.currentTarget.checked)}
+                />
+                <p className="hint">
+                  Checks model image support. Browser and tool access depend on
+                  the native harness.
+                </p>
+                <Button
+                  variant="light"
+                  loading={adviceBusy === adviceKey}
+                  disabled={!connected || !projectId}
+                  onClick={() => void suggestModel()}
+                >
+                  Suggest a model
+                </Button>
+                {adviceError?.key === adviceKey && (
+                  <Alert color="red">{adviceError.message}</Alert>
+                )}
+                {currentAdvice && (
+                  <div aria-live="polite">
+                    <strong>
+                      {adviceChoice
+                        ? `${harnessName(adviceChoice.harness)} · ${adviceChoice.model}`
+                        : "No suitable model found"}
+                    </strong>
+                    {adviceChoice?.basis !== "policy" && adviceChoice && (
+                      <p className="hint">
+                        {adviceChoice.basis === "task-pin" ? "Your task model pin" : "Saved role model pin"}
+                      </p>
+                    )}
+                    {!adviceChoice && (
+                      <ul>
+                        {currentAdvice.reasons.map((reason) => <li key={reason}>{reason}</li>)}
+                      </ul>
+                    )}
+                    {adviceChoice?.warnings.filter((warning) => warning.includes("headroom is low"))
+                      .map((warning) => <Alert color="orange" key={warning}>{warning}</Alert>)}
+                    <p className="hint">
+                      Limited policy advice. Quality and subscription cost are unmeasured.
+                    </p>
+                    {adviceChoice && (
+                      <Button
+                        size="xs"
+                        variant="light"
+                        disabled={!canUseAdvice}
+                        onClick={() => {
+                          if (!canUseAdvice) return;
+                          setHarness(adviceChoice.harness);
+                          setModel(adviceChoice.model);
+                        }}
+                      >
+                        Use suggestion
+                      </Button>
+                    )}
+                    <details>
+                      <summary>{adviceChoice ? "Why this suggestion" : "Details"}</summary>
+                      {adviceChoice && (
+                        <ul>
+                          {[...new Set([...currentAdvice.reasons, ...adviceChoice.reasons])]
+                            .map((reason) => <li key={reason}>{reason}</li>)}
+                        </ul>
+                      )}
+                      <ul>
+                        {[...new Set([...currentAdvice.warnings, ...(adviceChoice?.warnings || [])])]
+                          .map((warning) => <li key={warning}>{warning}</li>)}
+                      </ul>
+                      <p className="hint">Native list checked {time(currentAdvice.catalogCheckedAt)}.</p>
+                      {currentAdvice.sources.length > 0 && (
+                        <ul>
+                          {currentAdvice.sources.map((source) => (
+                            <li key={source}>
+                              <a href={source} target="_blank" rel="noreferrer">{source}</a>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </details>
+                  </div>
+                )}
+              </Stack>
+            </details>
             <Checkbox
               label="Use project context"
               checked={includeProjectContext}

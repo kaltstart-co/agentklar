@@ -18,13 +18,21 @@ Keep that terminal running. Open the one-time setup URL it prints. It creates a 
 
 Register an existing project folder. Add roles with a harness, optional model, and responsibility. Start a task from your native harness through MCP or from the local UI. Only registered projects can run workers. Each project allows one worker at a time; a busy request returns an error. Repeating the same task with the same idempotency key returns its original run.
 
-Project cost preference is saved as economical, balanced, or best. This first version uses your explicit model pin or native default. It does not infer the best model from benchmarks. Role responsibility is sent with the task, and the role snapshot, worker harness, and actual native model stay in its history. Choose an installed worker harness in the local UI. A selected role chooses its harness. Changing the harness clears the model pin so a model name from another harness is not carried over.
+Project cost preference is saved as economical, balanced, or best. Optional model advice uses that saved preference, task complexity, native availability and model family profiles. Your explicit task or role model pin takes priority. Role responsibility is sent with the task, and the role snapshot, worker harness, and actual native model stay in its history. Choose an installed worker harness in the local UI. A selected role chooses its harness. Changing the harness clears the model pin so a model name from another harness is not carried over.
 
 ## Native models and account allowance
 
 Open **Models**, choose a project, and select **Refresh models and allowance**. AgentKlar reads the native Codex and Claude model lists. New task and Team let you choose a listed model or type a custom name. Loading the list never changes your model pin. A listed model does not prove that your account can use it or that you are signed in. Prices in native vendor descriptions describe API usage, not your subscription bill.
 
-**Usage** shows native Codex account allowance when available: used and remaining percentages, window duration, and reset time in your local time zone. These limits are shared across the native account; project task tokens do not calculate them. A native included-usage block remains visible even when a percentage window has reset. Claude account allowance is unavailable through the current SDK. Missing information stays unknown. Native reads occur only when you request a refresh; the normal task polling reads no model or quota data. Catalog snapshots are cached per project and refreshes within 30 seconds reuse that cache.
+**Usage** shows native Codex account allowance when available: used and remaining percentages, window duration, and reset time in your local time zone. These limits are shared across the native account; project task tokens do not calculate them. A native included-usage block remains visible even when a percentage window has reset. Claude account allowance is unavailable through the current SDK. Missing information stays unknown. Native reads occur when you request a refresh or model advice; the normal task polling reads no model or quota data. Catalog snapshots are cached per project and refreshes within 30 seconds reuse that cache.
+
+## Model advice
+
+In **New task**, open **Model advice**, choose Routine, Standard or Hard, and select **Images needed** if the model must read images. **Suggest a model** returns a model, reasons and known limits. **Use suggestion** copies it into the task form. It does not start a worker. Changing the project, role, harness, model or advice inputs clears the previous advice. The saved preference shown here comes from Team.
+
+Your native harness can classify the task with its existing model, call `recommend_worker`, then choose whether to call `task_start`. The router itself uses no LLM. Suggestions use source-based family profiles and native model lists; they are policy advice, without measured quality scores, savings or subscription cost. Unknown account allowance stays unknown. Model image support does not imply browser or tool access. Claude image support is unknown through the current SDK.
+
+Automatic routing and quality benchmarks remain planned. Advice does not change task launch behavior unless you apply a suggestion or pass the chosen model explicitly.
 
 ## Shared project context
 

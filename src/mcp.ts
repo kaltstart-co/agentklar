@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { z } from "zod";
 import { startSchema, contextUpdateSchema } from "./service.ts";
+import { recommendationSchema } from "./recommend.ts";
 export function bounded(result: unknown) {
   const text = JSON.stringify(result);
   return text.length <= 24000
@@ -76,6 +77,18 @@ export function createMcp(base: string, token: string) {
       call(`/api/projects/${projectId}/catalog`, refresh ? "POST" : "GET"),
   );
   server.registerTool(
+    "recommend_worker",
+    {
+      description:
+        "Get deterministic local worker advice from saved cost preference, explicit role/model pins, offered native models and quota. The main native agent classifies complexity and image needs. No model call or worker starts. When the user has not pinned a model, inspect the limited advice and explicitly choose a model before task_start. Preserve user pins; a blocked pin returns no replacement. Unknown access, billing and capabilities remain unknown.",
+      inputSchema: recommendationSchema
+        .extend({ projectId: z.uuid() })
+        .strict(),
+    },
+    ({ projectId, ...body }) =>
+      call(`/api/projects/${projectId}/recommend`, "POST", body),
+  );
+  server.registerTool(
     "project_register",
     {
       description: "Register an existing local project folder.",
@@ -87,7 +100,7 @@ export function createMcp(base: string, token: string) {
     "project_update",
     {
       description:
-        "Save project team roles and cost preference. Preference does not choose a model automatically.",
+        "Save project team roles and cost preference. Preference guides recommend_worker advice; task_start still uses only explicit task or role model choices.",
       inputSchema: z
         .object({
           projectId: z.uuid(),
@@ -134,7 +147,7 @@ export function createMcp(base: string, token: string) {
     "task_start",
     {
       description:
-        "Start one durable native Codex or Claude Code worker for a registered project. Includes a saved project context snapshot by default; includeProjectContext:false opts out. Returns promptly. Completion means worker finished; review is separate. Keep the returned run ID.",
+        "Start one durable native Codex or Claude Code worker for a registered project. Includes a saved project context snapshot by default; includeProjectContext:false opts out. Returns promptly. Completion means worker finished; review is separate. Keep the returned run ID. When no user model is pinned, classify complexity and image needs, call recommend_worker, inspect its reasons and limits, then explicitly choose a model for this call.",
       inputSchema: startSchema,
     },
     (args) => call("/api/tasks/start", "POST", args),

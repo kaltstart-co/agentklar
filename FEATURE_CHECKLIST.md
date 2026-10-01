@@ -23,6 +23,7 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 - [x] Shared memory
 - [x] Project context
 - [x] Native model list
+- [x] Model advice
 
 ## In progress
 
@@ -32,7 +33,7 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 ## Next
 
 - [ ] Other harness workers
-- [ ] Model recommendations
+- [ ] Automatic routing
 - [ ] Quality benchmarks
 - [ ] Configs, skills, plugins
 - [ ] Config preview and rollback

@@ -24,6 +24,7 @@ import { NativeWorker, type NativeCallbacks } from "./native.ts";
 import { ClaudeWorker } from "./claude.ts";
 import { CatalogCache, readCatalog, type CatalogReader } from "./catalog.ts";
 import type { Run, Project } from "./contracts.ts";
+import { recommendationSchema, recommendWorker } from "./recommend.ts";
 const role = z
   .object({
     id: z.string().min(1).max(80),
@@ -208,6 +209,56 @@ export function createService(
       return c.json(await catalogs.refresh(project));
     } catch {
       return c.json({ error: "Native catalog could not be read." }, 503);
+    }
+  });
+  app.post("/api/projects/:id/recommend", async (c) => {
+    const project = store.projects().find((p) => p.id === c.req.param("id"));
+    if (!project) return c.json({ error: "Project not found" }, 404);
+    const parsed = recommendationSchema.safeParse(
+      await c.req.json().catch(() => null),
+    );
+    if (!parsed.success)
+      return c.json(
+        {
+          error: (
+            parsed.error.issues[0]?.message || "Invalid advice request"
+          ).slice(0, 240),
+        },
+        400,
+      );
+    const selected = parsed.data.roleId
+      ? project.roles.find((r) => r.id === parsed.data.roleId)
+      : undefined;
+    if (parsed.data.roleId && !selected)
+      return c.json({ error: "Role not found" }, 400);
+    if (
+      selected &&
+      parsed.data.harness &&
+      selected.harness !== parsed.data.harness
+    )
+      return c.json(
+        { error: "Task harness must match the selected role harness." },
+        400,
+      );
+    if (selected && !["codex", "claude"].includes(selected.harness))
+      return c.json(
+        { error: "This role harness has no worker adapter yet." },
+        400,
+      );
+    c.header("Cache-Control", "no-store");
+    try {
+      const catalog = await catalogs.refresh(project);
+      return c.json(
+        recommendWorker(project, parsed.data, catalog, {
+          codex: !!nativeCommand,
+          claude: !!claudeCommand,
+        }),
+      );
+    } catch {
+      return c.json(
+        { error: "Native advice evidence could not be read." },
+        503,
+      );
     }
   });
   app.get("/api/projects/:id/context", (c) => {

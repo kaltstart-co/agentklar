@@ -42,7 +42,7 @@ test("SDK stdio wire lists and calls tools; closing MCP leaves service worker al
   try {
     await client.connect(transport);
     const list = await client.listTools();
-    assert.equal(list.tools.length, 13);
+    assert.equal(list.tools.length, 14);
     assert.equal(
       list.tools.some((t) => /approve/.test(t.name)),
       false,
@@ -70,6 +70,25 @@ test("SDK stdio wire lists and calls tools; closing MCP leaves service worker al
       p.id,
     );
     assert.equal(catalogReads, 1);
+    const recommendation = await client.callTool({
+      name: "recommend_worker",
+      arguments: { projectId: p.id, model: "custom-native-model" },
+    });
+    const advice = JSON.parse(
+      (recommendation.content as { text: string }[])[0].text,
+    );
+    assert.equal(advice.choice, null);
+    assert.match(
+      advice.reasons.join(" "),
+      /Pinned codex model custom-native-model/,
+    );
+    assert.equal(service.store.runs().length, 0);
+    assert.equal(catalogReads, 1);
+    const invalidAdvice = await client.callTool({
+      name: "recommend_worker",
+      arguments: { projectId: p.id, complexity: "unreviewed" },
+    });
+    assert.equal(invalidAdvice.isError, true);
     const unknown = await client.callTool({
       name: "models_list",
       arguments: { projectId: "00000000-0000-4000-8000-000000000000" },

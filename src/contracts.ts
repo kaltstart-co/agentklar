@@ -128,3 +128,29 @@ export type CatalogSnapshot = {
   checkedAt: string;
   harnesses: HarnessCatalog[];
 };
+
+export type TaskComplexity = "routine" | "standard" | "hard";
+export type WorkerChoice = {
+  harness: "codex" | "claude";
+  model: string;
+  roleId?: string;
+  basis: "task-pin" | "role-pin" | "policy";
+  tier: "efficient" | "balanced" | "capable" | "unknown";
+  reasons: string[];
+  warnings: string[];
+};
+export type WorkerAdvice = {
+  projectId: string;
+  createdAt: string;
+  catalogCheckedAt: string;
+  preference: Preference;
+  complexity: TaskComplexity;
+  requiresImages: boolean;
+  choice: WorkerChoice | null;
+  alternatives: WorkerChoice[];
+  reasons: string[];
+  warnings: string[];
+  policyVersion: string;
+  confidence: "limited";
+  sources: string[];
+};
