@@ -1,18 +1,25 @@
 {
   "name": "agentklar",
-  "version": "0.1.0",
+  "version": "0.1.0-beta.1",
   "private": true,
   "type": "module",
+  "bin": {
+    "agentklar": "bin/agentklar.mjs"
+  },
+  "files": ["bin", "dist", "LICENSE", "README.md"],
   "engines": {
     "node": ">=24 <25"
   },
+  "os": ["darwin", "linux"],
   "scripts": {
     "dev": "vite --host 127.0.0.1",
-    "build": "tsc && vite build",
+    "build": "tsc -p tsconfig.build.json && vite build",
+    "prepack": "npm run build",
+    "smoke:package": "node scripts/package-smoke.mjs",
     "test": "node --import tsx --test tests/*.test.ts",
-    "start": "tsx src/server.ts",
-    "service": "tsx src/launchd.ts",
-    "mcp": "tsx src/mcp.ts",
+    "start": "node dist/server/server.js",
+    "service": "node dist/server/launchd.js",
+    "mcp": "node dist/server/mcp.js",
     "check": "tsc --noEmit"
   },
   "dependencies": {

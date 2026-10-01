@@ -107,7 +107,10 @@ export class NativeSetup {
   private neutral: string;
   constructor(private db: DatabaseSync, private home: string, private port: number, private commands: Record<SetupHarness, string | null>, private options: NativeSetupOptions = {}) {
     this.env = { ...(options.env ?? process.env) };
-    this.entry = { type: "stdio", command: process.execPath, args: ["--import", fileURLToPath(import.meta.resolve("tsx")), fileURLToPath(new URL("./mcp.ts", import.meta.url))], env: { AGENTKLAR_HOME: realpathSync(home), AGENTKLAR_PORT: String(port) } };
+    const source = import.meta.url.endsWith(".ts");
+    this.entry = { type: "stdio", command: process.execPath, args: source
+      ? ["--import", fileURLToPath(import.meta.resolve("tsx")), fileURLToPath(new URL("./mcp.ts", import.meta.url))]
+      : [fileURLToPath(new URL("./mcp.js", import.meta.url))], env: { AGENTKLAR_HOME: realpathSync(home), AGENTKLAR_PORT: String(port) } };
     this.neutral = mkdtempSync(join(tmpdir(), "agentklar-setup-cwd-"));
     db.exec("PRAGMA synchronous=FULL; CREATE TABLE IF NOT EXISTS native_setup_changes(id TEXT PRIMARY KEY,projectId TEXT NOT NULL,data TEXT NOT NULL)");
     for (const row of db.prepare("SELECT data FROM native_setup_changes").all()) {
@@ -135,7 +138,7 @@ export class NativeSetup {
     if (process.platform === "win32") throw new SetupError("Native setup currently supports macOS and Linux. Use your native MCP settings on Windows.");
     if (Number(process.versions.node.split(".")[0]) !== 24) throw new SetupError("Native setup requires Node 24. Restart AgentKlar with Node 24.");
     for (const path of [this.entry.command, ...this.entry.args.filter((arg) => isAbsolute(arg))]) {
-      try { accessSync(path, path === this.entry.command ? constants.X_OK : constants.R_OK); } catch { throw new SetupError("MCP bridge files are unavailable. Install this checkout's dependencies and restart AgentKlar."); }
+      try { accessSync(path, path === this.entry.command ? constants.X_OK : constants.R_OK); } catch { throw new SetupError("MCP bridge files are unavailable. Reinstall AgentKlar and restart it."); }
     }
     if (!this.commands[harness]) throw new SetupError(`Install ${harness === "codex" ? "Codex" : "Claude Code"} through its native setup first.`);
   }

@@ -48,7 +48,7 @@ test("private operator opens fresh browser links and stops new work during shutd
   try {
     const unauthenticated = await call("/api/projects", "GET", undefined, {});
     assert.equal(unauthenticated.status, 401);
-    assert.match((await unauthenticated.json()).error, /npm run service -- open/);
+    assert.match((await unauthenticated.json()).error, /agentklar service open/);
     for (const extra of [{ Authorization: `Bearer ${service.bearer}` }, { Origin: base }, { Cookie: "x=y" }] as Record<string, string>[])
       assert.equal((await call("/api/operator/status", "GET", undefined, { ...operator, ...extra })).status, 403);
     assert.equal((await call("/api/operator/status", "GET", undefined, { Authorization: `Bearer ${service.bearer}` })).status, 403);

@@ -104,14 +104,15 @@ export async function install(p: ReturnType<typeof paths>, control: typeof launc
   if (await portBusy(p.port)) throw new Error(`Port ${p.port} is already in use. Stop the foreground service or choose another AGENTKLAR_PORT.`);
   mkdirSync(p.home, { recursive: true, mode: 0o700 });
   mkdirSync(dirname(p.plist), { recursive: true, mode: 0o700 });
-  const root = realpathSync(fileURLToPath(new URL("..", import.meta.url)));
-  const loader = fileURLToPath(import.meta.resolve("tsx"));
-  const server = fileURLToPath(new URL("./server.ts", import.meta.url));
+  const source = import.meta.url.endsWith(".ts");
+  const root = realpathSync(fileURLToPath(new URL(source ? "../" : "../../", import.meta.url)));
+  const server = fileURLToPath(new URL(source ? "./server.ts" : "./server.js", import.meta.url));
+  const program = source ? [process.execPath, "--import", fileURLToPath(import.meta.resolve("tsx")), server] : [process.execPath, server];
   const id = randomUUID();
   const env: Record<string, string> = { AGENTKLAR_HOME: p.home, AGENTKLAR_PORT: String(p.port), AGENTKLAR_SERVICE_ID: id };
   for (const name of ["PATH", "CODEX_HOME", "CLAUDE_CONFIG_DIR"])
     if (process.env[name]) env[name] = process.env[name]!;
-  const plistData = { Label: p.label, ProgramArguments: [process.execPath, "--import", loader, server],
+  const plistData = { Label: p.label, ProgramArguments: program,
     WorkingDirectory: root, EnvironmentVariables: env, RunAtLoad: true,
     KeepAlive: { SuccessfulExit: false }, ThrottleInterval: 30, Umask: 63,
     StandardOutPath: join(p.home, "launchd.out.log"), StandardErrorPath: join(p.home, "launchd.err.log") };
@@ -141,7 +142,7 @@ export async function install(p: ReturnType<typeof paths>, control: typeof launc
     throw e;
   }
   await healthy(p, entry);
-  console.log("AgentKlar will start at login. Use `npm run service -- open` to open it.");
+  console.log("AgentKlar will start at login. Use `agentklar service open` to open it.");
 }
 async function operator(p: ReturnType<typeof paths>, entry: Install, route: string, body?: unknown) {
   const response = await fetch(`http://127.0.0.1:${entry.port}/api/operator/${route}`, {
@@ -178,13 +179,13 @@ async function stop(p: ReturnType<typeof paths>, entry: Install, force: boolean)
   await waitUnregistered(p.target);
   console.log("AgentKlar stopped until you start it or log in again.");
 }
-async function main() {
-  const [action, ...flags] = process.argv.slice(2);
+export async function main(args = process.argv.slice(2)) {
+  const [action, ...flags] = args;
   if (!["install", "status", "open", "stop", "start", "uninstall"].includes(action || "") ||
       flags.some((x) => x !== "--force" && x !== "--print") ||
       (flags.includes("--force") && !["stop", "uninstall"].includes(action!)) ||
       (flags.includes("--print") && action !== "open"))
-    throw new Error("Use: npm run service -- install|status|open [--print]|stop [--force]|start|uninstall [--force]");
+    throw new Error("Use: agentklar service install|status|open [--print]|stop [--force]|start|uninstall [--force]");
   const p = paths();
   if (action === "install") return install(p);
   const entry = installed(p);

@@ -2,6 +2,7 @@ import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createService } from "./service.ts";
 import { operatorKey } from "./launchd.ts";
 const port = Number(process.env.AGENTKLAR_PORT || 4317);
@@ -21,16 +22,16 @@ const service = createService(
   undefined,
   operator,
 );
-service.app.get("*", serveStatic({ root: "dist/web" }));
+service.app.get("*", serveStatic({ root: fileURLToPath(new URL(import.meta.url.endsWith(".ts") ? "../dist/web/" : "../web/", import.meta.url)) }));
 service.app.get("*", (c) =>
   c.text(
-    "Build the UI with npm run build, or open http://127.0.0.1:5173 after npm run dev.",
+    "The AgentKlar UI is missing. Reinstall the package or run npm run build in the source checkout.",
   ),
 );
 const server = serve(
   { fetch: service.app.fetch, hostname: "127.0.0.1", port },
   () => console.log(operator
-    ? "AgentKlar local service started. Use `npm run service -- open` to open it."
+    ? "AgentKlar local service started. Use `agentklar service open` to open it."
     : `AgentKlar local service. Open this one-time setup link:\n${service.setupUrl}`),
 );
 server.on("error", (error) => {

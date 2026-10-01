@@ -13,6 +13,7 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 - [x] MCP connection
 - [x] Native MCP setup
 - [x] Background startup (macOS)
+- [x] Package install
 - [x] Codex delegation
 - [x] Native approvals
 - [x] Run history
@@ -36,7 +37,6 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 
 - [ ] Claude delegation
 - [ ] Account quotas (Codex only)
-- [ ] Easy setup
 
 ## Next
 

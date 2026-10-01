@@ -1,5 +1,6 @@
 import { accessSync, constants, realpathSync, statSync } from "node:fs";
-import { isAbsolute } from "node:path";
+import { homedir } from "node:os";
+import { isAbsolute, join } from "node:path";
 import type { Project, Run, RunHandoff } from "./contracts.ts";
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -33,6 +34,12 @@ export function runHandoff(run: Run, project: Project | undefined, busy: boolean
   } catch { return unavailable("The native CLI is not installed or executable."); }
   if (!run.nativeHome || !safePath(run.nativeHome))
     return unavailable("The native session home was not recorded as a safe absolute path for this run.");
+  if (harness === "claude") {
+    if (run.nativeHomeEnv !== "set" && run.nativeHomeEnv !== "unset")
+      return unavailable("The Claude config environment scope was not recorded for this run.");
+    if (run.nativeHomeEnv === "unset" && run.nativeHome !== join(homedir(), ".claude"))
+      return unavailable("The current user home differs from this Claude session's saved home.");
+  }
   const model = run.effectiveModel || run.model;
   if (model && !/^[a-zA-Z0-9][a-zA-Z0-9._:/\[\]-]{0,119}$/.test(model))
     return unavailable("The saved model name is not safe for a native command.");
@@ -41,10 +48,15 @@ export function runHandoff(run: Run, project: Project | undefined, busy: boolean
     ? ["resume", "--cd", project.path, ...(run.readOnly ? ["--sandbox", "read-only"] : []),
         ...(model ? [`--model=${model}`] : []), packet.nativeSessionId]
     : ["--resume", packet.nativeSessionId, ...(model ? [`--model=${model}`] : [])];
-  const env = { [variable]: run.nativeHome };
+  const unsetClaude = harness === "claude" && run.nativeHomeEnv === "unset";
+  const env = unsetClaude ? {} : { [variable]: run.nativeHome };
+  const envUnset = unsetClaude ? [variable] : [];
+  const commandText = [cli, ...argv].map(quote).join(" ");
+  const display = unsetClaude
+    ? `(unset CLAUDE_CONFIG_DIR && cd ${quote(project.path)} && ${commandText})`
+    : `cd ${quote(project.path)} && ${variable}=${quote(run.nativeHome)} ${commandText}`;
   const ready: RunHandoff = { ...packet, available: true, reason: null,
-    command: { executable: cli, argv, cwd: project.path, env, shell: "posix",
-      display: `cd ${quote(project.path)} && ${variable}=${quote(run.nativeHome)} ${[cli, ...argv].map(quote).join(" ")}` },
+    command: { executable: cli, argv, cwd: project.path, env, envUnset, shell: "posix", display },
     notes: [
       ...(model ? [] : ["No model was saved. The native harness will choose its current default model."]),
       "The native harness will check whether this saved session can be opened.",

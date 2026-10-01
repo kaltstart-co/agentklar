@@ -4,9 +4,21 @@ Keep your native coding harness. AgentKlar gives registered projects a shared lo
 
 This is a fresh TypeScript rewrite. The old Go application is preserved in Git at `archive/pre-rewrite-2026-10-01`. Old databases and configuration are never imported. A run marked **completed** means the worker finished. Review the changes in your normal editor and harness.
 
-## Run locally
+## Install and start
 
-Requires Node 24 and npm. For workers, install Codex or Claude Code and sign in through its native setup first. Use the discovered executable path if the command is not on your shell PATH. For Claude Code, run that executable with `auth login`. No new model API key is required. An installed executable does not prove that you are signed in.
+Requires Node 24 and npm on macOS or Linux. Install this pinned GitHub beta package, then start the local service:
+
+```sh
+npm install -g https://github.com/kaltstart-co/agentklar/releases/download/v0.1.0-beta.1/agentklar-0.1.0-beta.1.tgz
+agentklar start
+```
+
+The install does not start a service, open a browser, or change native harness settings. Keep that terminal running. Open the one-time setup URL it prints within five minutes. It creates a private local browser session. After setup, the UI lives at `http://127.0.0.1:4317`.
+
+For workers, install Codex or Claude Code and sign in through its native setup first. Use the discovered executable path if the command is not on your shell PATH. For Claude Code, run that executable with `auth login`. No new model API key is required. An installed executable does not prove that you are signed in.
+
+<details>
+<summary>Run from a source checkout</summary>
 
 ```sh
 npm ci
@@ -14,21 +26,25 @@ npm run build
 npm start
 ```
 
-Keep that terminal running. Open the one-time setup URL it prints within five minutes. It works once and creates a private local browser session in the support UI. After setup, the UI lives at `http://127.0.0.1:4317`. For frontend development, run `npm run dev` in another terminal and open `http://127.0.0.1:5173`.
+For frontend development, run `npm run dev` in another terminal and open `http://127.0.0.1:5173`.
+
+</details>
 
 ### Start at login on macOS
 
-After `npm ci` and `npm run build`, install a private per-user [launchd LaunchAgent](https://support.apple.com/guide/terminal/script-management-with-launchd-apdc6c1077b-5d5d-4d35-9c19-60f2397b2369/mac) from this checkout:
+After installing the package, install a private per-user [launchd LaunchAgent](https://support.apple.com/guide/terminal/script-management-with-launchd-apdc6c1077b-5d5d-4d35-9c19-60f2397b2369/mac):
 
 ```sh
-npm run service -- install
-npm run service -- status
-npm run service -- open
+agentklar service install
+agentklar service status
+agentklar service open
 ```
 
-`open` creates a new one-use browser link, valid for five minutes, and opens it. Use `npm run service -- open --print` to print the link without opening a browser. Your existing browser session stays signed in. The service starts at login. Keep this checkout and its Node 24 installation in place. To control it later, use `npm run service -- stop`, `start`, or `uninstall`. Stop and uninstall refuse active work; add `--force` to stop active workers. A stopped service starts again at the next login. If a stop command is interrupted, run `npm run service -- start` to resume task starts. Uninstall removes login startup and keeps your local projects and run history. Native harness settings and sign-in remain where each harness keeps them. This uses macOS [launchd](https://developer.apple.com/library/archive/documentation/MacOSX/Conceptual/BPSystemStartup/Chapters/CreatingLaunchdJobs.html) with your user account. It needs no sudo.
+Stop a foreground `agentklar start` first. `open` creates a new one-use browser link, valid for five minutes, and opens it. Use `agentklar service open --print` to print the link without opening a browser. Your existing browser session stays signed in. The service starts at login. Keep the installed package and its Node 24 installation in place. To control it later, use `agentklar service stop`, `start`, or `uninstall`. Stop and uninstall refuse active work; add `--force` to stop active workers. A stopped service starts again at the next login. If a stop command is interrupted, run `agentklar service start` to resume task starts. Uninstall removes login startup and keeps your local projects and run history. Native harness settings and sign-in remain where each harness keeps them. This uses macOS [launchd](https://developer.apple.com/library/archive/documentation/MacOSX/Conceptual/BPSystemStartup/Chapters/CreatingLaunchdJobs.html) with your user account. It needs no sudo.
 
-`AGENTKLAR_HOME` and `AGENTKLAR_PORT` choose an isolated service. Set the same values for each command. The setup saves absolute paths for Node, this checkout, and the service files. It never stores model API keys in launchd settings. The one-use browser link is not written to launchd logs. A service restart marks unfinished runs interrupted; it does not resume workers.
+`AGENTKLAR_HOME` and `AGENTKLAR_PORT` choose an isolated service. Set the same values for each command. The setup saves absolute paths for Node and the installed service files. It never stores model API keys in launchd settings. The one-use browser link is not written to launchd logs. A service restart marks unfinished runs interrupted; it does not resume workers.
+
+To update, stop the service, install a new pinned release tarball, then start it again. Native MCP entries and a macOS launchd job contain absolute file paths, so keep the same global npm prefix and Node 24 path when updating. If either path changes, remove and add the managed connection or background job through the local UI and CLI.
 
 Register an existing project folder. Add roles with a harness, optional model, and responsibility. Start a task from your native harness through MCP or from the local UI. Only registered projects can run workers. Each project allows one worker at a time; a busy request returns an error. Repeating the same task with the same idempotency key returns its original run.
 
@@ -80,26 +96,20 @@ Open **Settings**, select a registered project, then choose **Codex** or **Claud
 
 Codex uses **User** scope, shared across projects. Claude Code uses **Local project** scope in the selected project's real folder. AgentKlar respects `CODEX_HOME` and `CLAUDE_CONFIG_DIR`. A different existing `agentklar` entry, or an entry in another native scope, needs handling in native MCP settings. An exact existing entry is shown as configured and is never adopted for undo.
 
-The generated bridge uses absolute paths for Node 24, the installed tsx loader and `src/mcp.ts`. It passes this running service's `AGENTKLAR_HOME` and `AGENTKLAR_PORT`, and reads the private local token file. Native settings contain no AgentKlar token. Keep this checkout, its dependencies and the local service available. Native add/remove commands own their config serialization and migrations; unknown native keys may change under those rules.
+The generated bridge uses absolute paths for Node 24 and `dist/server/mcp.js`. It passes this running service's `AGENTKLAR_HOME` and `AGENTKLAR_PORT`, and reads the private local token file. Native settings contain no AgentKlar token. Keep the installed package and local service available. Native add/remove commands own their config serialization and migrations; unknown native keys may change under those rules.
 
 **Undo managed connection** removes only the unchanged entry that this app installed from the selected project. Native entries changed outside AgentKlar are kept. An interrupted change remains visible after restart; **Try undo unchanged entry** is available only when the saved entry still matches. Setup does not start your harness. Start or restart a native session to load or unload MCP, and keep its native trust and permission decisions. A configured entry does not prove that an active session has loaded it.
 
 The folder check now includes its creation time, so a deleted project cannot pass as the same folder if the disk reuses its file number. Older saved changes lack this check. Their undo is refused; inspect the instruction file or native MCP entry and change it through the native tool if needed. A filesystem that cannot report a stable folder creation time cannot use these guarded edits.
 
-For other MCP hosts, use their normal setup. Replace the folder below with the checkout path:
+For other MCP hosts, use their normal setup. This example expects `agentklar` on that host's PATH:
 
 ```json
 {
   "mcpServers": {
     "agentklar": {
-      "command": "npm",
-      "args": [
-        "--prefix",
-        "/absolute/path/to/Agentklar",
-        "run",
-        "--silent",
-        "mcp"
-      ]
+      "command": "agentklar",
+      "args": ["mcp"]
     }
   }
 }
@@ -115,7 +125,7 @@ Private records live in `~/.agentklar/local-v1/`: SQLite state, a private MCP be
 
 On a service restart, unfinished runs become interrupted. Native sessions are recorded, but AgentKlar does not claim to recover a live worker. A possibly surviving owned process group keeps its project blocked until it exits; the service never kills an unverified or reused process ID. Cancellation interrupts the owned turn and terminates its owned subprocess group. Keep the service running for active work.
 
-For a finished run, open **Continue in native harness** in its task detail, or call `run_handoff({runId})` through MCP. AgentKlar shows a POSIX terminal command only when it has the saved native session UUID, session home, project folder, and installed CLI, with no active worker in that project. The command keeps the saved model when known and Codex read-only sandbox when selected. Claude read-only runs have no ready command because their SDK tool restriction cannot be carried into native CLI resume. Older runs without a saved session home also have no ready command. The command is a snapshot; AgentKlar does not launch or monitor the manual session. Close native work before starting another worker in the same project.
+For a finished run, open **Continue in native harness** in its task detail, or call `run_handoff({runId})` through MCP. AgentKlar shows a POSIX terminal command only when it has the saved native session UUID, session home, project folder, and installed CLI, with no active worker in that project. The command keeps the saved model when known and Codex read-only sandbox when selected. For Claude, it also keeps whether `CLAUDE_CONFIG_DIR` was set or unset when the worker started; setting that variable changes where Claude reads its config. Claude read-only runs have no ready command because their SDK tool restriction cannot be carried into native CLI resume. Older runs without saved session scope have no ready command. The command is a snapshot; AgentKlar does not launch or monitor the manual session. Close native work before starting another worker in the same project.
 
 Results and event tails have character limits and explicit truncation flags. Native token counts are shown when available. Dollar cost and model quality scores remain unknown. Account allowance is shown only when the native harness provides it.
 
@@ -123,10 +133,11 @@ Results and event tails have character limits and explicit truncation flags. Nat
 
 ```sh
 npm run check
-npm test
 npm run build
+npm test
+npm run smoke:package
 ```
 
-Tests use a fake native protocol process and the official MCP SDK on real stdio. They verify persistence, project isolation, idempotency, cancellation, restart state, exclusive service ownership, native event identity, role context, and approval boundaries. The verified Codex smoke tests use separate temporary projects and explicitly pinned Sol models. Claude Code integration is in progress. The installed CLI was found, but native authentication was not active; a successful live Claude worker run has not been verified.
+Tests use a fake native protocol process and the official MCP SDK on real stdio. They verify persistence, project isolation, idempotency, cancellation, restart state, exclusive service ownership, native event identity, role context, and approval boundaries. The package smoke builds a tarball, installs only production dependencies in a clean prefix, then checks the CLI, built UI, and generated MCP bridge from another working folder. It starts no model. The verified Codex smoke tests use separate temporary projects and explicitly pinned Sol models. Claude Code integration is in progress. The installed CLI was found, but native authentication was not active; a successful live Claude worker run has not been verified.
 
 See [docs/VALIDATION.md](docs/VALIDATION.md) for local and real native evidence. See [BUILD_PLAN.md](BUILD_PLAN.md) for the staged roadmap and [FEATURE_CHECKLIST.md](FEATURE_CHECKLIST.md) for verified scope. MIT license.

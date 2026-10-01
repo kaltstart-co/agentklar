@@ -64,6 +64,7 @@ export type Run = {
   threadId?: string;
   turnId?: string;
   nativeHome?: string;
+  nativeHomeEnv?: "set" | "unset";
   workerPid?: number;
   launchHash?: string;
   routing?: RoutingDecision;
@@ -89,6 +90,7 @@ export type RunHandoff = {
     argv: string[];
     cwd: string;
     env: Record<string, string>;
+    envUnset: string[];
     shell: "posix";
     display: string;
   };

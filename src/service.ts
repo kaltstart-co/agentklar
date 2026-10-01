@@ -40,7 +40,7 @@ const role = z
   })
   .strict();
 function compactRun(r: Run): Run {
-  const { contextSnapshot, followUpContext, nativeHome, ...metadata } = r;
+  const { contextSnapshot, followUpContext, nativeHome, nativeHomeEnv, ...metadata } = r;
   return {
     ...metadata,
     contextRevision: contextSnapshot?.revision ?? null,
@@ -205,7 +205,7 @@ export function createService(
     const mcp = matches(c.req.header("authorization"), `Bearer ${bearer}`);
     if (!ui && !mcp)
       return c.json(
-        { error: operator ? "Run npm run service -- open to open the local UI." : "Open the one-time setup URL printed by the local service." },
+        { error: operator ? "Run agentklar service open to open the local UI." : "Open the one-time setup URL printed by the local service." },
         401,
       );
     if (c.req.path.includes("/setup/") && (!ui || mcp || (c.req.method !== "GET" && (!origin || !origins.has(origin)))))
@@ -258,7 +258,7 @@ export function createService(
   app.get("/setup", (c) => {
     if (!setup || Date.now() > setupExpires || !matches(c.req.query("token"), setup))
       return c.text(
-        operator ? "Setup link expired. Run npm run service -- open for a new link." : "Setup link expired. Restart the local service to get a new link.",
+        operator ? "Setup link expired. Run agentklar service open for a new link." : "Setup link expired. Restart the local service to get a new link.",
         403,
       );
     setup = "";
@@ -674,6 +674,7 @@ export function createService(
         : {}),
       readOnly: data.readOnly,
       nativeHome,
+      nativeHomeEnv: configuredHome === undefined ? "unset" : "set",
       state: "running",
       result: "",
       tokens: null,

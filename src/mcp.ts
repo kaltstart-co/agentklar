@@ -47,7 +47,7 @@ Use projects_list or project_register for the folder, then project_context_read 
         content: [
           {
             type: "text" as const,
-            text: "AgentKlar local service is unavailable. Start npm start in the AgentKlar folder.",
+            text: "AgentKlar local service is unavailable. Run agentklar start.",
           },
         ],
         isError: true,
@@ -206,10 +206,7 @@ Use projects_list or project_register for the folder, then project_context_read 
   );
   return server;
 }
-if (
-  process.argv[1] &&
-  import.meta.url === pathToFileURL(process.argv[1]).href
-) {
+export async function startMcp() {
   const home =
     process.env.AGENTKLAR_HOME || join(homedir(), ".agentklar", "local-v1");
   let token: string;
@@ -222,7 +219,9 @@ if (
     process.exit(1);
   }
   const port = Number(process.env.AGENTKLAR_PORT || 4317);
-  await createMcp(`http://127.0.0.1:${port}`, token!).connect(
+  await createMcp(`http://127.0.0.1:${port}`, token).connect(
     new StdioServerTransport(),
   );
 }
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href)
+  await startMcp();

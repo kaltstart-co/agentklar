@@ -397,14 +397,8 @@ export function App() {
     {
       mcpServers: {
         agentklar: {
-          command: "npm",
-          args: [
-            "--prefix",
-            "/absolute/path/to/Agentklar",
-            "run",
-            "--silent",
-            "mcp",
-          ],
+          command: "agentklar",
+          args: ["mcp"],
         },
       },
     },
@@ -414,7 +408,7 @@ export function App() {
   const backgroundSetup = (
     <details><summary>Start at login on macOS</summary>
       <p className="hint">Stop the foreground terminal service first. Use the same custom home and port, if set.</p>
-      <pre>npm run service -- install{"\n"}npm run service -- open</pre>
+      <pre>agentklar service install{"\n"}agentklar service open</pre>
       <p className="hint">The setup link works once for five minutes. See README for stop, start, and uninstall.</p>
     </details>
   );
@@ -431,14 +425,14 @@ export function App() {
           ? "Start AgentKlar, then open the one-time setup link printed by the service. This gives this browser a local session."
           : "This hosted page is a setup guide. Run the local app to see projects, workers and permission requests."}
       </p>
-      <pre>
-        npm install{"\n"}npm run build{"\n"}npm start
-      </pre>
+      <p className="hint">Requires Node 24 on macOS or Linux. Install the pinned beta package:</p>
+      <pre>npm install -g https://github.com/kaltstart-co/agentklar/releases/download/v0.1.0-beta.1/agentklar-0.1.0-beta.1.tgz{"\n"}agentklar start</pre>
       <p>
         Open the setup link from the terminal, then use{" "}
         <code>http://127.0.0.1:4317</code>.
       </p>
       {backgroundSetup}
+      <details><summary>Run from a source checkout</summary><pre>npm ci{"\n"}npm run build{"\n"}npm start</pre></details>
       <Button variant="light" onClick={() => setView("Settings")}>
         See MCP setup
       </Button>
@@ -1194,15 +1188,9 @@ export function App() {
                 </p>
                 {!connected && <>
                   {setup}
-                  <h3>1. Start the local service</h3>
-                  <pre>npm run build{"\n"}npm start</pre>
-                  <p className="hint">
-                    Open the one-time setup URL printed by the service to
-                    authenticate the local UI.
-                  </p>
                 </>}
                 {connected && backgroundSetup}
-                <h3>{connected ? "Native connection" : "2. Connect a native harness"}</h3>
+                <h3>Native connection</h3>
                 {connected && project ? <NativeSetupForm key={project.id} projectId={project.id} connected={connected} /> : connected ? <p className="hint">Add or select a project to connect Codex or Claude Code.</p> :
                   <p className="hint">Open the local app and select a project. Settings can then check, preview and add the native connection. This hosted guide has no access to your computer.</p>}
                 <details><summary>Manual setup for other MCP hosts</summary><pre>{snippet}</pre></details>
