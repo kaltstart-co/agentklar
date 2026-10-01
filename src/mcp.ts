@@ -125,6 +125,14 @@ export function createMcp(base: string, token: string) {
       call(`/api/projects/${projectId}`, "PATCH", body),
   );
   server.registerTool(
+    "project_instructions_list",
+    {
+      description: "Read presence, hash and bounded change history for root Codex AGENTS.md and Claude Code CLAUDE.md. File presence does not prove native loading. Returns metadata only; instruction text and writes are available only in the trusted local UI. This starts no worker.",
+      inputSchema: z.object({ projectId: z.uuid() }).strict(),
+    },
+    ({ projectId }) => call(`/api/projects/${projectId}/instructions`),
+  );
+  server.registerTool(
     "project_context_read",
     {
       description:

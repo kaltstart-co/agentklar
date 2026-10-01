@@ -154,3 +154,51 @@ export type WorkerAdvice = {
   confidence: "limited";
   sources: string[];
 };
+
+export type InstructionFileId = "agents" | "claude";
+export type InstructionFileMetadata = {
+  id: InstructionFileId;
+  path: string;
+  status: "present" | "missing" | "unavailable";
+  hash: string | null;
+  bytes: number | null;
+  message: string | null;
+};
+export type InstructionDocument = {
+  id: InstructionFileId;
+  path: string;
+  exists: boolean;
+  hash: string | null;
+  text: string;
+  bytes: number;
+};
+export type InstructionPreview = {
+  id: string;
+  projectId: string;
+  file: InstructionFileId;
+  path: string;
+  before: string | null;
+  after: string;
+  beforeHash: string | null;
+  afterHash: string;
+  createdAt: string;
+};
+export type InstructionChange = {
+  id: string;
+  projectId: string;
+  file: InstructionFileId;
+  path: string;
+  createdAt: string;
+  updatedAt: string;
+  state: "prepared" | "applied" | "rolled_back" | "interrupted";
+  operation: "apply" | "rollback";
+  beforeHash: string | null;
+  afterHash: string;
+  message: string | null;
+};
+export type InstructionSnapshot = {
+  projectId: string;
+  checkedAt: string;
+  files: InstructionFileMetadata[];
+  changes: InstructionChange[];
+};

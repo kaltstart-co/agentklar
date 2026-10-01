@@ -24,6 +24,7 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 - [x] Project context
 - [x] Native model list
 - [x] Model advice
+- [x] Native instructions (Codex and Claude Code)
 
 ## In progress
 
@@ -36,7 +37,7 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 - [ ] Automatic routing
 - [ ] Quality benchmarks
 - [ ] Configs, skills, plugins
-- [ ] Config preview and rollback
+- [ ] Wider config preview and rollback
 - [ ] Easy setup
 - [ ] Device pairing
 - [ ] Remote work

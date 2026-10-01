@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { InstructionsForm } from "./InstructionsForm.js";
 import {
   Alert,
   Autocomplete,
@@ -25,7 +26,7 @@ import type {
   WorkerAdvice,
 } from "../src/contracts.js";
 
-type View = "Work" | "Context" | "Team" | "Models" | "Usage" | "Settings";
+type View = "Work" | "Instructions" | "Context" | "Team" | "Models" | "Usage" | "Settings";
 const local = ["127.0.0.1", "localhost"].includes(location.hostname);
 const empty: Snapshot = {
   projects: [],
@@ -95,6 +96,7 @@ export function App() {
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("all");
   const [error, setError] = useState("");
+  const [connectionError, setConnectionError] = useState("");
   const [connected, setConnected] = useState(false);
   const [loaded, setLoaded] = useState(!local);
   const [busy, setBusy] = useState(false);
@@ -186,6 +188,7 @@ export function App() {
     try {
       const next = await api<Snapshot>("/snapshot");
       setSnapshot(next);
+      setConnectionError("");
       setConnected(true);
       setLoaded(true);
       setProjectId((id) =>
@@ -196,7 +199,7 @@ export function App() {
     } catch (e) {
       setConnected(false);
       setLoaded(true);
-      setError((e as Error).message);
+      setConnectionError((e as Error).message);
     }
   }
   useEffect(() => {
@@ -409,7 +412,7 @@ export function App() {
         <Button
           variant="subtle"
           onClick={() => {
-            setError("");
+            setConnectionError("");
             void refresh();
           }}
         >
@@ -450,7 +453,7 @@ export function App() {
         </button>
         <nav aria-label="Main navigation">
           {(
-            ["Work", "Context", "Team", "Models", "Usage", "Settings"] as View[]
+            ["Work", "Instructions", "Context", "Team", "Models", "Usage", "Settings"] as View[]
           ).map((item, i) => (
             <button
               key={item}
@@ -459,7 +462,7 @@ export function App() {
               onClick={() => setView(item)}
             >
               <span aria-hidden="true">
-                {["▦", "≡", "♧", "◇", "◷", "⚙"][i]}
+                {["▦", "✎", "≡", "♧", "◇", "◷", "⚙"][i]}
               </span>
               {item}
               {item === "Work" &&
@@ -501,6 +504,11 @@ export function App() {
             {notice}
           </Alert>
         )}
+        {connectionError && (
+          <Alert color="red" title="Local service disconnected">
+            {connectionError}
+          </Alert>
+        )}
         {error && (
           <Alert
             color="red"
@@ -518,6 +526,11 @@ export function App() {
               projectId={project.id}
               connected={connected}
             />
+          </div>
+        )}
+        {project && (
+          <div hidden={view !== "Instructions" || !connected}>
+            <InstructionsForm key={project.id} projectId={project.id} connected={connected} />
           </div>
         )}
         {!loaded ? (
@@ -780,6 +793,9 @@ export function App() {
                   </button>
                 </div>
               ))}
+            {view === "Instructions" && !project && (
+              <p className="empty-note">Add an existing project to manage its instruction files.</p>
+            )}
             {view === "Context" && !project && (
               <p className="empty-note">
                 Add an existing project to save its context.

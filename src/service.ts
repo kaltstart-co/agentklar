@@ -25,6 +25,7 @@ import { ClaudeWorker } from "./claude.ts";
 import { CatalogCache, readCatalog, type CatalogReader } from "./catalog.ts";
 import type { Run, Project } from "./contracts.ts";
 import { recommendationSchema, recommendWorker } from "./recommend.ts";
+import { Instructions, InstructionError, instructionFileSchema, instructionPreviewSchema } from "./instructions.ts";
 const role = z
   .object({
     id: z.string().min(1).max(80),
@@ -119,6 +120,7 @@ export function createService(
     throw e;
   }
   const app = new Hono();
+  const instructions = new Instructions(store.db);
   const catalogs = new CatalogCache(catalogReader, {
     codex: nativeCommand,
     claude: claudeCommand,
@@ -143,7 +145,7 @@ export function createService(
     !!a &&
     Buffer.byteLength(a) === Buffer.byteLength(b) &&
     timingSafeEqual(Buffer.from(a), Buffer.from(b));
-  app.onError((e, c) => c.json({ error: e.message }, 500));
+  app.onError((e, c) => c.json({ error: e.message }, e instanceof InstructionError ? e.status : 500));
   app.use("*", async (c, next) => {
     const host = c.req.header("host") || new URL(c.req.url).host;
     if (![`127.0.0.1:${port}`, "127.0.0.1:5173"].includes(host))
@@ -165,13 +167,16 @@ export function createService(
         401,
       );
     if (
-      c.req.path.startsWith("/api/approvals/") &&
+      (c.req.path.startsWith("/api/approvals/") ||
+        (c.req.path.includes("/instructions") && c.req.method !== "GET")) &&
       (!ui || !origin || !origins.has(origin) || mcp)
     )
       return c.json(
-        { error: "Only the trusted local UI may answer native approvals" },
+        { error: "Only the trusted local UI may answer native approvals or edit instruction files" },
         403,
       );
+    if (/^\/api\/projects\/[^/]+\/instructions\/[^/]+$/.test(c.req.path) && c.req.method === "GET" && (!ui || mcp))
+      return c.json({ error: "Only the trusted local UI may read instruction text" }, 403);
     if (c.req.method !== "GET" && !mcp && (!origin || !origins.has(origin)))
       return c.json({ error: "Exact local Origin required" }, 403);
     await next();
@@ -194,6 +199,37 @@ export function createService(
     return c.redirect("/");
   });
   app.get("/api/projects", (c) => c.json(store.projects()));
+  app.get("/api/projects/:id/instructions", (c) => {
+    const project = store.projects().find((p) => p.id === c.req.param("id"));
+    c.header("Cache-Control", "no-store");
+    return project ? c.json(instructions.list(project)) : c.json({ error: "Project not found" }, 404);
+  });
+  app.get("/api/projects/:id/instructions/:file", (c) => {
+    const project = store.projects().find((p) => p.id === c.req.param("id"));
+    if (!project) return c.json({ error: "Project not found" }, 404);
+    const file = instructionFileSchema.safeParse(c.req.param("file"));
+    if (!file.success) return c.json({ error: "Unknown instruction file" }, 400);
+    c.header("Cache-Control", "no-store");
+    return c.json(instructions.document(project, file.data));
+  });
+  app.post("/api/projects/:id/instructions/preview", async (c) => {
+    const project = store.projects().find((p) => p.id === c.req.param("id"));
+    if (!project) return c.json({ error: "Project not found" }, 404);
+    const parsed = instructionPreviewSchema.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: "Provide a native instruction file, UTF-8 text and the hash you read." }, 400);
+    c.header("Cache-Control", "no-store");
+    return c.json(instructions.preview(project, parsed.data.file, parsed.data.text, parsed.data.expectedHash));
+  });
+  for (const operation of ["apply", "rollback"] as const)
+    app.post(`/api/projects/:id/instructions/${operation}`, async (c) => {
+      const project = store.projects().find((p) => p.id === c.req.param("id"));
+      if (!project) return c.json({ error: "Project not found" }, 404);
+      const schema = operation === "apply" ? z.object({ previewId: z.uuid() }).strict() : z.object({ changeId: z.uuid() }).strict();
+      const parsed = schema.safeParse(await c.req.json().catch(() => null));
+      if (!parsed.success) return c.json({ error: "Provide the saved preview or change ID." }, 400);
+      c.header("Cache-Control", "no-store");
+      return c.json(operation === "apply" ? instructions.apply(project, (parsed.data as { previewId: string }).previewId) : instructions.rollback(project, (parsed.data as { changeId: string }).changeId));
+    });
   app.get("/api/projects/:id/catalog", (c) => {
     const id = c.req.param("id");
     c.header("Cache-Control", "no-store");

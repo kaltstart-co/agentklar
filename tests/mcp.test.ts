@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import { serve } from "@hono/node-server";
-import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createService } from "../src/service.ts";
@@ -42,7 +42,7 @@ test("SDK stdio wire lists and calls tools; closing MCP leaves service worker al
   try {
     await client.connect(transport);
     const list = await client.listTools();
-    assert.equal(list.tools.length, 14);
+    assert.equal(list.tools.length, 15);
     assert.equal(
       list.tools.some((t) => /approve/.test(t.name)),
       false,
@@ -52,6 +52,15 @@ test("SDK stdio wire lists and calls tools; closing MCP leaves service worker al
       arguments: { name: "wire", path: project },
     });
     const p = JSON.parse((pResult.content as { text: string }[])[0].text);
+    writeFileSync(join(project, "AGENTS.md"), "INSTRUCTION_BODY_PRIVATE");
+    const instructions = await client.callTool({ name: "project_instructions_list", arguments: { projectId: p.id } });
+    const instructionText = (instructions.content as { text: string }[])[0].text;
+    const inventory = JSON.parse(instructionText);
+    assert.equal(inventory.files.length, 2);
+    assert.equal(inventory.files[0].status, "present");
+    assert.equal(instructionText.includes("INSTRUCTION_BODY_PRIVATE"), false);
+    assert.equal(list.tools.some((t) => /instructions.*(write|apply|rollback|preview)/.test(t.name)), false);
+    assert.equal(service.store.runs().length, 0);
     const cached = await client.callTool({
       name: "models_list",
       arguments: { projectId: p.id, refresh: false },

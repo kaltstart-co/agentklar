@@ -40,6 +40,14 @@ Open **Context** to save a project brief, decisions and lessons, and next steps.
 
 Each save creates a revision. If another harness saves first, the UI keeps your draft and shows a conflict. **Load latest (replaces draft)** loads that newer revision. New tasks use saved project context by default; turn off **Use project context** to skip it. Each task retains the exact context used at launch. Open its **Project context** disclosure to inspect that snapshot. Unsaved edits apply after you save them.
 
+## Native project instructions
+
+Open **Instructions** and choose **Codex · AGENTS.md** or **Claude Code · CLAUDE.md**. AgentKlar shows the status and actual path of that file in the project root. Select **Load file**, edit the text, then **Preview changes** to read the before and after. **Apply change** writes that file. Files must fit within 32 KiB of UTF-8 text. Nothing is saved automatically.
+
+Each harness keeps its own native instruction file. These files are separate from the shared project context above. Native settings and parent files can change what loads. Start a new native session to check. Creating CLAUDE.md may stop Claude from loading AGENTS.md under its default settings; AgentKlar does not copy the instructions between files.
+
+Drafts stay in the open app when you switch views or harnesses, or the local service briefly disconnects. If a file changes on disk, the UI keeps your draft. **Reload file (replaces draft)** loads the current file. **Undo latest change** restores the saved prior contents only when the current file still matches that change. Recent changes remain visible in the local UI. An interrupted change has a **Try undo** action with the same file check. Instruction editing is available through the trusted local UI; MCP can read file status and change metadata.
+
 ## Connect MCP
 
 Use your harness's normal MCP setup. Replace the folder below with the checkout path:

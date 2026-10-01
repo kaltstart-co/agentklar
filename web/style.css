@@ -607,3 +607,19 @@ code {
 .catalog-model p {
   margin: 3px 0;
 }
+
+.instruction-path {
+  overflow-wrap: anywhere;
+}
+.instructions-panel summary {
+  cursor: pointer;
+}
+.instruction-preview {
+  border: 1px solid #e9ebf1;
+  border-radius: 8px;
+  padding: 18px;
+}
+.instruction-preview pre {
+  max-height: 360px;
+  overflow: auto;
+}
