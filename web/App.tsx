@@ -460,7 +460,7 @@ export function App() {
           : "This hosted page is a setup guide. Run the local app to see projects, workers and permission requests."}
       </p>
       <p className="hint">Requires Node 24 on macOS or Linux. Install the pinned beta package:</p>
-      <pre>npm install -g https://github.com/kaltstart-co/agentklar/releases/download/v0.1.0-beta.12/agentklar-0.1.0-beta.12.tgz{"\n"}agentklar start</pre>
+      <pre>npm install -g https://github.com/kaltstart-co/agentklar/releases/download/v0.1.0-beta.13/agentklar-0.1.0-beta.13.tgz{"\n"}agentklar start</pre>
       <p>
         Open the setup link from the terminal, then use{" "}
         <code>http://127.0.0.1:4317</code>.
@@ -1099,6 +1099,7 @@ export function App() {
                 {catalog?.harnesses.map((entry) => (
                   <div className="role-card" key={entry.harness}>
                     <h3>{harnessName(entry.harness)}</h3>
+                    {entry.auth && <Alert color={entry.auth.status === "sign_in_required" ? "orange" : "blue"}>{entry.auth.message}</Alert>}
                     {entry.modelsMessage &&
                       (entry.harness === "muse" || entry.modelsStatus === "unavailable" ||
                         entry.modelsTruncated) && (
@@ -1444,6 +1445,8 @@ export function App() {
             )}
             {taskHarness === "muse" && catalogBusy === draftProjectId && <p className="hint">Loading Muse model descriptions…</p>}
             {taskHarness === "muse" && catalogError?.projectId === draftProjectId && <Alert color="orange">Muse model descriptions are unavailable: {catalogError.message}</Alert>}
+            {taskHarness === "claude" && catalogs[draftProjectId]?.harnesses.find((entry) => entry.harness === "claude")?.auth?.status === "sign_in_required" &&
+              <Alert color="orange">Claude Code worker sign-in is required. Sign in with the native Claude Code CLI, then refresh Models.</Alert>}
             <Checkbox
               label="Choose model automatically"
               checked={automaticRouting}

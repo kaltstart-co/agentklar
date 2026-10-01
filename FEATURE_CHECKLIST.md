@@ -31,6 +31,7 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 - [x] Shared memory
 - [x] Project context
 - [x] Native model list
+- [x] Claude worker sign-in status
 - [x] Muse model discovery
 - [x] Muse delegation (native worker write and completion verified)
 - [x] Muse subscription usage snapshots (fixture values; live numeric reading unverified)

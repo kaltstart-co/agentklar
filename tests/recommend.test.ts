@@ -294,6 +294,22 @@ test("Claude aliases use exact resolved models and never infer a tier from alias
   );
 });
 
+test("known Claude sign-in block excludes automatic choice and keeps pins fixed", () => {
+  const claude = catalog("claude", ["claude-sonnet-4-6"]);
+  claude.auth = { status: "sign_in_required", source: "claude-auth-status", message: "Sign in" };
+  const blocked = advise({ harness: "claude" }, [claude]);
+  assert.equal(blocked.choice, null);
+  assert.doesNotMatch(blocked.reasons.join(" "), /Policy order|LiveBench/);
+  const pinned = advise({ harness: "claude", model: "claude-sonnet-4-6" }, [claude]);
+  assert.equal(pinned.choice, null);
+  assert.match(pinned.reasons.join(" "), /Pinned claude.*sign-in.*No replacement/i);
+  assert.equal(advise({}, [claude, catalog()]).choice?.harness, "codex");
+  claude.auth.status = "unknown";
+  assert.equal(advise({ harness: "claude", model: "claude-sonnet-4-6" }, [claude]).choice?.harness, "claude");
+  claude.auth.status = "signed_in";
+  assert.equal(advise({ harness: "claude", model: "claude-sonnet-4-6" }, [claude]).choice?.harness, "claude");
+});
+
 test("image advice requires native image evidence for both automatic choices and pins", () => {
   const c = catalog();
   c.models = [

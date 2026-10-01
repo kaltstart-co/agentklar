@@ -309,6 +309,14 @@ export function recommendWorker(
       else warn(`${h}: native catalog evidence is unavailable.`);
       continue;
     }
+    if (h === "claude" && catalog.auth?.status === "sign_in_required") {
+      const message = "Claude Code worker sign-in is required in its native CLI.";
+      if (pin) advice.reasons.push(`Pinned ${h} model ${pin}: ${message} No replacement was selected.`);
+      else warn(message);
+      continue;
+    }
+    if (h === "claude" && catalog.auth?.status === "unknown")
+      warn("Claude Code worker sign-in could not be checked.");
     if (catalog.modelsTruncated)
       warn(`${h}: the native catalog was shortened and may omit choices.`);
     if (pin)
@@ -354,7 +362,7 @@ export function recommendWorker(
     advice.benchmarkMethod = "reference-tie-break";
     advice.reasons.push(`Fresh LiveBench ${advice.choice.benchmark.metric} reference scores break this equal policy fit after native included usage priority.`);
 
-  } else if (!pin) {
+  } else if (advice.choice && !pin) {
     advice.reasons.push("Policy order is used: no comparable tie needs ranking, or the group lacks fresh, exact LiveBench scores for every candidate.");
   }
   // Report exact references even when they did not affect policy ordering or a pin.

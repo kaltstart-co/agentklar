@@ -210,7 +210,7 @@ Use projects_list or project_register, then project_context_read and project_run
     "models_list",
     {
       description:
-        "Read project-scoped native model catalogs and Codex account quota. Refresh defaults to true, with a 30-second local cache. Catalog discovery does not verify sign-in or model entitlement; quota remains unknown where unavailable. This starts no worker or inference.",
+        "Read project-scoped native model catalogs, Codex account quota, and optional Claude worker sign-in status. Refresh defaults to true, with a 30-second local cache. A model listing alone does not verify sign-in or model entitlement; quota remains unknown where unavailable. This starts no worker or inference.",
       inputSchema: z
         .object({ projectId: z.uuid(), refresh: z.boolean().default(true) })
         .strict(),

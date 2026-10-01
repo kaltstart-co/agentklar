@@ -17,6 +17,7 @@ import {
   CatalogCache,
   parseQuota,
   readCodexCatalog,
+  readClaudeAuth,
   readClaudeCatalog,
   readMuseCatalog,
   type CatalogReader,
@@ -75,6 +76,21 @@ createInterface({input:process.stdin}).on('line', line => {
  if(request.method==='model/list')return mode==='malformed' ? reply({models:{}}) : reply({source:mode==='fake'?'fakeCatalog':mode==='config'?'configCatalog':mode==='bundled'?'bundledCatalog':'providerCatalog',providerId:'muse',profileId:null,models:[row('muse-spark-1.3'),row('muse-spark-1.3-contributor'),row('muse-spark-1.3'),row('foreign','other')]});
  throw new Error('Unexpected method '+request.method);
 });
+`;
+const claudeAuthFixture = `
+import { appendFileSync } from 'node:fs';
+const [mode, log] = process.argv.slice(2);
+appendFileSync(log + '.pid', String(process.pid));
+appendFileSync(log, JSON.stringify(process.argv.slice(2)) + '\\n');
+if (mode === 'hang') { process.on('SIGTERM', () => {}); setInterval(() => {}, 1000); }
+else if (mode === 'large') { process.stdout.write('x'.repeat(20000)); setInterval(() => {}, 1000); }
+else if (mode === 'large-error') { process.stderr.write('x'.repeat(20000)); setInterval(() => {}, 1000); }
+else if (mode === 'bad') { process.stdout.write('not-json'); process.exitCode = 1; }
+else {
+ const loggedIn = mode === 'in' || mode === 'true-exit-one';
+ process.stdout.write(JSON.stringify({ loggedIn, authMethod: mode === 'other-auth' ? 'apiKey' : loggedIn ? 'oauth' : 'none', apiProvider: mode === 'third-party' ? 'thirdParty' : 'firstParty', email: 'SECRET_EMAIL', token: 'SECRET_TOKEN', configDirectory: 'SECRET_PATH' }));
+ process.exitCode = mode === 'false-exit-zero' ? 0 : mode === 'true-exit-one' ? 1 : loggedIn ? 0 : 1;
+}
 `;
 function project(): Project {
   return {
@@ -429,6 +445,39 @@ test("Claude SDK discovery waits on empty input, preserves native settings and c
   );
 });
 
+test("Claude native auth probe keeps only status, bounds output and owns its child", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "agentklar-claude-auth-"));
+  const file = join(dir, "auth.mjs");
+  writeFileSync(file, claudeAuthFixture);
+  try {
+    for (const [mode, expected] of [
+      ["in", "signed_in"], ["out", "sign_in_required"],
+      ["third-party", "unknown"], ["bad", "unknown"],
+      ["other-auth", "unknown"], ["false-exit-zero", "unknown"],
+      ["true-exit-one", "unknown"], ["large", "unknown"],
+      ["large-error", "unknown"], ["hang", "unknown"],
+    ] as const) {
+      const log = join(dir, mode);
+      const result = await readClaudeAuth(process.execPath, dir, new AbortController().signal, [file, mode, log], 2000);
+      assert.equal(result.status, expected, mode);
+      assert.equal(result.source, "claude-auth-status");
+      assert.doesNotMatch(JSON.stringify(result), /SECRET|email|configDirectory|token/i);
+      assertStopped(Number(readFileSync(log + ".pid", "utf8")), mode);
+      assert.deepEqual(JSON.parse(readFileSync(log, "utf8").trim()), [mode, log]);
+    }
+    const log = join(dir, "abort");
+    const controller = new AbortController();
+    const pending = readClaudeAuth(process.execPath, dir, controller.signal, [file, "hang", log], 2000);
+    for (let attempt = 0; attempt < 100 && !existsSync(log + ".pid"); attempt++)
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    controller.abort();
+    assert.equal((await pending).status, "unknown");
+    assertStopped(Number(readFileSync(log + ".pid", "utf8")), "abort");
+    assert.equal((await readClaudeAuth(process.execPath, dir, controller.signal, [file, "in", join(dir, "unused")])).status, "unknown");
+    assert.equal((await readClaudeAuth(join(dir, "missing"), dir, new AbortController().signal)).status, "unknown");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test("project cache coalesces refresh, expires after 30 seconds and aborts owned reads on close", async () => {
   let now = 0,
     calls = 0,
@@ -477,6 +526,27 @@ test("project cache coalesces refresh, expires after 30 seconds and aborts owned
   await cancelling.close();
   await waiting;
   assert.equal(aborted, true);
+});
+
+test("Claude sign-in status changes only after a fresh catalog read", async () => {
+  let now = 0, signedIn = false, reads = 0;
+  const p = project();
+  const cache = new CatalogCache(async (project) => ({
+    projectId: project.id, checkedAt: String(++reads),
+    harnesses: [{
+      harness: "claude", models: [], modelsStatus: "unavailable", modelsMessage: null,
+      modelsTruncated: false, quota: { status: "unavailable", message: null, ordinaryUsageAllowed: null, buckets: [] },
+      auth: { status: signedIn ? "signed_in" : "sign_in_required", source: "claude-auth-status", message: "fixture" },
+    }],
+  }), { codex: null, claude: null }, () => now);
+  try {
+    assert.equal((await cache.refresh(p)).harnesses[0].auth?.status, "sign_in_required");
+    signedIn = true;
+    assert.equal((await cache.refresh(p)).harnesses[0].auth?.status, "sign_in_required");
+    now = 30000;
+    assert.equal((await cache.refresh(p)).harnesses[0].auth?.status, "signed_in");
+    assert.equal(reads, 2);
+  } finally { await cache.close(); }
 });
 
 test("authenticated project API reads only on demand, isolates cache and does not persist catalogs", async () => {

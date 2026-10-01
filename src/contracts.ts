@@ -194,6 +194,11 @@ export type AccountQuota = {
 };
 export type HarnessCatalog = {
   harness: "codex" | "claude" | "muse";
+  auth?: {
+    status: "signed_in" | "sign_in_required" | "unknown";
+    source: "claude-auth-status";
+    message: string;
+  };
   models: CatalogModel[];
   modelsStatus: "available" | "unavailable";
   modelsMessage: string | null;

@@ -2,6 +2,16 @@
 
 Verified on 2026-10-01 and 2026-10-02 using Node 24.21.0. The old application was not used.
 
+## Claude Code worker sign-in status — beta.13
+
+Offline native CLI fixtures check signed-in, sign-in-required, contradictory exit and JSON values, other providers and auth methods, malformed output, missing executable, excess stdout or stderr, timeout, abort and child exit. The response keeps only a fixed status, source and message; fixture email, token and config path never enter the catalog. Routing fixtures show that a known sign-in requirement removes Claude from automatic choices without replacing a Claude model pin. Unknown status remains a warning. A cached requirement changes only after a fresh catalog read. These tests use no model call, login command or native config change. The installed Claude CLI was separately observed reporting `loggedIn:false`, `authMethod:none`, `apiProvider:firstParty` with exit code 1. The [native CLI reference](https://code.claude.com/docs/en/cli-reference) documents the auth-status command and exit codes.
+
+Independent local QA on port 4333 used the actual installed Claude CLI. Native metadata still listed five models while `auth.status` was `sign_in_required`; a pinned Haiku advice call returned no choice and no replacement. A routed task start was blocked before a worker or run was created. There were zero worker starts and model turns. Evidence: `/tmp/agentklar-claude-auth-qa/evidence.json`. This does not establish successful Claude worker inference or Desktop app sign-in for the separate worker process.
+
+Browser QA showed the worker sign-in status in Models and a clear warning in a Claude task draft. The blocked automatic start kept the draft and created zero runs. At 320 pixels there was no horizontal overflow, and the browser reported no errors. The no-choice advice now omits policy-order and LiveBench explanations because no model was selected. Browser evidence is in `/tmp/agentklar-claude-auth-qa/evidence.json`, `models.png`, and `task-warning-mobile.png`.
+
+Local beta.13 checks passed: TypeScript, all 124 tests, the production build, and diff whitespace checks. The package smoke installed production dependencies in a clean temporary prefix, verified the built UI and installed MCP bridge, and listed all 19 tools. It started no worker or model.
+
 ## Advisory project lead — beta.12
 
 Service and MCP tests cover explicit claim, same-bridge repeat, another bridge's conflict, observed-ID takeover, exact-owner release, stale renew and UI clear, unknown or changed client reports, deterministic expiry, and restart without an automatic reclaim. A delayed claim response after MCP close is released; concurrent lead actions for one project are ordered. The official stdio client test closes a claimed bridge and confirms its separate worker stays active. No lead claim is made by project reads or task starts. These tests use local protocol fixtures and no model inference.

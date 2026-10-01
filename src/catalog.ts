@@ -126,6 +126,64 @@ function empty(harness: HarnessCatalog["harness"]): HarnessCatalog {
     ),
   };
 }
+
+type ClaudeAuth = NonNullable<HarnessCatalog["auth"]>;
+const authMessage: Record<ClaudeAuth["status"], string> = {
+  signed_in: "Claude Code reports that its native CLI is signed in. Model access is not verified.",
+  sign_in_required: "Claude Code worker sign-in is required. Sign in with the native Claude Code CLI, then refresh models.",
+  unknown: "Claude Code worker sign-in could not be checked. Refresh models or check the native CLI.",
+};
+const authResult = (status: ClaudeAuth["status"]): ClaudeAuth => ({
+  status, source: "claude-auth-status", message: authMessage[status],
+});
+
+export async function readClaudeAuth(
+  command: string,
+  cwd: string,
+  signal: AbortSignal,
+  args = ["auth", "status"],
+  timeoutMs = 8000,
+): Promise<ClaudeAuth> {
+  if (signal.aborted) return authResult("unknown");
+  const child = spawn(command, args, {
+    cwd, stdio: "pipe", detached: process.platform !== "win32",
+  });
+  const owned = ownChild(child);
+  let output = "", bytes = 0, errorBytes = 0, overflow = false, timedOut = false;
+  child.stdout.on("data", (chunk: Buffer) => {
+    bytes += chunk.length;
+    if (bytes > 16384) { overflow = true; owned.stop(); }
+    else output += chunk.toString("utf8");
+  });
+  child.stderr.on("data", (chunk: Buffer) => {
+    errorBytes += chunk.length;
+    if (errorBytes > 16384) { overflow = true; owned.stop(); }
+  });
+  child.stdin.on("error", () => {});
+  child.stdin.end();
+  const timeout = setTimeout(() => { timedOut = true; owned.stop(); }, timeoutMs);
+  const abort = () => owned.stop();
+  signal.addEventListener("abort", abort, { once: true });
+  try {
+    const code = await new Promise<number | null>((resolve) => {
+      child.once("error", () => resolve(null));
+      child.once("close", resolve);
+    });
+    if (overflow || timedOut || signal.aborted || code === null) return authResult("unknown");
+    const payload = record(JSON.parse(output));
+    if (payload?.apiProvider !== "firstParty") return authResult("unknown");
+    if (code === 0 && payload.loggedIn === true) return authResult("signed_in");
+    if (code === 1 && payload.loggedIn === false && payload.authMethod === "none")
+      return authResult("sign_in_required");
+  } catch {
+  } finally {
+    clearTimeout(timeout);
+    signal.removeEventListener("abort", abort);
+    owned.stop();
+    await owned.ended;
+  }
+  return authResult("unknown");
+}
 function clipped(value: unknown) {
   const r = record(value);
   return (
@@ -501,7 +559,13 @@ export const readCatalog: CatalogReader = async (
       return harness === "codex"
         ? readCodexCatalog(command, project.path, signal)
         : harness === "claude"
-          ? readClaudeCatalog(command, project.path, signal)
+          ? (async () => {
+              const [catalog, auth] = await Promise.all([
+                readClaudeCatalog(command, project.path, signal),
+                readClaudeAuth(command, project.path, signal),
+              ]);
+              return { ...catalog, auth };
+            })()
           : readMuseCatalog(command, project.path, signal);
     }),
   ),
