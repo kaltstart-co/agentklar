@@ -10,6 +10,7 @@ import {
 } from "@mantine/core";
 
 type Harness = "codex" | "claude";
+type Scope = "project" | "personal";
 type Item = {
   id: string | null;
   harness: Harness;
@@ -38,12 +39,12 @@ type Preview = {
   currentFiles: { path: string; bytes: number }[] | null;
 };
 async function request<T>(
-  projectId: string,
+  base: string,
   operation = "",
   body?: unknown,
 ): Promise<T> {
   const response = await fetch(
-    `/api/projects/${encodeURIComponent(projectId)}/skills${operation}`,
+    `${base}${operation}`,
     {
       credentials: "same-origin",
       ...(body === undefined
@@ -63,9 +64,13 @@ export function SkillsForm({
   projectId,
   connected,
 }: {
-  projectId: string;
+  projectId?: string;
   connected: boolean;
 }) {
+  const [scope, setScope] = useState<Scope>(projectId ? "project" : "personal");
+  const base = scope === "project" && projectId
+    ? `/api/projects/${encodeURIComponent(projectId)}/skills`
+    : "/api/skills";
   const [harness, setHarness] = useState<Harness>("codex");
   const [drafts, setDrafts] = useState<
     Record<Harness, { source: string; name: string }>
@@ -83,7 +88,7 @@ export function SkillsForm({
     setBusy("refresh");
     setError("");
     try {
-      const data = await request<{ skills: Item[] }>(projectId);
+      const data = await request<{ skills: Item[] }>(base);
       if (id === generation.current && currentConnected.current)
         setItems(data.skills);
     } catch (e) {
@@ -93,6 +98,7 @@ export function SkillsForm({
     }
   }
   useEffect(() => {
+    if (!projectId && scope === "project") { setScope("personal"); return; }
     if (connected) void refresh();
     else {
       setBusy("");
@@ -101,7 +107,7 @@ export function SkillsForm({
     return () => {
       generation.current++;
     };
-  }, [projectId, connected]);
+  }, [projectId, scope, connected]);
   const draft = drafts[harness];
   function edit(field: "source" | "name", value: string) {
     generation.current++;
@@ -118,7 +124,7 @@ export function SkillsForm({
     setError("");
     setNotice("");
     try {
-      const result = await request<Preview>(projectId, `/${operation}`, body);
+      const result = await request<Preview>(base, `/${operation}`, body);
       if (id !== generation.current || !currentConnected.current) return;
       if (operation === "preview" || operation === "preview-update") setPreview(result);
       else {
@@ -132,7 +138,7 @@ export function SkillsForm({
             ? "Skill installed. Start a new native session to load it."
             : "Managed skill removed. Start a new native session to unload it.",
         );
-        const data = await request<{ skills: Item[] }>(projectId);
+        const data = await request<{ skills: Item[] }>(base);
         if (id === generation.current) setItems(data.skills);
       }
     } catch (e) {
@@ -146,11 +152,11 @@ export function SkillsForm({
   }
   return (
     <section className="content-panel instructions-panel">
-      <h2>Project skills</h2>
+      <h2>Skills</h2>
       <p className="muted">
-        Add one skill from a GitHub repo to a project folder. Codex and Muse
-        can read .agents/skills. Claude Code uses .claude/skills, which Muse can
-        also read.
+        Add one skill from a GitHub repo to this project or your personal skill folder.
+        Codex uses .agents/skills; Claude Code uses .claude/skills.
+        {scope === "project" && " Muse can read both project folders."}
       </p>
       <p className="hint">
         Review the skill text and full file list before installing or updating.
@@ -160,12 +166,31 @@ export function SkillsForm({
       </p>
       <Stack gap="sm">
         <Select
-          label="Project skill folder"
+          label="Scope"
+          value={scope}
+          disabled={Boolean(busy)}
+          data={[
+            ...(projectId ? [{ value: "project", label: "This project" }] : []),
+            { value: "personal", label: "All projects on this computer" },
+          ]}
+          allowDeselect={false}
+          onChange={(v) => {
+            generation.current++;
+            setScope(v as Scope);
+            setItems([]);
+            setPreview(null);
+            setError("");
+            setNotice("");
+          }}
+        />
+        {scope === "personal" && <p className="hint">Uses the default personal folders in your home directory. A custom native profile may use a different folder.</p>}
+        <Select
+          label="Native skill folder"
           value={harness}
           disabled={Boolean(busy)}
           data={[
-            { value: "codex", label: "Shared · .agents/skills" },
-            { value: "claude", label: "Claude · .claude/skills" },
+            { value: "codex", label: scope === "personal" ? "Codex · ~/.agents/skills" : "Shared · .agents/skills" },
+            { value: "claude", label: scope === "personal" ? "Claude · ~/.claude/skills" : "Claude · .claude/skills" },
           ]}
           allowDeselect={false}
           onChange={(v) => {
@@ -256,7 +281,7 @@ export function SkillsForm({
         {error && <Alert color="red">{error}</Alert>}
         {notice && <Alert color="teal">{notice}</Alert>}
         <Group>
-          <h3>Native project skill folders</h3>
+          <h3>Native {scope === "project" ? "project" : "personal"} skill folders</h3>
           <Button
             variant="subtle"
             size="xs"
@@ -319,7 +344,7 @@ export function SkillsForm({
               </div>
             ))
         ) : (
-          <p className="hint">No project skills found in this folder.</p>
+          <p className="hint">No {scope === "project" ? "project" : "personal"} skills found in this folder.</p>
         )}
       </Stack>
     </section>

@@ -33,26 +33,27 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 - [x] Native model list
 - [x] Claude worker sign-in status
 - [x] Muse model discovery
-- [x] Muse delegation (native worker write and completion verified)
-- [x] Muse subscription usage snapshots (fixture values; live numeric reading unverified)
+- [x] Muse delegation
+- [x] Muse quota snapshots
 - [x] Model advice
 - [x] Quality benchmarks (LiveBench reference)
 - [x] Automatic model choice
 - [x] Shared instruction files
 - [x] Shared skill folders
+- [x] Personal skills
 - [x] Reviewed skill updates
 - [x] Parallel worktrees
 
 ## In progress
 
 - [ ] Claude delegation
-- [ ] Complete account quotas (Codex initial coverage; Muse snapshots; Claude unavailable)
+- [ ] Complete account quotas
 
 ## Next
 
 - [ ] Control transfer
 - [ ] Gemini, Cursor and OpenCode workers
-- [ ] Global skills
+- [ ] ZCode worker
 - [ ] Plugin bundles
 - [ ] Wider config preview and rollback
 - [ ] Device pairing

@@ -460,7 +460,7 @@ export function App() {
           : "This hosted page is a setup guide. Run the local app to see projects, workers and permission requests."}
       </p>
       <p className="hint">Requires Node 24 on macOS or Linux. Install the pinned beta package:</p>
-      <pre>npm install -g https://github.com/kaltstart-co/agentklar/releases/download/v0.1.0-beta.13/agentklar-0.1.0-beta.13.tgz{"\n"}agentklar start</pre>
+      <pre>npm install -g https://github.com/kaltstart-co/agentklar/releases/download/v0.1.0-beta.14/agentklar-0.1.0-beta.14.tgz{"\n"}agentklar start</pre>
       <p>
         Open the setup link from the terminal, then use{" "}
         <code>http://127.0.0.1:4317</code>.
@@ -593,9 +593,11 @@ export function App() {
         {project && (
           <div hidden={view !== "Instructions" || !connected}>
             <InstructionsForm key={`instructions-${project.id}`} projectId={project.id} connected={connected} />
-            <SkillsForm key={`skills-${project.id}`} projectId={project.id} connected={connected} />
           </div>
         )}
+        <div hidden={view !== "Instructions" || !connected}>
+          <SkillsForm key={`skills-${project?.id || "personal"}`} projectId={project?.id} connected={connected} />
+        </div>
         {!loaded ? (
           <div className="setup">
             <p>Connecting to your local service…</p>
@@ -918,9 +920,6 @@ export function App() {
                   </button>
                 </div>
               ))}
-            {view === "Instructions" && !project && (
-              <p className="empty-note">Add an existing project to manage its instruction files.</p>
-            )}
             {view === "Context" && !project && (
               <p className="empty-note">
                 Add an existing project to save its context.

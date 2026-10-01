@@ -9,6 +9,7 @@ import {
   symlinkSync,
   readdirSync,
   lstatSync,
+  realpathSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -17,9 +18,11 @@ import { createService } from "../src/service.ts";
 async function fixture(timeoutMs = 10000) {
   const dir = mkdtempSync(join(tmpdir(), "agentklar-skills-"));
   const home = join(dir, "home");
+  const userHome = join(dir, "user-home");
   const project = join(dir, "project");
   const source = join(dir, "source");
   mkdirSync(project);
+  mkdirSync(userHome);
   mkdirSync(source);
   mkdirSync(join(source, "references"));
   writeFileSync(
@@ -38,7 +41,7 @@ async function fixture(timeoutMs = 10000) {
     undefined,
     {},
     undefined,
-    { sourceOverride, timeoutMs },
+    { sourceOverride, timeoutMs, userHome },
   );
   let cookie = "";
   async function auth() {
@@ -78,6 +81,7 @@ async function fixture(timeoutMs = 10000) {
   return {
     dir,
     home,
+    userHome,
     project,
     source,
     requestedSources,
@@ -99,7 +103,7 @@ async function fixture(timeoutMs = 10000) {
         undefined,
         {},
         undefined,
-        { sourceOverride, timeoutMs },
+        { sourceOverride, timeoutMs, userHome },
       );
       await auth();
     },
@@ -163,6 +167,70 @@ test("project skills stage exact CLI bytes, install separately by harness, survi
   } finally {
     await f.close();
   }
+});
+
+test("personal skills have one durable owner across projects and keep scope-specific previews", async () => {
+  const f = await fixture();
+  try {
+    const personal = "/api/skills";
+    const input = { harness: "codex", source: "example/skills#main", name: "agentklar-qa" };
+    const globalPreview = await (await f.call(`${personal}/preview`, "POST", input)).json();
+    assert.equal(globalPreview.path, join(realpathSync(f.userHome), ".agents/skills/agentklar-qa"));
+    assert.equal((await f.call(`${f.base}/install`, "POST", { previewId: globalPreview.id })).status, 404);
+    const global = await (await f.call(`${personal}/install`, "POST", { previewId: globalPreview.id })).json();
+    const projectPreview = await f.preview();
+    assert.equal((await f.call(`${personal}/install`, "POST", { previewId: projectPreview.id })).status, 404);
+    const local = await (await f.call(`${f.base}/install`, "POST", { previewId: projectPreview.id })).json();
+    const claudePreview = await (await f.call(`${personal}/preview`, "POST", { ...input, harness: "claude" })).json();
+    assert.equal(claudePreview.path, join(realpathSync(f.userHome), ".claude/skills/agentklar-qa"));
+    const claude = await (await f.call(`${personal}/install`, "POST", { previewId: claudePreview.id })).json();
+    const other = await (await f.call("/api/projects", "POST", { name: "other", path: f.source })).json();
+    assert.equal((await (await f.call(`/api/projects/${other.id}/skills`)).json()).skills.some((x: { id: string }) => x.id === global.id), false);
+    await f.restart();
+    const globalList = await (await f.call(personal)).json();
+    assert.equal(globalList.scope, "personal");
+    assert.equal(globalList.projectId, undefined);
+    assert.equal(globalList.skills.filter((x: { state: string }) => x.state === "installed").length, 2);
+    assert.equal((await f.call(`${f.base}/remove`, "POST", { installId: global.id })).status, 404);
+    assert.equal((await f.call(`${personal}/remove`, "POST", { installId: local.id })).status, 404);
+    writeFileSync(join(f.source, "SKILL.md"), globalPreview.text.replace("Review me.", "Updated upstream."));
+    const update = await (await f.call(`${personal}/preview-update`, "POST", { installId: global.id })).json();
+    assert.equal(update.updateInstallId, global.id);
+    assert.equal((await (await f.call(`${personal}/update`, "POST", { previewId: update.id })).json()).id, global.id);
+    assert.match(readFileSync(join(globalPreview.path, "SKILL.md"), "utf8"), /Updated upstream/);
+    assert.match(readFileSync(join(projectPreview.path, "SKILL.md"), "utf8"), /Review me/);
+    assert.match(readFileSync(join(claudePreview.path, "SKILL.md"), "utf8"), /Review me/);
+    assert.equal((await f.call(`${personal}/remove`, "POST", { installId: global.id })).status, 200);
+    assert.equal((await f.call(`${personal}/remove`, "POST", { installId: claude.id })).status, 200);
+    assert.equal(lstatMissing(globalPreview.path), true);
+    assert.equal(lstatMissing(claudePreview.path), true);
+    assert.equal(lstatMissing(projectPreview.path), false);
+  } finally { await f.close(); }
+});
+
+test("personal skill API protects preview text, user-home targets and external edits", async () => {
+  const f = await fixture();
+  try {
+    const base = "/api/skills";
+    const input = { harness: "codex", source: "example/skills", name: "agentklar-qa" };
+    const bearer = { Authorization: `Bearer ${f.service.bearer}`, Origin: "http://127.0.0.1:4317", "Content-Type": "application/json" };
+    assert.equal((await f.call(base, "GET", undefined, {})).status, 401);
+    assert.equal((await f.call(`${base}/preview`, "POST", input, bearer)).status, 403);
+    assert.equal((await f.call(`${base}/preview`, "POST", { ...input, path: f.project })).status, 400);
+    const preview = await (await f.call(`${base}/preview`, "POST", input)).json();
+    assert.doesNotMatch(await (await f.call(base, "GET", undefined, bearer)).text(), /Review me/);
+    assert.equal((await f.call(`${base}/install`, "POST", { previewId: preview.id }, bearer)).status, 403);
+    const installed = await (await f.call(`${base}/install`, "POST", { previewId: preview.id })).json();
+    writeFileSync(join(preview.path, "SKILL.md"), "edited outside AgentKlar");
+    assert.equal((await f.call(`${base}/preview-update`, "POST", { installId: installed.id })).status, 409);
+    assert.equal((await f.call(`${base}/remove`, "POST", { installId: installed.id })).status, 409);
+    assert.equal(readFileSync(join(preview.path, "SKILL.md"), "utf8"), "edited outside AgentKlar");
+    const outside = join(f.dir, "outside");
+    mkdirSync(outside);
+    symlinkSync(outside, join(f.userHome, ".claude"));
+    assert.equal((await f.call(`${base}/preview`, "POST", { ...input, harness: "claude" })).status, 409);
+    assert.equal(readdirSync(outside).length, 0);
+  } finally { await f.close(); }
 });
 function lstatMissing(path: string) {
   try {

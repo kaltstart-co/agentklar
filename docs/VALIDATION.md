@@ -2,6 +2,16 @@
 
 Verified on 2026-10-01 and 2026-10-02 using Node 24.21.0. The old application was not used.
 
+## Personal skills — beta.14
+
+Offline tests use a temporary user home, never the real personal skill folders. They install separate Codex and Claude personal skills, keep one durable global owner across two registered projects and a service restart, update one personal skill from its saved source, and remove it without changing a same-name project skill. Project and personal preview/install IDs cannot cross scopes. API tests reject arbitrary target paths and MCP writes, hide pending preview text from MCP metadata reads, and leave external edits or linked parent folders untouched. Existing project-skill tests continue to pass. Native loading of these personal folders remains a separate check.
+
+Browser QA used an isolated service and temporary user home. With no project, Instructions opened on the personal scope. A reviewed skill install wrote to that temporary `~/.agents/skills` folder. After registering a project, the UI defaulted to project scope with no personal item; selecting personal scope showed the same managed install. An upstream change was previewed and applied from its saved source. The item survived reload, then removal succeeded. At 375 pixels there was no horizontal overflow and the browser reported no errors. Evidence: `/tmp/agentklar-global-skills-qa/installed.png` and `mobile.png`. No native model turn or real user skill folder was touched.
+
+Local checks passed: TypeScript, all 126 tests, the production build, and a clean package smoke covering the installed UI and all 19 MCP tools. Native loading remains unverified.
+
+ZCode 0.16.9 metadata research used its bundled CLI. Plain `app-server` exited because its bundled provider path was missing. A temporary per-process pointer to the app's bundled provider JSON allowed a workspace metadata read without a session or model turn. A headless model command failed before inference. Evidence: `/tmp/agentklar-zcode-research/native-probe.json`, `native-probe-with-builtin.json`, and `native-model-command.json`. No ZCode worker is enabled.
+
 ## Claude Code worker sign-in status — beta.13
 
 Offline native CLI fixtures check signed-in, sign-in-required, contradictory exit and JSON values, other providers and auth methods, malformed output, missing executable, excess stdout or stderr, timeout, abort and child exit. The response keeps only a fixed status, source and message; fixture email, token and config path never enter the catalog. Routing fixtures show that a known sign-in requirement removes Claude from automatic choices without replacing a Claude model pin. Unknown status remains a warning. A cached requirement changes only after a fresh catalog read. These tests use no model call, login command or native config change. The installed Claude CLI was separately observed reporting `loggedIn:false`, `authMethod:none`, `apiProvider:firstParty` with exit code 1. The [native CLI reference](https://code.claude.com/docs/en/cli-reference) documents the auth-status command and exit codes.

@@ -157,11 +157,12 @@ export function createService(
   catalogReader: CatalogReader = readCatalog,
   setupOptions: NativeSetupOptions = {},
   operator?: Operator,
-  skillOptions: { timeoutMs?: number; sourceOverride?: (source: string) => string } = {},
+  skillOptions: { timeoutMs?: number; sourceOverride?: (source: string) => string; userHome?: string } = {},
   benchmarkOptions: { fetcher?: typeof fetch; timeoutMs?: number } = {},
   museCommand: string | null = executable("muse"),
   leadOptions: { now?: () => number; wallNow?: () => number; leaseMs?: number } = {},
 ) {
+  const personalHome = realpathSync(skillOptions.userHome ?? homedir());
   const release = ownHome(home);
   let store: Store;
   try {
@@ -182,6 +183,7 @@ export function createService(
   const app = new Hono();
   const instructions = new Instructions(store.db);
   const skills = new ProjectSkills(store.db, home, skillOptions);
+  const personalSkills: Project = { id: "__personal_skills__", name: "Personal skills", path: personalHome, preference: "balanced", roles: [], createdAt: "" };
   const nativeSetup = new NativeSetup(store.db, home, port, { codex: nativeCommand, claude: claudeCommand, muse: museCommand }, setupOptions);
   const catalogs = new CatalogCache(catalogReader, {
     codex: nativeCommand,
@@ -510,6 +512,11 @@ export function createService(
     c.header("Cache-Control", "no-store");
     return project ? c.json(skills.list(project)) : c.json({ error: "Project not found" }, 404);
   });
+  app.get("/api/skills", (c) => {
+    c.header("Cache-Control", "no-store");
+    const { projectId, ...snapshot } = skills.list(personalSkills);
+    return c.json({ scope: "personal", ...snapshot });
+  });
   for (const operation of ["preview", "preview-update", "install", "update", "remove"] as const)
     app.post(`/api/projects/:id/skills/${operation}`, async (c) => {
       const project = store.projects().find((p) => p.id === c.req.param("id"));
@@ -519,6 +526,14 @@ export function createService(
       if (!parsed.success) return c.json({ error: "Provide one native harness, a GitHub owner/repo, and one exact skill name or saved ID." }, 400);
       c.header("Cache-Control", "no-store");
       return c.json(operation === "preview" ? await skills.preview(project, parsed.data as typeof skillPreviewInput._output) : operation === "preview-update" ? await skills.previewUpdate(project, (parsed.data as typeof skillRemoveInput._output).installId) : operation === "update" ? skills.update(project, (parsed.data as typeof skillIdInput._output).previewId) : operation === "install" ? skills.install(project, (parsed.data as typeof skillIdInput._output).previewId) : skills.remove(project, (parsed.data as typeof skillRemoveInput._output).installId));
+    });
+  for (const operation of ["preview", "preview-update", "install", "update", "remove"] as const)
+    app.post(`/api/skills/${operation}`, async (c) => {
+      const schema = operation === "preview" ? skillPreviewInput : (operation === "install" || operation === "update") ? skillIdInput : skillRemoveInput;
+      const parsed = schema.safeParse(await c.req.json().catch(() => null));
+      if (!parsed.success) return c.json({ error: "Provide one native harness, a GitHub owner/repo, and one exact skill name or saved ID." }, 400);
+      c.header("Cache-Control", "no-store");
+      return c.json(operation === "preview" ? await skills.preview(personalSkills, parsed.data as typeof skillPreviewInput._output) : operation === "preview-update" ? await skills.previewUpdate(personalSkills, (parsed.data as typeof skillRemoveInput._output).installId) : operation === "update" ? skills.update(personalSkills, (parsed.data as typeof skillIdInput._output).previewId) : operation === "install" ? skills.install(personalSkills, (parsed.data as typeof skillIdInput._output).previewId) : skills.remove(personalSkills, (parsed.data as typeof skillRemoveInput._output).installId));
     });
   app.get("/api/projects/:id/instructions/:file", (c) => {
     const project = store.projects().find((p) => p.id === c.req.param("id"));
