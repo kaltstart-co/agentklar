@@ -15,6 +15,8 @@ const quotaFailure =
   "Native account limits could not be read. Check your native Codex CLI.";
 const claudeQuota =
   "Claude Code does not expose account quota through this supported native SDK read.";
+const museQuota =
+  "Muse account allowance is not read by this adapter. Remaining usage is unknown.";
 const record = (v: unknown): Record<string, unknown> | null =>
   v !== null && typeof v === "object" && !Array.isArray(v)
     ? (v as Record<string, unknown>)
@@ -90,18 +92,20 @@ export function parseQuota(value: unknown): AccountQuota {
 }
 function model(
   value: unknown,
-  harness: "codex" | "claude",
+  harness: "codex" | "claude" | "muse",
 ): CatalogModel | null {
   const r = record(value);
   if (!r || r.hidden === true) return null;
-  const id = identifier(harness === "codex" ? r.model : r.value);
+  const id = identifier(
+    harness === "codex" ? r.model : harness === "muse" ? r.modelId : r.value,
+  );
   if (!id) return null;
   return {
     id,
-    name: text(r.displayName, 160) || id,
+    name: text(harness === "muse" ? r.displayLabel : r.displayName, 160) || id,
     description: text(r.description, 800) || "",
     resolvedModel: harness === "claude" ? identifier(r.resolvedModel) : null,
-    isDefault: harness === "codex" ? r.isDefault === true : id === "default",
+    isDefault: harness === "claude" ? id === "default" : r.isDefault === true,
     inputModalities:
       harness === "codex" && Array.isArray(r.inputModalities)
         ? r.inputModalities
@@ -110,14 +114,16 @@ function model(
         : null,
   };
 }
-function empty(harness: "codex" | "claude"): HarnessCatalog {
+function empty(harness: HarnessCatalog["harness"]): HarnessCatalog {
   return {
     harness,
     models: [],
     modelsStatus: "unavailable",
     modelsMessage: modelFailure,
     modelsTruncated: false,
-    quota: unavailableQuota(harness === "claude" ? claudeQuota : quotaFailure),
+    quota: unavailableQuota(
+      harness === "claude" ? claudeQuota : harness === "muse" ? museQuota : quotaFailure,
+    ),
   };
 }
 function clipped(value: unknown) {
@@ -126,6 +132,7 @@ function clipped(value: unknown) {
     !!r &&
     ((typeof r.description === "string" && r.description.length > 800) ||
       (typeof r.displayName === "string" && r.displayName.length > 160) ||
+      (typeof r.displayLabel === "string" && r.displayLabel.length > 160) ||
       (Array.isArray(r.inputModalities) &&
         (r.inputModalities.length > 8 ||
           r.inputModalities.some(
@@ -168,14 +175,15 @@ function ownChild(child: ChildProcessWithoutNullStreams) {
   return { stop, ended };
 }
 
-export async function readCodexCatalog(
+async function readJsonRpcCatalog(
+  harness: "codex" | "muse",
   command: string,
   cwd: string,
   signal: AbortSignal,
-  args = ["app-server", "--stdio"],
+  args: string[],
   timeoutMs = 12000,
 ): Promise<HarnessCatalog> {
-  const result = empty("codex");
+  const result = empty(harness);
   if (signal.aborted) return result;
   const child = spawn(command, args, {
     cwd,
@@ -241,16 +249,57 @@ export async function readCodexCatalog(
     await rpc("initialize", {
       clientInfo: {
         name: "agentklar_catalog",
-        title: "AgentKlar catalog",
         version: "0.1.0",
+        ...(harness === "codex" ? { title: "AgentKlar catalog" } : {}),
       },
-      capabilities: { experimentalApi: false },
+      capabilities: {
+        experimentalApi: false,
+        ...(harness === "muse" ? { userInputDialogs: false } : {}),
+      },
     });
     child.stdin.write(
       JSON.stringify({ jsonrpc: "2.0", method: "initialized", params: {} }) +
         "\n",
     );
     const modelsRead = async () => {
+      if (harness === "muse") {
+        const response = record(await rpc("model/list", {}));
+        if (!response || !Array.isArray(response.models))
+          throw new Error("Invalid catalog");
+        const source = response.source;
+        if (
+          !["providerCatalog", "configCatalog", "bundledCatalog"].includes(
+            source as string,
+          )
+        ) {
+          result.modelsMessage =
+            "Muse returned a fake, unresolved or unknown catalog source; no usable native model list was confirmed.";
+          return;
+        }
+        const provider = identifier(response.providerId);
+        const profile =
+          response.profileId === null ? null : identifier(response.profileId);
+        if (!provider || (response.profileId !== null && !profile))
+          throw new Error("Invalid catalog route");
+        const seen = new Set<string>();
+        for (const raw of response.models.slice(0, 100)) {
+          const route = record(raw);
+          if (route?.providerId !== provider || route.profileId !== profile) {
+            result.modelsTruncated = true;
+            continue;
+          }
+          const m = model(raw, "muse");
+          if (clipped(raw) || !m) result.modelsTruncated = true;
+          if (m && !seen.has(m.id)) {
+            seen.add(m.id);
+            result.models.push(m);
+          }
+        }
+        result.modelsTruncated ||= response.models.length > 100;
+        result.modelsStatus = "available";
+        result.modelsMessage = `Muse native model list${result.modelsTruncated ? " was shortened or omitted incompatible routes" : ""}. Listing does not verify sign-in or model access. Muse worker execution is unavailable.`;
+        return;
+      }
       let cursor: string | null = null;
       const cursors = new Set<string>();
       const seen = new Set<string>();
@@ -297,6 +346,7 @@ export async function readCodexCatalog(
         : "Native catalog discovery does not verify model access or subscription entitlement.";
     };
     const quotaRead = async () => {
+      if (harness === "muse") return;
       result.quota = parseQuota(
         await rpc("account/rateLimits/read", {
           excludeResetCreditDetails: true,
@@ -314,6 +364,26 @@ export async function readCodexCatalog(
     await owned.ended;
   }
   return result;
+}
+
+export function readCodexCatalog(
+  command: string,
+  cwd: string,
+  signal: AbortSignal,
+  args = ["app-server", "--stdio"],
+  timeoutMs = 12000,
+) {
+  return readJsonRpcCatalog("codex", command, cwd, signal, args, timeoutMs);
+}
+
+export function readMuseCatalog(
+  command: string,
+  cwd: string,
+  signal: AbortSignal,
+  args = ["serve", "--no-session-log"],
+  timeoutMs = 12000,
+) {
+  return readJsonRpcCatalog("muse", command, cwd, signal, args, timeoutMs);
 }
 
 export async function readClaudeCatalog(
@@ -410,7 +480,7 @@ export async function readClaudeCatalog(
 
 export type CatalogReader = (
   project: Project,
-  commands: { codex: string | null; claude: string | null },
+  commands: { codex: string | null; claude: string | null; muse?: string | null },
   signal: AbortSignal,
 ) => Promise<CatalogSnapshot>;
 export const readCatalog: CatalogReader = async (
@@ -421,16 +491,18 @@ export const readCatalog: CatalogReader = async (
   projectId: project.id,
   checkedAt: new Date().toISOString(),
   harnesses: await Promise.all(
-    (["codex", "claude"] as const).map(async (harness) => {
+    (["codex", "claude", "muse"] as const).map(async (harness) => {
       const command = commands[harness];
       if (!command)
         return {
           ...empty(harness),
-          modelsMessage: `${harness === "codex" ? "Codex" : "Claude Code"} executable was not found.`,
+          modelsMessage: `${harness === "codex" ? "Codex" : harness === "claude" ? "Claude Code" : "Muse"} executable was not found.`,
         };
       return harness === "codex"
         ? readCodexCatalog(command, project.path, signal)
-        : readClaudeCatalog(command, project.path, signal);
+        : harness === "claude"
+          ? readClaudeCatalog(command, project.path, signal)
+          : readMuseCatalog(command, project.path, signal);
     }),
   ),
 });
@@ -444,7 +516,11 @@ export class CatalogCache {
   private abort = new AbortController();
   constructor(
     private reader: CatalogReader,
-    private commands: { codex: string | null; claude: string | null },
+    private commands: {
+      codex: string | null;
+      claude: string | null;
+      muse?: string | null;
+    },
     private now = Date.now,
   ) {}
   get(id: string) {

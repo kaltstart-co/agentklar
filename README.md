@@ -1,6 +1,6 @@
 # AgentKlar
 
-Keep your native coding harness. AgentKlar gives registered projects a shared local work record, saved project context, team roles, and durable worker runs. Start from Codex, Claude Code, Gemini CLI, Cursor, or OpenCode and connect its MCP client to AgentKlar. Codex and Claude Code have worker adapters. Other installed CLIs are discovered as hosts; their worker adapters are planned.
+Keep your native coding harness. AgentKlar gives registered projects a shared local work record, saved project context, team roles, and durable worker runs. Start from Codex, Claude Code, Gemini CLI, Cursor, or OpenCode and connect its MCP client to AgentKlar. Codex and Claude Code have worker adapters. Muse has native model discovery. Other installed CLIs are listed with their current support; worker adapters are planned.
 
 This is a fresh TypeScript rewrite. The old Go application is preserved in Git at `archive/pre-rewrite-2026-10-01`. Old databases and configuration are never imported. A run marked **completed** means the worker finished. Review the changes in your normal editor and harness.
 
@@ -9,7 +9,7 @@ This is a fresh TypeScript rewrite. The old Go application is preserved in Git a
 Requires Node 24 and npm on macOS or Linux. Install this pinned GitHub beta package, then start the local service:
 
 ```sh
-npm install -g https://github.com/kaltstart-co/agentklar/releases/download/v0.1.0-beta.1/agentklar-0.1.0-beta.1.tgz
+npm install -g https://github.com/kaltstart-co/agentklar/releases/download/v0.1.0-beta.2/agentklar-0.1.0-beta.2.tgz
 agentklar start
 ```
 
@@ -52,9 +52,9 @@ Project cost preference is saved as economical, balanced, or best. Optional mode
 
 ## Native models and account allowance
 
-Open **Models**, choose a project, and select **Refresh models and allowance**. AgentKlar reads the native Codex and Claude model lists. New task and Team let you choose a listed model or type a custom name. Loading the list never changes your model pin. A listed model does not prove that your account can use it or that you are signed in. Prices in native vendor descriptions describe API usage, not your subscription bill.
+Open **Models**, choose a project, and select **Refresh models and allowance**. AgentKlar reads the native Codex, Claude, and Muse model lists. Muse is discovery only; it cannot receive delegated work yet. New task and Team offer models for supported workers. Loading the list never changes your model pin. A listed model does not prove that your account can use it or that you are signed in. Prices in native vendor descriptions describe API usage, not your subscription bill.
 
-**Usage** shows native Codex account allowance when available: used and remaining percentages, window duration, and reset time in your local time zone. These limits are shared across the native account; project task tokens do not calculate them. A native included-usage block remains visible even when a percentage window has reset. Claude account allowance is unavailable through the current SDK. Missing information stays unknown. Native reads occur when you request a refresh or model advice; the normal task polling reads no model or quota data. Catalog snapshots are cached per project and refreshes within 30 seconds reuse that cache.
+**Usage** shows native Codex account allowance when available: used and remaining percentages, window duration, and reset time in your local time zone. These limits are shared across the native account; project task tokens do not calculate them. A native included-usage block remains visible even when a percentage window has reset. Claude account allowance is unavailable through the current SDK. Muse account allowance is not read by this adapter. Missing information stays unknown. Native reads occur when you request a refresh or model advice; the normal task polling reads no model or quota data. Catalog snapshots are cached per project and refreshes within 30 seconds reuse that cache.
 
 ## Model advice
 

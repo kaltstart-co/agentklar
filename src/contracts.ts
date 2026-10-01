@@ -149,7 +149,7 @@ export type AccountQuota = {
   buckets: QuotaBucket[];
 };
 export type HarnessCatalog = {
-  harness: "codex" | "claude";
+  harness: "codex" | "claude" | "muse";
   models: CatalogModel[];
   modelsStatus: "available" | "unavailable";
   modelsMessage: string | null;

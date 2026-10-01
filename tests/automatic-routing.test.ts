@@ -145,6 +145,38 @@ test("unpinned routing can select another installed harness, while a blocked Cod
   } finally { await t.cleanup(); }
 });
 
+test("Muse catalog rows do not become worker choices and a Muse role pin is rejected", async () => {
+  const t = fixture(async (project) => ({
+    ...snapshot(project),
+    harnesses: [
+      ...snapshot(project).harnesses,
+      {
+        harness: "muse", modelsStatus: "available", modelsMessage: "Muse native model list", modelsTruncated: false,
+        models: [{ id: "muse-spark-1.3", name: "Muse Spark", description: "", resolvedModel: null,
+          isDefault: true, inputModalities: null }],
+        quota: { status: "unavailable", message: null, ordinaryUsageAllowed: null, buckets: [] },
+      },
+    ],
+  }));
+  try {
+    const p = await t.register();
+    const advice = await t.call(`/api/projects/${p.id}/recommend`, { complexity: "standard" });
+    assert.equal(advice.status, 200);
+    const choices = await advice.json();
+    assert.equal(choices.choice.harness, "codex");
+    assert.ok(choices.alternatives.every((choice: { harness: string }) => choice.harness !== "muse"));
+    const update = await t.service.app.request(`http://127.0.0.1:4317/api/projects/${p.id}`, {
+      method: "PATCH", headers: { Authorization: `Bearer ${t.service.bearer}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ roles: [{ id: "muse-role", name: "Muse role", harness: "muse", model: "muse-spark-1.3", responsibility: "Research" }] }),
+    });
+    assert.equal(update.status, 200);
+    const pinned = await t.call("/api/tasks/start", { projectId: p.id, prompt: "Work", idempotencyKey: "muse-pin", roleId: "muse-role", routing: {} });
+    assert.equal(pinned.status, 400);
+    assert.match((await pinned.json()).error, /no worker adapter/i);
+    assert.equal(t.launched.length, 0);
+  } finally { await t.cleanup(); }
+});
+
 test("concurrent routing rechecks idempotency, busy state, and saved settings after discovery", async () => {
   let release!: (value: CatalogSnapshot) => void;
   let started!: () => void;

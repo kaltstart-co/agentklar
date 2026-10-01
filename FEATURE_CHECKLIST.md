@@ -28,6 +28,7 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 - [x] Shared memory
 - [x] Project context
 - [x] Native model list
+- [x] Muse model discovery
 - [x] Model advice
 - [x] Automatic model choice
 - [x] Native instructions (Codex and Claude Code)

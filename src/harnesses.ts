@@ -38,6 +38,7 @@ export function executable(
       );
     } catch {}
   }
+  if (name === "muse") candidates.push(join(home, ".local", "bin", "muse"));
   for (const path of candidates)
     try {
       accessSync(path, constants.X_OK);
@@ -49,6 +50,7 @@ export function harnesses(): Harness[] {
   return [
     ["codex", "Codex"],
     ["claude", "Claude Code"],
+    ["muse", "Muse"],
     ["gemini", "Gemini CLI"],
     ["cursor-agent", "Cursor"],
     ["opencode", "OpenCode"],
@@ -60,12 +62,14 @@ export function harnesses(): Harness[] {
       available: !!path,
       executable: path,
       workerSupported: ["codex", "claude"].includes(id) && !!path,
-      hostSupported: !!path,
+      hostSupported: id === "muse" ? false : !!path,
       reason:
         id === "codex"
           ? "Native app-server worker adapter"
           : id === "claude"
             ? "Official Claude Agent SDK worker adapter; native sign-in required"
+            : id === "muse"
+              ? "Native model discovery available; worker and MCP host setup are unverified"
             : "Discovered host CLI; worker adapter is planned",
     };
   });

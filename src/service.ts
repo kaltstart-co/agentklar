@@ -139,6 +139,7 @@ export function createService(
   const catalogs = new CatalogCache(catalogReader, {
     codex: nativeCommand,
     claude: claudeCommand,
+    muse: executable("muse"),
   });
   function linkedSource(projectId: string, link: { runId: string; kind: "review" | "fix" }) {
     const source = store.run(link.runId);

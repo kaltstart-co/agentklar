@@ -426,7 +426,7 @@ export function App() {
           : "This hosted page is a setup guide. Run the local app to see projects, workers and permission requests."}
       </p>
       <p className="hint">Requires Node 24 on macOS or Linux. Install the pinned beta package:</p>
-      <pre>npm install -g https://github.com/kaltstart-co/agentklar/releases/download/v0.1.0-beta.1/agentklar-0.1.0-beta.1.tgz{"\n"}agentklar start</pre>
+      <pre>npm install -g https://github.com/kaltstart-co/agentklar/releases/download/v0.1.0-beta.2/agentklar-0.1.0-beta.2.tgz{"\n"}agentklar start</pre>
       <p>
         Open the setup link from the terminal, then use{" "}
         <code>http://127.0.0.1:4317</code>.
@@ -924,10 +924,12 @@ export function App() {
                         <Select
                           label="Harness"
                           value={role.harness}
-                          data={snapshot.harnesses.map((h) => ({
-                            value: h.id,
-                            label: h.name,
-                          }))}
+                          data={[
+                            ...workers.map((h) => ({ value: h.id, label: h.name })),
+                            ...(!workers.some((h) => h.id === role.harness)
+                              ? [{ value: role.harness, label: `${harnessName(role.harness)} (worker unavailable)`, disabled: true }]
+                              : []),
+                          ]}
                           onChange={(v) =>
                             setRoles(
                               roles.map((r) =>
@@ -1041,7 +1043,7 @@ export function App() {
                   <div className="role-card" key={entry.harness}>
                     <h3>{harnessName(entry.harness)}</h3>
                     {entry.modelsMessage &&
-                      (entry.modelsStatus === "unavailable" ||
+                      (entry.harness === "muse" || entry.modelsStatus === "unavailable" ||
                         entry.modelsTruncated) && (
                         <p className="hint">{entry.modelsMessage}</p>
                       )}
@@ -1079,9 +1081,10 @@ export function App() {
                   </div>
                 ))}
                 <p className="hint">
-                  Choose a listed model or enter a custom model in New task or
-                  Team. Leave it blank to use the saved role model or native
-                  default.
+                  For Codex and Claude Code workers, choose a listed model or
+                  enter a custom model in New task or Team. Muse models are for
+                  discovery only. Leave the worker model blank to use the saved
+                  role model or native default.
                 </p>
               </section>
             )}
@@ -1326,7 +1329,7 @@ export function App() {
                 setModel("");
               }}
               data={
-                taskProject?.roles.map((r) => ({ value: r.id, label: r.name })) ||
+                taskProject?.roles.filter((r) => workers.some((h) => h.id === r.harness)).map((r) => ({ value: r.id, label: r.name })) ||
                 []
               }
             />

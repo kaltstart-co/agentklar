@@ -3,8 +3,10 @@ import assert from "node:assert/strict";
 import {
   mkdtempSync,
   mkdirSync,
+  chmodSync,
   writeFileSync,
   readFileSync,
+  existsSync,
   rmSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -16,9 +18,11 @@ import {
   parseQuota,
   readCodexCatalog,
   readClaudeCatalog,
+  readMuseCatalog,
   type CatalogReader,
 } from "../src/catalog.ts";
 import { createService } from "../src/service.ts";
+import { executable } from "../src/harnesses.ts";
 import type { CatalogSnapshot, Project } from "../src/contracts.ts";
 
 const fixture = `
@@ -55,6 +59,23 @@ createInterface({input:process.stdin}).on('line',line=>{
  throw new Error('Unexpected method '+r.method);
 });
 `;
+const museFixture = `
+import { createInterface } from 'node:readline';
+import { appendFileSync } from 'node:fs';
+const [mode, log] = process.argv.slice(2);
+appendFileSync(log+'.pid', String(process.pid));
+const row = (modelId, providerId='muse', profileId=null) => ({modelId, displayLabel:modelId, description:'Native model', isDefault:modelId==='muse-spark-1.3-contributor', providerId, profileId});
+createInterface({input:process.stdin}).on('line', line => {
+ const request=JSON.parse(line); appendFileSync(log, JSON.stringify(request)+'\\n');
+ if(mode==='hang'){process.on('SIGTERM',()=>{});return;}
+ if(mode==='huge'){process.stdout.write('x'.repeat(1024*1024+1));return;}
+ if(request.method==='initialized')return;
+ const reply=result=>process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:request.id,result})+'\\n');
+ if(request.method==='initialize')return reply({});
+ if(request.method==='model/list')return mode==='malformed' ? reply({models:{}}) : reply({source:mode==='fake'?'fakeCatalog':mode==='config'?'configCatalog':mode==='bundled'?'bundledCatalog':'providerCatalog',providerId:'muse',profileId:null,models:[row('muse-spark-1.3'),row('muse-spark-1.3-contributor'),row('muse-spark-1.3'),row('foreign','other')]});
+ throw new Error('Unexpected method '+request.method);
+});
+`;
 function project(): Project {
   return {
     id: randomUUID(),
@@ -85,6 +106,69 @@ function assertStopped(pid: number, label: string) {
   }
   assert.throws(() => process.kill(pid, 0), `${label}: PID ${pid} is still alive`);
 }
+
+test("Muse probe reads only the native model list and removes incompatible routes", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "agentklar-muse-catalog-"));
+  const file = join(dir, "muse.mjs"), log = join(dir, "wire");
+  writeFileSync(file, museFixture);
+  try {
+    const result = await readMuseCatalog(process.execPath, dir, new AbortController().signal, [file, "ok", log]);
+    assert.equal(result.harness, "muse");
+    assert.equal(result.modelsStatus, "available");
+    assert.deepEqual(result.models.map((m) => m.id), ["muse-spark-1.3", "muse-spark-1.3-contributor"]);
+    assert.equal(result.models[1].isDefault, true);
+    assert.equal(result.modelsTruncated, true);
+    assert.match(result.modelsMessage!, /native model list.*worker execution is unavailable/i);
+    assert.equal(result.quota.status, "unavailable");
+    assert.equal(result.quota.ordinaryUsageAllowed, null);
+    const calls = readFileSync(log, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+    assert.deepEqual(calls.map((r) => r.method), ["initialize", "initialized", "model/list"]);
+    assert.deepEqual(calls[0].params.capabilities, { experimentalApi: false, userInputDialogs: false });
+    assert.deepEqual(calls[2].params, {});
+    assert.ok(calls.every((r) => !JSON.stringify(r).includes("session")));
+    assertStopped(Number(readFileSync(log + ".pid", "utf8")), "Muse probe");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("Muse discovery falls back to the user's local bin when PATH omits it", () => {
+  const dir = mkdtempSync(join(tmpdir(), "agentklar-muse-path-"));
+  const localBin = join(dir, ".local", "bin");
+  mkdirSync(localBin, { recursive: true });
+  const muse = join(localBin, "muse");
+  writeFileSync(muse, "#!/bin/sh\nexit 0\n");
+  chmodSync(muse, 0o755);
+  try { assert.equal(executable("muse", "", dir), muse); }
+  finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("Muse probe rejects fake and malformed lists and stops on overflow or abort", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "agentklar-muse-failure-"));
+  const file = join(dir, "muse.mjs");
+  writeFileSync(file, museFixture);
+  try {
+    for (const mode of ["config", "bundled"]) {
+      const result = await readMuseCatalog(process.execPath, dir, new AbortController().signal, [file, mode, join(dir, mode)]);
+      assert.equal(result.modelsStatus, "available", mode);
+      assert.match(result.modelsMessage!, /does not verify sign-in/i);
+    }
+    for (const mode of ["fake", "malformed", "huge", "hang"]) {
+      const log = join(dir, mode);
+      const controller = new AbortController();
+      const reading = readMuseCatalog(process.execPath, dir, controller.signal, [file, mode, log], 2000);
+      if (mode === "hang") {
+        for (let attempt = 0; attempt < 100 && !existsSync(log + ".pid"); attempt++)
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        assert.ok(existsSync(log + ".pid"));
+        controller.abort();
+      }
+      const result = await reading;
+      assert.equal(result.modelsStatus, "unavailable", mode);
+      assert.deepEqual(result.models, [], mode);
+      assert.equal(result.quota.status, "unavailable", mode);
+      assertStopped(Number(readFileSync(log + ".pid", "utf8")), mode);
+    }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
 
 test("Codex metadata probe sends only discovery methods, pages and deduplicates; quota uses map without private fields", async () => {
   const dir = mkdtempSync(join(tmpdir(), "agentklar-catalog-"));

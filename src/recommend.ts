@@ -19,6 +19,7 @@ export const recommendationSchema = z
   .strict();
 export type RecommendationInput = z.infer<typeof recommendationSchema>;
 type Harness = WorkerChoice["harness"];
+type WorkerCatalog = HarnessCatalog & { harness: Harness };
 type Tier = WorkerChoice["tier"];
 type Candidate = {
   choice: WorkerChoice;
@@ -169,7 +170,7 @@ export function recommendWorker(
   };
   const candidates: Candidate[] = [];
   const evaluate = (
-    catalog: HarnessCatalog,
+    catalog: WorkerCatalog,
     model: CatalogModel | undefined,
     id: string,
     pinned: boolean,
@@ -287,7 +288,7 @@ export function recommendWorker(
       else warn(message);
       continue;
     }
-    const catalog = snapshot.harnesses.find((c) => c.harness === h);
+    const catalog = snapshot.harnesses.find((c): c is WorkerCatalog => c.harness === h);
     if (!catalog) {
       if (pin)
         advice.reasons.push(

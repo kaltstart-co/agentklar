@@ -2,9 +2,19 @@
 
 The old application has been replaced. Git retains its source. This plan describes the new implementation only.
 
+Each harness has separate setup and support. Shared context does not replace native instructions or permissions.
+
+| Harness | Native setup | Worker status |
+| --- | --- | --- |
+| Codex | MCP, AGENTS.md, project skills | Verified locally |
+| Claude Code | MCP, CLAUDE.md, project skills | Implemented; live success awaits native sign-in |
+| Muse | CLI and native model discovery | Pending |
+
+Add a harness in small steps: discover it, read native metadata, verify task and permission behavior, then enable delegation. Instruction and skill setup can follow separately. A detected app or model list does not count as a working adapter.
+
 1. **Current slice:** one local TypeScript service, a small React support UI, durable SQLite records, MCP stdio bridge, explicit projects and roles, and native Codex and Claude Code worker adapters. Claude’s live worker success remains unverified. Keep the existing harness as the user's starting point.
 2. **Shared context, delivered:** a bounded project brief, manually saved memory, and next steps shared through the local UI and MCP. Revision conflicts keep the UI draft. Each task retains its launch context. Local browser checks and a real Codex worker verified this flow; memory collection is explicit.
-3. **Other harnesses:** add Gemini CLI, Cursor, OpenCode, Muse, and GLM through ZCode workers only after verifying their real native interfaces, authentication, lifecycle, and permission behavior. Muse and ZCode apps are installed locally, but their worker interfaces have not been verified. Discovered CLI or app presence does not prove worker support.
+3. **Other harnesses:** add Gemini CLI, Cursor, OpenCode, Muse, and GLM through ZCode workers only after verifying their real native interfaces, authentication, lifecycle, and permission behavior. Muse's installed CLI exposes a native stdio session protocol; AgentKlar reads its model list without creating a session or sending a prompt. Its worker, instruction editing, skills, and managed MCP setup remain pending. ZCode's app is installed; OpenCode was not found in the local locations checked on 2026-10-01. Discovered CLI or app presence does not prove worker support.
 4. **Native project setup:** separate Codex and Claude Code instruction files are supported. The local UI previews guarded edits and undo for root AGENTS.md and CLAUDE.md. Project skills can be installed from one named GitHub skill with a staged preview, then removed if every managed file and folder still matches. Codex uses .agents/skills; Claude Code uses .claude/skills. Add other harnesses, skill updates, global skills, and plugin bundles only when needed.
 
    Project skill staging uses pinned [Vercel Skills](https://github.com/vercel-labs/skills) 1.7.0 (MIT) inside a private service folder. Only the reviewed skill folder is copied to the selected project. Its staged lock file is not copied; AgentKlar keeps separate per-harness ownership in SQLite. [Ruler](https://github.com/intellectronica/ruler) (MIT) remains a possible future tool for explicit cross-harness sharing. Its writes can affect .gitignore and MCP setup, so it is not part of this slice.
