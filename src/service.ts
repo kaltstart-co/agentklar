@@ -24,6 +24,7 @@ import { harnesses, executable } from "./harnesses.ts";
 import { NativeWorker, type NativeCallbacks } from "./native.ts";
 import { ClaudeWorker } from "./claude.ts";
 import { MuseWorker } from "./muse.ts";
+import { OpenCodeWorker } from "./opencode.ts";
 import { CatalogCache, readCatalog, type CatalogReader } from "./catalog.ts";
 import { BenchmarkCache } from "./benchmarks.ts";
 import type { Run, Project, ProjectRun, ProjectLead, RoutingDecision, FollowUpContext } from "./contracts.ts";
@@ -90,7 +91,7 @@ export const startSchema = z
     prompt: z.string().trim().min(1).max(32000),
     idempotencyKey: z.string().min(1).max(200),
     roleId: z.string().optional(),
-    harness: z.enum(["codex", "claude", "muse"]).optional(),
+    harness: z.enum(["codex", "claude", "muse", "opencode"]).optional(),
     model: z.string().min(1).max(120).optional(),
     readOnly: z.boolean().default(false),
     includeProjectContext: z.boolean().default(true),
@@ -151,6 +152,8 @@ export function createService(
       ? new ClaudeWorker(command, run, path, callbacks)
       : run.harness === "muse"
       ? new MuseWorker(command, run, path, callbacks)
+      : run.harness === "opencode"
+      ? new OpenCodeWorker(command, run, path, callbacks)
       : new NativeWorker(command, run, path, callbacks),
   nativeCommand: string | null = executable("codex"),
   claudeCommand: string | null = executable("claude"),
@@ -161,6 +164,7 @@ export function createService(
   benchmarkOptions: { fetcher?: typeof fetch; timeoutMs?: number } = {},
   museCommand: string | null = executable("muse"),
   leadOptions: { now?: () => number; wallNow?: () => number; leaseMs?: number } = {},
+  opencodeCommand: string | null = executable("opencode"),
 ) {
   const personalHome = realpathSync(skillOptions.userHome ?? homedir());
   const release = ownHome(home);
@@ -189,6 +193,7 @@ export function createService(
     codex: nativeCommand,
     claude: claudeCommand,
     muse: museCommand,
+    opencode: opencodeCommand,
   });
   function linkedSource(projectId: string, link: { runId: string; kind: "review" | "fix" }) {
     const source = store.run(link.runId);
@@ -607,7 +612,7 @@ export function createService(
         { error: "Task harness must match the selected role harness." },
         400,
       );
-    if (selected && !["codex", "claude", "muse"].includes(selected.harness))
+    if (selected && !["codex", "claude", "muse", "opencode"].includes(selected.harness))
       return c.json(
         { error: "This role harness has no worker adapter yet." },
         400,
@@ -620,6 +625,7 @@ export function createService(
           codex: !!nativeCommand,
           claude: !!claudeCommand,
           muse: !!museCommand,
+          opencode: !!opencodeCommand,
         }, Date.now(), benchmarks.get()),
       );
     } catch {
@@ -810,10 +816,10 @@ export function createService(
         400,
       );
     let harness = data.harness || selected?.harness || "codex";
-    if (!["codex", "claude", "muse"].includes(harness))
+    if (!["codex", "claude", "muse", "opencode"].includes(harness))
       return c.json({ error: "This harness has no worker adapter yet." }, 400);
-    if (harness === "muse" && data.readOnly)
-      return c.json({ error: "Muse cannot enforce read-only work. Choose Codex or Claude Code for a review." }, 400);
+    if ((harness === "muse" || harness === "opencode") && data.readOnly)
+      return c.json({ error: `${harness === "muse" ? "Muse" : "OpenCode"} cannot enforce read-only work. Choose Codex or Claude Code for a review.` }, 400);
     let model = data.model || selected?.model;
     let routing: RoutingDecision | undefined;
     if (data.routing) {
@@ -825,7 +831,7 @@ export function createService(
           harness: data.harness,
           model: data.model,
           ...data.routing,
-        }, catalog, { codex: !!nativeCommand, claude: !!claudeCommand, muse: !!museCommand }, Date.now(), benchmarks.get());
+        }, catalog, { codex: !!nativeCommand, claude: !!claudeCommand, muse: !!museCommand, opencode: !!opencodeCommand }, Date.now(), benchmarks.get());
       } catch {
         if (quiesced || stopping) return c.json({ error: "Local service is stopping." }, 503);
         return c.json({ error: "Native routing evidence could not be read. Retry or choose a model manually." }, 503);
@@ -855,8 +861,8 @@ export function createService(
       const choice = advice.choice;
       harness = choice.harness;
       model = choice.model;
-      if (harness === "muse" && data.readOnly)
-        return c.json({ error: "Muse cannot enforce read-only work. Choose Codex or Claude Code for a review." }, 400);
+      if ((harness === "muse" || harness === "opencode") && data.readOnly)
+        return c.json({ error: `${harness === "muse" ? "Muse" : "OpenCode"} cannot enforce read-only work. Choose Codex or Claude Code for a review.` }, 400);
       routing = {
         selected: {
           harness: choice.harness, model: choice.model, roleId: choice.roleId,
@@ -874,11 +880,11 @@ export function createService(
         warnings: [...new Set([...choice.warnings, ...advice.warnings])].slice(0, 3),
       };
     }
-    const command = harness === "claude" ? claudeCommand : harness === "muse" ? museCommand : nativeCommand;
+    const command = harness === "claude" ? claudeCommand : harness === "muse" ? museCommand : harness === "opencode" ? opencodeCommand : nativeCommand;
     if (!command)
       return c.json(
         {
-          error: `Install ${harness === "claude" ? "Claude Code" : harness === "muse" ? "Muse" : "Codex"} and sign in through its native CLI first.`,
+          error: `Install ${harness === "claude" ? "Claude Code" : harness === "muse" ? "Muse" : harness === "opencode" ? "OpenCode" : "Codex"} and set up its native CLI first.`,
         },
         409,
       );
@@ -935,7 +941,7 @@ export function createService(
     }
     const r: Run = {
       id: runId,
-      harness: harness as "codex" | "claude" | "muse",
+      harness: harness as "codex" | "claude" | "muse" | "opencode",
       projectId: p.id,
       roleId: data.roleId,
       prompt: data.prompt,
@@ -969,7 +975,7 @@ export function createService(
       "started",
       workspace.kind === "worktree" && !workspace.verified && !workspace.nativeName
         ? "Preparing separate Git worktree."
-        : `${harness === "claude" ? "Claude Code" : harness === "muse" ? "Muse" : "Codex"} worker started.`,
+        : `${harness === "claude" ? "Claude Code" : harness === "muse" ? "Muse" : harness === "opencode" ? "OpenCode" : "Codex"} worker started.`,
     );
     queueMicrotask(() => {
       const callbacks: NativeCallbacks = {
@@ -1044,7 +1050,7 @@ export function createService(
     if (!run) return c.json({ error: "Run not found" }, 404);
     c.header("Cache-Control", "no-store");
     const project = store.projects().find((p) => p.id === run.projectId);
-    const cli = run.harness === "codex" || run.harness === "claude" || run.harness === "muse" ? executable(run.harness) : null;
+    const cli = run.harness === "codex" || run.harness === "claude" || run.harness === "muse" || run.harness === "opencode" ? executable(run.harness) : null;
     return c.json(runHandoff(run, project,
       activeRuns().some((item) => sameWorkspace(item, run)), cli));
   });

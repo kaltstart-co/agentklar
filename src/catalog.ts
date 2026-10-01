@@ -1,5 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { query } from "@anthropic-ai/claude-agent-sdk";
+import { readOpenCodeCatalog } from "./opencode.ts";
 import type {
   AccountQuota,
   CatalogModel,
@@ -17,6 +18,7 @@ const claudeQuota =
   "Claude Code does not expose account quota through this supported native SDK read.";
 const museQuota =
   "Model refresh does not read Muse account usage. A completed Muse task may show an observed account snapshot.";
+const opencodeQuota = "OpenCode account limits are not exposed by this native catalog read.";
 const record = (v: unknown): Record<string, unknown> | null =>
   v !== null && typeof v === "object" && !Array.isArray(v)
     ? (v as Record<string, unknown>)
@@ -122,7 +124,7 @@ function empty(harness: HarnessCatalog["harness"]): HarnessCatalog {
     modelsMessage: modelFailure,
     modelsTruncated: false,
     quota: unavailableQuota(
-      harness === "claude" ? claudeQuota : harness === "muse" ? museQuota : quotaFailure,
+      harness === "claude" ? claudeQuota : harness === "muse" ? museQuota : harness === "opencode" ? opencodeQuota : quotaFailure,
     ),
   };
 }
@@ -538,7 +540,7 @@ export async function readClaudeCatalog(
 
 export type CatalogReader = (
   project: Project,
-  commands: { codex: string | null; claude: string | null; muse?: string | null },
+  commands: { codex: string | null; claude: string | null; muse?: string | null; opencode?: string | null },
   signal: AbortSignal,
 ) => Promise<CatalogSnapshot>;
 export const readCatalog: CatalogReader = async (
@@ -549,12 +551,12 @@ export const readCatalog: CatalogReader = async (
   projectId: project.id,
   checkedAt: new Date().toISOString(),
   harnesses: await Promise.all(
-    (["codex", "claude", "muse"] as const).map(async (harness) => {
+    (["codex", "claude", "muse", "opencode"] as const).map(async (harness) => {
       const command = commands[harness];
       if (!command)
         return {
           ...empty(harness),
-          modelsMessage: `${harness === "codex" ? "Codex" : harness === "claude" ? "Claude Code" : "Muse"} executable was not found.`,
+          modelsMessage: `${harness === "codex" ? "Codex" : harness === "claude" ? "Claude Code" : harness === "muse" ? "Muse" : "OpenCode"} executable was not found.`,
         };
       return harness === "codex"
         ? readCodexCatalog(command, project.path, signal)
@@ -566,7 +568,8 @@ export const readCatalog: CatalogReader = async (
               ]);
               return { ...catalog, auth };
             })()
-          : readMuseCatalog(command, project.path, signal);
+          : harness === "muse" ? readMuseCatalog(command, project.path, signal)
+          : readOpenCodeCatalog(command, project.path, signal);
     }),
   ),
 });
@@ -584,6 +587,7 @@ export class CatalogCache {
       codex: string | null;
       claude: string | null;
       muse?: string | null;
+      opencode?: string | null;
     },
     private now = Date.now,
   ) {}

@@ -35,6 +35,7 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 - [x] Muse model discovery
 - [x] Muse delegation
 - [x] Muse quota snapshots
+- [x] OpenCode delegation
 - [x] Model advice
 - [x] Quality benchmarks (LiveBench reference)
 - [x] Automatic model choice
@@ -52,7 +53,7 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 ## Next
 
 - [ ] Control transfer
-- [ ] Gemini, Cursor and OpenCode workers
+- [ ] Gemini and Cursor workers
 - [ ] ZCode worker
 - [ ] Plugin bundles
 - [ ] Wider config preview and rollback

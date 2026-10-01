@@ -9,12 +9,13 @@ const safePath = (value: string) => isAbsolute(value) && value.length <= 4096 &&
 const quote = (value: string) => `'${value.replaceAll("'", "'\"'\"'")}'`;
 
 export function runHandoff(run: Run, project: Project | undefined, busy: boolean, cli: string | null): RunHandoff {
-  const harness = run.harness === "codex" || run.harness === "claude" || run.harness === "muse" ? run.harness : null;
+  const harness = run.harness === "codex" || run.harness === "claude" || run.harness === "muse" || run.harness === "opencode" ? run.harness : null;
   const packet: RunHandoff = { runId: run.id, available: false, reason: null, harness,
     nativeSessionId: typeof run.threadId === "string" && uuid.test(run.threadId) ? run.threadId : null,
     command: null, notes: [] };
   const unavailable = (reason: string) => ({ ...packet, reason });
   if (!harness) return unavailable("This run has no supported native harness.");
+  if (harness === "opencode") return unavailable("OpenCode native continuation has not been verified for this saved local server session. Open the workspace in OpenCode manually.");
   if (["running", "needs_attention"].includes(run.state)) return unavailable("The worker is still active.");
   if (!["completed", "failed", "cancelled", "interrupted"].includes(run.state))
     return unavailable("The run is not in a finished state.");

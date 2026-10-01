@@ -153,11 +153,11 @@ export function App() {
   const museModel = taskHarness === "muse" ? museModels.find((item) => item.id === (model.trim() || selectedRole?.model)) ||
     (!model.trim() && !selectedRole?.model ? museModels.find((item) => item.isDefault) : undefined) : undefined;
   useEffect(() => {
-    if (taskHarness === "muse") setAutomaticRouting(false);
+    if (taskHarness === "muse" || taskHarness === "opencode") setAutomaticRouting(false);
   }, [taskHarness]);
   useEffect(() => {
-    if (!taskModal || taskHarness !== "muse" || !connected || !draftProjectId ||
-        catalogs[draftProjectId]?.harnesses.some((entry) => entry.harness === "muse")) return;
+    if (!taskModal || (taskHarness !== "muse" && taskHarness !== "opencode") || !connected || !draftProjectId ||
+        catalogs[draftProjectId]?.harnesses.some((entry) => entry.harness === taskHarness)) return;
     let active = true;
     setCatalogBusy(draftProjectId);
     void api<CatalogSnapshot>(`/projects/${draftProjectId}/catalog`, {})
@@ -460,7 +460,7 @@ export function App() {
           : "This hosted page is a setup guide. Run the local app to see projects, workers and permission requests."}
       </p>
       <p className="hint">Requires Node 24 on macOS or Linux. Install the pinned beta package:</p>
-      <pre>npm install -g https://github.com/kaltstart-co/agentklar/releases/download/v0.1.0-beta.14/agentklar-0.1.0-beta.14.tgz{"\n"}agentklar start</pre>
+      <pre>npm install -g https://github.com/kaltstart-co/agentklar/releases/download/v0.1.0-beta.15/agentklar-0.1.0-beta.15.tgz{"\n"}agentklar start</pre>
       <p>
         Open the setup link from the terminal, then use{" "}
         <code>http://127.0.0.1:4317</code>.
@@ -931,7 +931,7 @@ export function App() {
                   <h2>Roles for {project.name}</h2>
                   <p className="muted">
                     Save who should do what. Your MCP host can choose a role.
-                    Installed Codex, Claude Code and Muse harnesses can run workers.
+                    Installed Codex, Claude Code, Muse and OpenCode harnesses can run workers.
                   </p>
                   <Select
                     label="Cost preference"
@@ -1419,7 +1419,7 @@ export function App() {
               <Alert color="orange">
                 {selectedRole
                   ? "This role does not have an installed, supported worker harness. Choose another role or change it in Team."
-                  : "Install Codex, Claude Code or Muse to start a worker."}
+                  : "Install Codex, Claude Code, Muse or OpenCode to start a worker."}
               </Alert>
             )}
             <Autocomplete
@@ -1444,6 +1444,7 @@ export function App() {
             )}
             {taskHarness === "muse" && catalogBusy === draftProjectId && <p className="hint">Loading Muse model descriptions…</p>}
             {taskHarness === "muse" && catalogError?.projectId === draftProjectId && <Alert color="orange">Muse model descriptions are unavailable: {catalogError.message}</Alert>}
+            {taskHarness === "opencode" && <p className="hint">OpenCode uses its own providers, sign-in and permissions. Its listed models show capabilities, not access or cost. Leave Model blank for its native default.</p>}
             {taskHarness === "claude" && catalogs[draftProjectId]?.harnesses.find((entry) => entry.harness === "claude")?.auth?.status === "sign_in_required" &&
               <Alert color="orange">Claude Code worker sign-in is required. Sign in with the native Claude Code CLI, then refresh Models.</Alert>}
             <Checkbox
@@ -1578,8 +1579,8 @@ export function App() {
               disabled={!!followUp}
               onChange={(e) => setReadOnly(e.currentTarget.checked)}
             />
-            {taskHarness === "muse" && <p className="hint">Muse cannot enforce read-only work. Turn off Read only for a regular task, or choose Codex or Claude Code for a review.</p>}
-            {readOnly && taskHarness !== "muse" && (
+            {(taskHarness === "muse" || taskHarness === "opencode") && <p className="hint">{harnessName(taskHarness)} cannot enforce read-only work. Turn off Read only for a regular task, or choose Codex or Claude Code for a review.</p>}
+            {readOnly && taskHarness !== "muse" && taskHarness !== "opencode" && (
               <p className="hint">
                 {taskHarness === "claude"
                   ? "Claude can use only Read, Glob and Grep tools. Your configured hooks can still run. This does not add an operating system sandbox."
@@ -1590,7 +1591,7 @@ export function App() {
               Runs a native {harnessName(taskHarness)} worker in {taskProject?.name}
               . Native permission requests appear in the task detail.
             </p>
-            <Button type="submit" loading={busy} disabled={!taskWorker || !taskProject || (taskHarness === "muse" && readOnly)}>
+            <Button type="submit" loading={busy} disabled={!taskWorker || !taskProject || ((taskHarness === "muse" || taskHarness === "opencode") && readOnly)}>
               Start worker
             </Button>
           </Stack>

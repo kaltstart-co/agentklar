@@ -1,6 +1,6 @@
 {
   "name": "agentklar",
-  "version": "0.1.0-beta.14",
+  "version": "0.1.0-beta.15",
   "private": true,
   "type": "module",
   "bin": {
@@ -39,6 +39,7 @@
     "@mantine/hooks": "9.6.3",
     "@modelcontextprotocol/server": "2.2.0",
     "@muse-code/sdk": "1.4.2",
+    "@opencode-ai/sdk": "1.18.34",
     "hono": "4.13.12",
     "react": "19.3.0",
     "react-dom": "19.3.0",

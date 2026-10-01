@@ -50,7 +50,7 @@ export type FollowUpContext = {
   sourceResult: string;
   sourceResultTruncated: boolean;
   sourceRunId: string;
-  sourceHarness: "codex" | "claude" | "muse";
+  sourceHarness: "codex" | "claude" | "muse" | "opencode";
   sourceModel: string | null;
   sourceState: "completed";
 };
@@ -78,7 +78,7 @@ export type MuseSubscriptionUsage = {
 };
 export type Run = {
   id: string;
-  harness?: "codex" | "claude" | "muse";
+  harness?: "codex" | "claude" | "muse" | "opencode";
   projectId: string;
   roleId?: string;
   prompt: string;
@@ -126,7 +126,7 @@ export type RunHandoff = {
   runId: string;
   available: boolean;
   reason: string | null;
-  harness: "codex" | "claude" | "muse" | null;
+  harness: "codex" | "claude" | "muse" | "opencode" | null;
   nativeSessionId: string | null;
   command: null | {
     executable: string;
@@ -193,7 +193,7 @@ export type AccountQuota = {
   buckets: QuotaBucket[];
 };
 export type HarnessCatalog = {
-  harness: "codex" | "claude" | "muse";
+  harness: "codex" | "claude" | "muse" | "opencode";
   auth?: {
     status: "signed_in" | "sign_in_required" | "unknown";
     source: "claude-auth-status";
@@ -214,7 +214,7 @@ export type CatalogSnapshot = {
 export type TaskComplexity = "routine" | "standard" | "hard";
 export type WorkerChoice = {
   benchmark?: BenchmarkEvidence;
-  harness: "codex" | "claude" | "muse";
+  harness: "codex" | "claude" | "muse" | "opencode";
   model: string;
   roleId?: string;
   basis: "task-pin" | "role-pin" | "policy";

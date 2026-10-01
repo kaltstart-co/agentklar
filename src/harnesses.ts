@@ -39,6 +39,7 @@ export function executable(
     } catch {}
   }
   if (name === "muse") candidates.push(join(home, ".local", "bin", "muse"));
+  if (name === "opencode") candidates.push(join(home, ".opencode", "bin", "opencode"), join(home, ".bun", "bin", "opencode"));
   for (const path of candidates)
     try {
       accessSync(path, constants.X_OK);
@@ -61,7 +62,7 @@ export function harnesses(): Harness[] {
       name,
       available: !!path,
       executable: path,
-      workerSupported: ["codex", "claude", "muse"].includes(id) && !!path,
+      workerSupported: ["codex", "claude", "muse", "opencode"].includes(id) && !!path,
       hostSupported: !!path,
       reason:
         id === "codex"
@@ -70,6 +71,8 @@ export function harnesses(): Harness[] {
             ? "Official Claude Agent SDK worker adapter; native sign-in required"
             : id === "muse"
               ? "Native MSP worker adapter; MCP host setup uses Muse settings"
+            : id === "opencode"
+              ? "Native OpenCode local server worker adapter; provider setup stays in OpenCode"
             : "Discovered host CLI; worker adapter is planned",
     };
   });

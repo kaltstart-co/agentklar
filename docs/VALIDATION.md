@@ -2,6 +2,18 @@
 
 Verified on 2026-10-01 and 2026-10-02 using Node 24.21.0. The old application was not used.
 
+## OpenCode worker — beta.15
+
+OpenCode CLI 1.18.34 served an authenticated loopback endpoint in an isolated project. A native metadata read listed eight connected text-and-tool models without a prompt. A separate bounded native test declined an `edit` permission: the file was not written, and the returned assistant step ended with `finish: tool-calls`, not a finished root answer. Evidence: `/tmp/agentklar-opencode-research/evidence.json` and `/tmp/agentklar-opencode-research/live/{permission,evidence}.json`.
+
+An integrated UI task pinned `opencode/mimo-v2.6-flash-free`. OpenCode requested a concrete file diff. The trusted local UI showed it and sent Allow once. The native worker wrote `AGENTKLAR_OPENCODE_UI_OK` with a newline, returned `Done`, and finished with a confirmed root answer. The saved task has native session and message IDs. Its 16,501 tokens equal the two recorded assistant steps (8,234 + 8,267); this is native task usage, not an account balance or bill. The result survived browser reload. Usage kept account and cost unknown. At 375 pixels there was no horizontal overflow or browser error. Evidence: `/tmp/agentklar-opencode-ui-qa/evidence.json`, `permission.png`, `completed.png`, `usage.png`, `mobile.png`, and `saved-run.json`.
+
+Offline tests cover connected model filtering without provider secrets, exact approval evidence, declined and recovered native steps, root completion, child permissions, unsupported questions, event reconnection, false permission replies, server exit, startup cancellation and the read-only API guard. OpenCode read-only work, managed MCP/skill setup and native session handoff are still unavailable. No account quota or cost is inferred from a free-labelled model or a native zero-cost step.
+
+A separate native cancellation check started one known sleeping shell command through OpenCode's SDK without any model prompt or tokens. The native tool process existed before cancellation. `session.abort` returned true; after that request and the owned server close, the tool process was gone. This checks the abort-before-close order used by the adapter. Evidence: `/tmp/agentklar-opencode-cancel-check/evidence.json`.
+
+Final local checks passed: TypeScript, production build, all 137 tests, and `git diff --check`. The beta.15 package installed with production dependencies, served its built UI, and exposed all 19 MCP tools in the package smoke check. No worker or model call was made by that smoke check.
+
 ## Personal skills — beta.14
 
 Offline tests use a temporary user home, never the real personal skill folders. They install separate Codex and Claude personal skills, keep one durable global owner across two registered projects and a service restart, update one personal skill from its saved source, and remove it without changing a same-name project skill. Project and personal preview/install IDs cannot cross scopes. API tests reject arbitrary target paths and MCP writes, hide pending preview text from MCP metadata reads, and leave external edits or linked parent folders untouched. Existing project-skill tests continue to pass.
