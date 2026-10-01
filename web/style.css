@@ -467,6 +467,10 @@ pre {
 .mantine-Alert-root {
   margin-bottom: 18px;
 }
+.task-modal-body .hint,
+.task-modal-body .mantine-Alert-root {
+  margin: 0;
+}
 code {
   font-size: 12px;
 }

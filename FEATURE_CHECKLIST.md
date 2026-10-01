@@ -21,9 +21,13 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 - [x] Support dashboard
 - [x] Independent review
 
+## In progress
+
+- [ ] Claude delegation
+
 ## Next
 
-- [ ] More harness workers
+- [ ] Other harness workers
 - [ ] Shared memory
 - [ ] Project context
 - [ ] Model recommendations

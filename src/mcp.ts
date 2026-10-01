@@ -103,7 +103,7 @@ export function createMcp(base: string, token: string) {
     "task_start",
     {
       description:
-        "Start one durable native Codex worker for a registered project. Returns promptly. Completion means worker finished; review is separate. Keep the returned run ID.",
+        "Start one durable native Codex or Claude Code worker for a registered project. Returns promptly. Completion means worker finished; review is separate. Keep the returned run ID.",
       inputSchema: startSchema,
     },
     (args) => call("/api/tasks/start", "POST", args),

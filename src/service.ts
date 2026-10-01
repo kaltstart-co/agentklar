@@ -21,6 +21,7 @@ import { isAbsolute, join } from "node:path";
 import { Store } from "./store.ts";
 import { harnesses, executable } from "./harnesses.ts";
 import { NativeWorker, type NativeCallbacks } from "./native.ts";
+import { ClaudeWorker } from "./claude.ts";
 import type { Run, Project } from "./contracts.ts";
 const role = z
   .object({
@@ -46,6 +47,7 @@ export const startSchema = z
     prompt: z.string().trim().min(1).max(32000),
     idempotencyKey: z.string().min(1).max(200),
     roleId: z.string().optional(),
+    harness: z.enum(["codex", "claude"]).optional(),
     model: z.string().min(1).max(120).optional(),
     readOnly: z.boolean().default(false),
   })
@@ -83,8 +85,12 @@ export type WorkerFactory = (
 export function createService(
   home: string,
   port = 4317,
-  factory: WorkerFactory = (...a) => new NativeWorker(...a),
+  factory: WorkerFactory = (command, run, path, callbacks) =>
+    run.harness === "claude"
+      ? new ClaudeWorker(command, run, path, callbacks)
+      : new NativeWorker(command, run, path, callbacks),
   nativeCommand: string | null = executable("codex"),
+  claudeCommand: string | null = executable("claude"),
 ) {
   const release = ownHome(home);
   let store: Store;
@@ -281,20 +287,26 @@ export function createService(
       : undefined;
     if (data.roleId && !selected)
       return c.json({ error: "Role not found" }, 400);
-    if (selected && selected.harness !== "codex")
+    const harness = data.harness || selected?.harness || "codex";
+    if (selected && data.harness && data.harness !== selected.harness)
+      return c.json(
+        { error: "Task harness must match the selected role harness." },
+        400,
+      );
+    if (!["codex", "claude"].includes(harness))
       return c.json({ error: "This harness has no worker adapter yet." }, 400);
-    const command = nativeCommand;
+    const command = harness === "claude" ? claudeCommand : nativeCommand;
     if (!command)
       return c.json(
         {
-          error:
-            "Install Codex and authenticate it in your native harness first.",
+          error: `Install ${harness === "claude" ? "Claude Code" : "Codex"} and sign in through its native CLI first.`,
         },
         409,
       );
     const now = new Date().toISOString();
     const r: Run = {
       id: randomUUID(),
+      harness: harness as "codex" | "claude",
       projectId: p.id,
       roleId: data.roleId,
       prompt: data.prompt,
@@ -309,7 +321,11 @@ export function createService(
       launchHash,
     };
     store.insertRun(r, data.idempotencyKey);
-    store.event(r.id, "started", "Codex worker started.");
+    store.event(
+      r.id,
+      "started",
+      `${harness === "claude" ? "Claude Code" : "Codex"} worker started.`,
+    );
     queueMicrotask(() => {
       try {
         const worker = factory(command, r, p.path, {
@@ -385,6 +401,7 @@ export function createService(
           threadId: r.threadId,
           turnId: r.turnId,
           effectiveModel: r.effectiveModel,
+          harness: r.harness || "codex",
         })
       : c.json({ error: "Run not found" }, 404);
   });

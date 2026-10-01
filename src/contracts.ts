@@ -23,6 +23,7 @@ export type RunState =
   | "interrupted";
 export type Run = {
   id: string;
+  harness?: "codex" | "claude";
   projectId: string;
   roleId?: string;
   prompt: string;

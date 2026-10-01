@@ -88,6 +88,7 @@ export function App() {
   const [path, setPath] = useState("");
   const [prompt, setPrompt] = useState("");
   const [roleId, setRoleId] = useState<string | null>(null);
+  const [harness, setHarness] = useState("codex");
   const [model, setModel] = useState("");
   const [readOnly, setReadOnly] = useState(true);
   const [roles, setRoles] = useState<Role[]>([]);
@@ -96,6 +97,12 @@ export function App() {
   const run = snapshot.runs.find(
     (r) => r.id === runId && r.projectId === projectId,
   );
+  const workers = snapshot.harnesses.filter((h) => h.workerSupported);
+  const selectedRole = project?.roles.find((r) => r.id === roleId);
+  const taskHarness = selectedRole?.harness || harness;
+  const taskWorker = workers.find((h) => h.id === taskHarness);
+  const harnessName = (id: string) =>
+    snapshot.harnesses.find((h) => h.id === id)?.name || id;
   const runs = snapshot.runs
     .filter((r) => r.projectId === projectId)
     .filter(
@@ -105,6 +112,7 @@ export function App() {
     )
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   async function refresh() {
+    if (!local) return;
     try {
       const next = await api<Snapshot>("/snapshot");
       setSnapshot(next);
@@ -134,7 +142,14 @@ export function App() {
   useEffect(() => {
     setRunId("");
     setRoleId(null);
+    setModel("");
   }, [projectId]);
+  useEffect(() => {
+    if (workers.length && !workers.some((h) => h.id === harness)) {
+      setHarness(workers[0]!.id);
+      setModel("");
+    }
+  }, [snapshot.harnesses, harness]);
   useEffect(() => {
     setEvents([]);
     setFullResult(null);
@@ -478,7 +493,7 @@ export function App() {
                             <p className="hint">Task preview shortened.</p>
                           )}
                           <p className="muted">
-                            Codex worker
+                            {harnessName(run.harness || "codex")} worker
                             {run.roleId
                               ? ` · ${run.roleSnapshot?.name || project?.roles.find((r) => r.id === run.roleId)?.name || "Saved role"}`
                               : ""}{" "}
@@ -622,7 +637,7 @@ export function App() {
                   <h2>Roles for {project.name}</h2>
                   <p className="muted">
                     Save who should do what. Your MCP host can choose a role.
-                    This build runs Codex workers; other harnesses can host MCP.
+                    Installed Codex and Claude harnesses can run workers.
                   </p>
                   <Select
                     label="Cost preference"
@@ -670,12 +685,19 @@ export function App() {
                         <Select
                           label="Harness"
                           value={role.harness}
-                          data={["codex", "claude", "cursor", "opencode"]}
+                          data={snapshot.harnesses.map((h) => ({
+                            value: h.id,
+                            label: h.name,
+                          }))}
                           onChange={(v) =>
                             setRoles(
                               roles.map((r) =>
                                 r.id === role.id
-                                  ? { ...r, harness: v || "codex" }
+                                  ? {
+                                      ...r,
+                                      harness: v || "codex",
+                                      model: undefined,
+                                    }
                                   : r,
                               ),
                             )
@@ -683,7 +705,7 @@ export function App() {
                         />
                         <TextInput
                           label="Model (optional)"
-                          placeholder="Harness default"
+                          placeholder={`${harnessName(role.harness)} native default`}
                           value={role.model || ""}
                           onChange={(e) =>
                             setRoles(
@@ -729,7 +751,7 @@ export function App() {
                           {
                             id: crypto.randomUUID(),
                             name: "",
-                            harness: "codex",
+                            harness: workers[0]?.id || "codex",
                             responsibility: "",
                           },
                         ])
@@ -871,8 +893,8 @@ export function App() {
                   </p>
                 )}
                 <p className="hint">
-                  First build: MCP → native Codex worker. Hosted pairing is not
-                  available.
+                  Installed means the executable was found. Sign in through
+                  your native harness before starting a worker.
                 </p>
               </section>
             )}
@@ -924,6 +946,8 @@ export function App() {
         opened={taskModal}
         onClose={() => setTaskModal(false)}
         title="Start a task"
+        classNames={{ body: "task-modal-body" }}
+        yOffset="5vh"
         centered
       >
         <form
@@ -935,7 +959,8 @@ export function App() {
                 prompt,
                 idempotencyKey: crypto.randomUUID(),
                 roleId: roleId || undefined,
-                model: model || undefined,
+                harness: taskHarness,
+                model: model.trim() || undefined,
                 readOnly,
               });
               setRunId(task.id);
@@ -944,7 +969,7 @@ export function App() {
             });
           }}
         >
-          <Stack>
+          <Stack gap="sm">
             {error && <Alert color="red">{error}</Alert>}
             <Textarea
               label="What should the worker do?"
@@ -959,28 +984,62 @@ export function App() {
               placeholder="No role"
               clearable
               value={roleId}
-              onChange={setRoleId}
+              onChange={(id) => {
+                setRoleId(id);
+                setModel("");
+              }}
               data={
                 project?.roles.map((r) => ({ value: r.id, label: r.name })) ||
                 []
               }
             />
+            <Select
+              label="Worker harness"
+              value={taskHarness}
+              disabled={Boolean(selectedRole)}
+              placeholder="No installed worker harness"
+              data={workers.map((h) => ({ value: h.id, label: h.name }))}
+              onChange={(id) => {
+                setHarness(id || "codex");
+                setModel("");
+              }}
+            />
+            {selectedRole && (
+              <p className="hint">The saved role chooses its harness.</p>
+            )}
+            {!taskWorker && (
+              <Alert color="orange">
+                {selectedRole
+                  ? "This role does not have an installed, supported worker harness. Choose another role or change it in Team."
+                  : "Install Codex or Claude to start a worker."}
+              </Alert>
+            )}
             <TextInput
               label="Model (optional)"
-              placeholder="Codex default"
+              placeholder={
+                selectedRole?.model ||
+                `${harnessName(taskHarness)} native default`
+              }
               value={model}
               onChange={(e) => setModel(e.currentTarget.value)}
             />
             <Checkbox
-              label="Read only — inspect without changing files"
+              label="Read only"
               checked={readOnly}
               onChange={(e) => setReadOnly(e.currentTarget.checked)}
             />
+            {readOnly && (
+              <p className="hint">
+                {taskHarness === "claude"
+                  ? "Claude can use only Read, Glob and Grep tools. Your configured hooks can still run. This does not add an operating system sandbox."
+                  : "Codex uses its native read-only sandbox."}
+              </p>
+            )}
             <p className="hint">
-              Runs a native Codex worker in {project?.name}. Native permission
-              requests appear in the task detail.
+              Runs a native {harnessName(taskHarness)} worker in {project?.name}.
+              Native permission requests appear in the task detail.
             </p>
-            <Button type="submit" loading={busy}>
+            <Button type="submit" loading={busy} disabled={!taskWorker}>
               Start worker
             </Button>
           </Stack>
@@ -1014,6 +1073,40 @@ function PermissionDetails({
           </p>
         )}
         {typeof d.reason === "string" && <p>{d.reason}</p>}
+      </>
+    );
+  if (
+    kind === "file" &&
+    typeof d.file_path === "string" &&
+    (d.tool === "Write" || d.tool === "Edit")
+  )
+    return (
+      <>
+        <div className="permission-label">File</div>
+        <p><strong>{d.file_path}</strong></p>
+        {d.tool === "Write" && typeof d.content === "string" && (
+          <>
+            <div className="permission-label">Proposed content</div>
+            <pre>{d.content}</pre>
+          </>
+        )}
+        {d.tool === "Edit" && (
+          <>
+            {d.replace_all === true && <p>Replace all matching text.</p>}
+            {typeof d.old_string === "string" && (
+              <>
+                <div className="permission-label">Before</div>
+                <pre>{d.old_string}</pre>
+              </>
+            )}
+            {typeof d.new_string === "string" && (
+              <>
+                <div className="permission-label">After</div>
+                <pre>{d.new_string}</pre>
+              </>
+            )}
+          </>
+        )}
       </>
     );
   if (kind === "file" && Array.isArray(d.changes))
