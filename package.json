@@ -11,6 +11,7 @@
     "build": "tsc && vite build",
     "test": "node --import tsx --test tests/*.test.ts",
     "start": "tsx src/server.ts",
+    "service": "tsx src/launchd.ts",
     "mcp": "tsx src/mcp.ts",
     "check": "tsc --noEmit"
   },

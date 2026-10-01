@@ -14,7 +14,21 @@ npm run build
 npm start
 ```
 
-Keep that terminal running. Open the one-time setup URL it prints. It creates a private local browser session and opens the support UI. After setup, the UI lives at `http://127.0.0.1:4317`. For frontend development, run `npm run dev` in another terminal and open `http://127.0.0.1:5173`.
+Keep that terminal running. Open the one-time setup URL it prints within five minutes. It works once and creates a private local browser session in the support UI. After setup, the UI lives at `http://127.0.0.1:4317`. For frontend development, run `npm run dev` in another terminal and open `http://127.0.0.1:5173`.
+
+### Start at login on macOS
+
+After `npm ci` and `npm run build`, install a private per-user [launchd LaunchAgent](https://support.apple.com/guide/terminal/script-management-with-launchd-apdc6c1077b-5d5d-4d35-9c19-60f2397b2369/mac) from this checkout:
+
+```sh
+npm run service -- install
+npm run service -- status
+npm run service -- open
+```
+
+`open` creates a new one-use browser link, valid for five minutes, and opens it. Use `npm run service -- open --print` to print the link without opening a browser. Your existing browser session stays signed in. The service starts at login. Keep this checkout and its Node 24 installation in place. To control it later, use `npm run service -- stop`, `start`, or `uninstall`. Stop and uninstall refuse active work; add `--force` to stop active workers. A stopped service starts again at the next login. If a stop command is interrupted, run `npm run service -- start` to resume task starts. Uninstall removes login startup and keeps your local projects and run history. Native harness settings and sign-in remain where each harness keeps them. This uses macOS [launchd](https://developer.apple.com/library/archive/documentation/MacOSX/Conceptual/BPSystemStartup/Chapters/CreatingLaunchdJobs.html) with your user account. It needs no sudo.
+
+`AGENTKLAR_HOME` and `AGENTKLAR_PORT` choose an isolated service. Set the same values for each command. The setup saves absolute paths for Node, this checkout, and the service files. It never stores model API keys in launchd settings. The one-use browser link is not written to launchd logs. A service restart marks unfinished runs interrupted; it does not resume workers.
 
 Register an existing project folder. Add roles with a harness, optional model, and responsibility. Start a task from your native harness through MCP or from the local UI. Only registered projects can run workers. Each project allows one worker at a time; a busy request returns an error. Repeating the same task with the same idempotency key returns its original run.
 

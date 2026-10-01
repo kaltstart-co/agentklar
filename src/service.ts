@@ -101,6 +101,7 @@ export type WorkerFactory = (
   path: string,
   callbacks: NativeCallbacks,
 ) => { stop: () => void; closed?: Promise<void> };
+export type Operator = { id: string; key: string };
 export function createService(
   home: string,
   port = 4317,
@@ -112,6 +113,7 @@ export function createService(
   claudeCommand: string | null = executable("claude"),
   catalogReader: CatalogReader = readCatalog,
   setupOptions: NativeSetupOptions = {},
+  operator?: Operator,
 ) {
   const release = ownHome(home);
   let store: Store;
@@ -140,6 +142,9 @@ export function createService(
   const bearer = readFileSync(secretPath, "utf8").trim();
   const session = randomBytes(32).toString("hex");
   let setup = randomBytes(32).toString("hex");
+  let setupExpires = Date.now() + 5 * 60_000;
+  let quiesced = false;
+  const setupUrl = () => `http://127.0.0.1:${port}/setup?token=${setup}`;
   const origins = new Set([
     `http://127.0.0.1:${port}`,
     "http://127.0.0.1:5173",
@@ -156,6 +161,13 @@ export function createService(
     const origin = c.req.header("origin");
     if (origin && !origins.has(origin))
       return c.json({ error: "Remote origins are not allowed" }, 403);
+    if (c.req.path.startsWith("/api/operator/")) {
+      if (!operator || c.req.header("authorization") || c.req.header("origin") || c.req.header("cookie") ||
+          !matches(c.req.header("x-agentklar-operator-key"), operator.key) ||
+          !matches(c.req.header("x-agentklar-service-id"), operator.id))
+        return c.json({ error: "Local service operator required" }, 403);
+      return next();
+    }
     if (
       c.req.path === "/api/health" ||
       c.req.path === "/setup" ||
@@ -187,10 +199,31 @@ export function createService(
     await next();
   });
   app.get("/api/health", (c) => c.json({ ok: true }));
+  app.get("/api/operator/status", (c) => {
+    c.header("Cache-Control", "no-store");
+    return c.json({ id: operator!.id, pid: process.pid, quiesced,
+      activeRuns: store.runs().filter((r) => ["running", "needs_attention"].includes(r.state) || workers.has(r.id) || (r.workerPid !== undefined && processGroupAlive(r.workerPid))).length });
+  });
+  app.post("/api/operator/open", (c) => {
+    setup = randomBytes(32).toString("hex");
+    setupExpires = Date.now() + 5 * 60_000;
+    c.header("Cache-Control", "no-store");
+    return c.json({ url: setupUrl() });
+  });
+  app.post("/api/operator/quiesce", async (c) => {
+    const body = await c.req.json().catch(() => null);
+    if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).length !== 1 || typeof body.force !== "boolean")
+      return c.json({ error: "Provide only a boolean force field" }, 400);
+    quiesced = true;
+    const activeRuns = store.runs().filter((r) => ["running", "needs_attention"].includes(r.state) || workers.has(r.id) || (r.workerPid !== undefined && processGroupAlive(r.workerPid))).length;
+    if (activeRuns && !body.force) { quiesced = false; return c.json({ error: `${activeRuns} active run(s); use --force to stop them` }, 409); }
+    return c.json({ ok: true, activeRuns });
+  });
+  app.post("/api/operator/resume", (c) => { quiesced = false; return c.json({ ok: true }); });
   app.get("/setup", (c) => {
-    if (!setup || !matches(c.req.query("token"), setup))
+    if (!setup || Date.now() > setupExpires || !matches(c.req.query("token"), setup))
       return c.text(
-        "Setup link expired. Restart the local service to get a new link.",
+        operator ? "Setup link expired. Run npm run service -- open for a new link." : "Setup link expired. Restart the local service to get a new link.",
         403,
       );
     setup = "";
@@ -436,6 +469,7 @@ export function createService(
   });
   app.post("/api/tasks/start", async (c) => {
     const parsed = startSchema.safeParse(await c.req.json().catch(() => null));
+    if (quiesced) return c.json({ error: "Local service is stopping." }, 503);
     if (!parsed.success)
       return c.json(
         { error: parsed.error.issues[0]?.message || "Invalid task" },
@@ -529,6 +563,10 @@ export function createService(
     );
     queueMicrotask(() => {
       try {
+        if (quiesced) {
+          store.saveRun({ ...r, state: "interrupted", error: "Local service stopped before worker launch.", updatedAt: new Date().toISOString() });
+          return;
+        }
         const worker = factory(command, r, p.path, {
           update: (patch) => {
             const current = store.run(r.id);
@@ -648,7 +686,7 @@ export function createService(
     app,
     store,
     bearer,
-    setupUrl: `http://127.0.0.1:${port}/setup?token=${setup}`,
+    setupUrl: setupUrl(),
     close: () => closing ??= (async () => {
       await nativeSetup.close();
       await catalogs.close();

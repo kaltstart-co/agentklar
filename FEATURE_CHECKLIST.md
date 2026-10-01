@@ -12,6 +12,7 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 - [x] Harness discovery
 - [x] MCP connection
 - [x] Native MCP setup
+- [x] Background startup (macOS)
 - [x] Codex delegation
 - [x] Native approvals
 - [x] Run history

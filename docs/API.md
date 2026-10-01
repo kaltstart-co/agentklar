@@ -4,6 +4,8 @@ The service listens on 127.0.0.1:4317. UI requests use a local session cookie an
 
 JSON bodies and replies. Errors: `{error: string}`. IDs are UUID strings. All changes require authenticated UI or the private MCP bearer token, except approval decisions, instruction file changes and native setup writes require the UI cookie and exact local Origin. Native setup reads also require the UI cookie. A valid MCP bearer is rejected for every native setup request, including requests that also carry a UI cookie. Instruction text reads require the UI cookie; MCP receives metadata only.
 
+The macOS service CLI uses separate private `/api/operator/*` routes for authenticated status, a fresh one-use setup link, stop preparation and recovery. They require the saved operator key and managed service ID. Any browser Origin, cookie or Authorization header is rejected, including an MCP bearer. Neither the UI nor MCP exposes these controls. The new setup link expires after five minutes; creating one invalidates an earlier unused link without ending an existing browser session. Stop blocks new task starts before launch and refuses active workers unless `--force`; `start` resumes a service left paused by an interrupted stop command. The CLI checks launchd registration by command exit status and service health through this authenticated route. The human-readable `launchctl print` text is not parsed.
+
 - GET /api/health: `{ok:true}` (public).
 - GET /api/snapshot: Snapshot in src/contracts.ts.
 - POST /api/projects: `{name,path}` → Project. Path must exist and be absolute.

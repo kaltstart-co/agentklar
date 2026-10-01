@@ -386,6 +386,13 @@ export function App() {
     null,
     2,
   );
+  const backgroundSetup = (
+    <details><summary>Start at login on macOS</summary>
+      <p className="hint">Stop the foreground terminal service first. Use the same custom home and port, if set.</p>
+      <pre>npm run service -- install{"\n"}npm run service -- open</pre>
+      <p className="hint">The setup link works once for five minutes. See README for stop, start, and uninstall.</p>
+    </details>
+  );
   const setup = (
     <div className="setup">
       <div className="empty-mark">↗</div>
@@ -406,6 +413,7 @@ export function App() {
         Open the setup link from the terminal, then use{" "}
         <code>http://127.0.0.1:4317</code>.
       </p>
+      {backgroundSetup}
       <Button variant="light" onClick={() => setView("Settings")}>
         See MCP setup
       </Button>
@@ -1127,6 +1135,7 @@ export function App() {
                     authenticate the local UI.
                   </p>
                 </>}
+                {connected && backgroundSetup}
                 <h3>{connected ? "Native connection" : "2. Connect a native harness"}</h3>
                 {connected && project ? <NativeSetupForm key={project.id} projectId={project.id} connected={connected} /> : connected ? <p className="hint">Add or select a project to connect Codex or Claude Code.</p> :
                   <p className="hint">Open the local app and select a project. Settings can then check, preview and add the native connection. This hosted guide has no access to your computer.</p>}
