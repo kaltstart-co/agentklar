@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { NativeSetupForm } from "./NativeSetupForm.js";
 import { InstructionsForm } from "./InstructionsForm.js";
 import {
   Alert,
@@ -1117,32 +1118,19 @@ export function App() {
                   Your harness stays in charge. Add AgentKlar as an MCP server
                   to register projects, start workers and collect results.
                 </p>
-                {!connected && setup}
-                <h3>1. Start the local service</h3>
-                <pre>npm run build{"\n"}npm start</pre>
-                <p className="hint">
-                  Open the one-time setup URL printed by the service to
-                  authenticate the local UI.
-                </p>
-                <h3>2. Add this MCP server</h3>
-                <p className="hint">
-                  Replace the absolute path with this checkout. Run from the
-                  same local account as the service. The server reads the local
-                  service credentials automatically.
-                </p>
-                <pre>{snippet}</pre>
-                <Button
-                  size="xs"
-                  variant="light"
-                  onClick={() =>
-                    void act(async () => {
-                      await navigator.clipboard.writeText(snippet);
-                      setNotice("MCP configuration copied.");
-                    })
-                  }
-                >
-                  Copy configuration
-                </Button>
+                {!connected && <>
+                  {setup}
+                  <h3>1. Start the local service</h3>
+                  <pre>npm run build{"\n"}npm start</pre>
+                  <p className="hint">
+                    Open the one-time setup URL printed by the service to
+                    authenticate the local UI.
+                  </p>
+                </>}
+                <h3>{connected ? "Native connection" : "2. Connect a native harness"}</h3>
+                {connected && project ? <NativeSetupForm key={project.id} projectId={project.id} connected={connected} /> : connected ? <p className="hint">Add or select a project to connect Codex or Claude Code.</p> :
+                  <p className="hint">Open the local app and select a project. Settings can then check, preview and add the native connection. This hosted guide has no access to your computer.</p>}
+                <details><summary>Manual setup for other MCP hosts</summary><pre>{snippet}</pre></details>
                 <h3>Harnesses on this computer</h3>
                 {connected ? (
                   snapshot.harnesses.map((h) => (

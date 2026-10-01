@@ -202,3 +202,9 @@ export type InstructionSnapshot = {
   files: InstructionFileMetadata[];
   changes: InstructionChange[];
 };
+
+export type SetupHarness = "codex" | "claude";
+export type SetupEntry = { type: "stdio"; command: string; args: string[]; env: Record<string, string> };
+export type SetupChange = { id: string; projectId: string; harness: SetupHarness; operation: "apply" | "undo"; state: "prepared" | "applied" | "undone" | "interrupted"; message: string | null; createdAt: string; updatedAt: string };
+export type SetupStatus = { projectId: string; harness: SetupHarness; scope: "User" | "Local project"; status: "missing" | "configured" | "conflict" | "unavailable"; message: string; checkedAt: string; change: SetupChange | null; canUndo: boolean };
+export type SetupPreview = { id: string; projectId: string; harness: SetupHarness; scope: "User" | "Local project"; configPath: string; cwd: string | null; command: string; entry: SetupEntry; createdAt: string };

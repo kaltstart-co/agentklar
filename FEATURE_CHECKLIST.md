@@ -11,6 +11,7 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 - [x] Cost preference
 - [x] Harness discovery
 - [x] MCP connection
+- [x] Native MCP setup
 - [x] Codex delegation
 - [x] Native approvals
 - [x] Run history
@@ -30,6 +31,7 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 
 - [ ] Claude delegation
 - [ ] Account quotas (Codex only)
+- [ ] Easy setup
 
 ## Next
 
@@ -38,7 +40,6 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 - [ ] Quality benchmarks
 - [ ] Configs, skills, plugins
 - [ ] Wider config preview and rollback
-- [ ] Easy setup
 - [ ] Device pairing
 - [ ] Remote work
 - [ ] Parallel worktrees
