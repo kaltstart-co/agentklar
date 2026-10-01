@@ -2,18 +2,19 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, rmSync, readFileSync, writeFileSync, existsSync, realpathSync, symlinkSync, linkSync, statSync, chmodSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import { createServer } from "node:net";
 import { serve } from "@hono/node-server";
 import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import { createService } from "../src/service.ts";
 import { nativeSetupCommand } from "../src/setup.ts";
+import { parse as parseJsonc } from "jsonc-parser";
 
 async function fixture(port = 4317, homeName = "agentklar home") {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "agentklar-setup-test-")));
-  const home = join(dir, homeName), codex = join(dir, "codex home"), claude = join(dir, "claude home"), xdg = join(dir, "xdg home"), project = join(dir, "project with spaces ' $()");
-  for (const path of [home, codex, claude, xdg, project]) mkdirSync(path);
+  const home = join(dir, homeName), codex = join(dir, "codex home"), claude = join(dir, "claude home"), xdg = join(dir, "xdg home"), project = join(dir, "project with spaces ' $()"), userHome = join(dir, "user home"), managed = join(dir, "managed");
+  for (const path of [home, codex, claude, xdg, project, userHome, managed]) mkdirSync(path);
   const command = join(dir, "native cli.mjs"), mode = join(dir, "mode"), calls = join(dir, "calls");
   writeFileSync(mode, "");
   writeFileSync(command, `#!${process.execPath}\n` + String.raw`
@@ -62,9 +63,9 @@ if(args[0]==='app-server') {
 }
 `, { mode: 0o700 });
   let starts = 0;
-  const nativeEnv = { ...process.env, CODEX_HOME: codex, CLAUDE_CONFIG_DIR: claude, XDG_CONFIG_HOME: xdg, SETUP_MODE: mode, SETUP_CALLS: calls };
+  const nativeEnv: NodeJS.ProcessEnv = { ...process.env, HOME: userHome, CODEX_HOME: codex, CLAUDE_CONFIG_DIR: claude, XDG_CONFIG_HOME: xdg, OPENCODE_TEST_MANAGED_CONFIG_DIR: managed, SETUP_MODE: mode, SETUP_CALLS: calls };
   let currentPort = port;
-  let service = createService(home, currentPort, () => { starts++; return { stop() {} }; }, command, command, undefined, { env: nativeEnv, timeoutMs: 1200 }, undefined, {}, {}, command);
+  let service = createService(home, currentPort, () => { starts++; return { stop() {} }; }, command, command, undefined, { env: nativeEnv, timeoutMs: 1200 }, undefined, {}, {}, command, {}, command);
   let cookie = "";
   async function auth() { const response = await service.app.request(service.setupUrl); cookie = response.headers.get("set-cookie")!.split(";")[0]; }
   await auth();
@@ -74,9 +75,96 @@ if(args[0]==='app-server') {
   const base = (harness = "codex") => `/api/projects/${p.id}/setup/${harness}`;
   const preview = async (harness = "codex") => (await call(`${base(harness)}/preview`, "POST", {})).json();
   const apply = async (id: string, harness = "codex") => call(`${base(harness)}/apply`, "POST", { previewId: id });
-  return { dir, home, codex, claude, xdg, project, p, command, mode, calls, base, call, preview, apply, get service() { return service; }, get cookie() { return cookie; }, get starts() { return starts; }, restart: async (nextPort = port) => { await service.close(); currentPort = nextPort; service = createService(home, currentPort, () => { starts++; return { stop() {} }; }, command, command, undefined, { env: nativeEnv, timeoutMs: 1200 }, undefined, {}, {}, command); await auth(); }, cleanup: async () => { await service.close(); rmSync(dir, { recursive: true, force: true }); } };
+  return { dir, home, codex, claude, xdg, userHome, managed, nativeEnv, project, p, command, mode, calls, base, call, preview, apply, get service() { return service; }, get cookie() { return cookie; }, get starts() { return starts; }, restart: async (nextPort = port) => { await service.close(); currentPort = nextPort; service = createService(home, currentPort, () => { starts++; return { stop() {} }; }, command, command, undefined, { env: nativeEnv, timeoutMs: 1200 }, undefined, {}, {}, command, {}, command); await auth(); }, cleanup: async () => { await service.close(); rmSync(dir, { recursive: true, force: true }); } };
 }
 function config(path: string) { return JSON.parse(readFileSync(path,"utf8")); }
+test("OpenCode setup preserves JSONC, uses its native entry, and undoes after restart", async () => {
+  const f = await fixture();
+  try {
+    const folder = join(f.xdg, "opencode"), file = join(folder, "opencode.jsonc"); mkdirSync(folder);
+    const source = '{\n  // Keep this provider setting\n  "provider": {"apiKey":"{env:NATIVE_PRIVATE_SECRET}"},\n  "mcp": {"other":{"type":"remote","url":"https://example.test"}},\n}\n';
+    writeFileSync(file, source, { mode: 0o640 });
+    const before = await (await f.call(f.base("opencode"))).json(); assert.equal(before.status, "missing");
+    const preview = await f.preview("opencode");
+    assert.equal(preview.configPath, file); assert.equal(preview.command, null);
+    assert.equal(preview.entry.type, "local"); assert.equal(preview.entry.command[0], process.execPath);
+    assert.deepEqual(preview.entry.environment, { AGENTKLAR_HOME: f.home, AGENTKLAR_PORT: "4317" });
+    assert.equal(JSON.stringify(preview).includes("NATIVE_PRIVATE_SECRET"), false);
+    const applied = await (await f.apply(preview.id, "opencode")).json(); assert.equal(applied.state, "applied");
+    const changed = readFileSync(file, "utf8"); assert.match(changed, /Keep this provider setting/);
+    assert.equal(parseJsonc(changed).provider.apiKey, "{env:NATIVE_PRIVATE_SECRET}");
+    assert.deepEqual(parseJsonc(changed).mcp.agentklar, preview.entry);
+    assert.equal(statSync(file).mode & 0o777, 0o640);
+    await f.restart();
+    assert.equal((await (await f.call(f.base("opencode"))).json()).canUndo, true);
+    assert.equal((await f.call(`${f.base("opencode")}/undo`, "POST", { changeId: applied.id })).status, 200);
+    const undone = readFileSync(file, "utf8");
+    assert.match(undone, /Keep this provider setting/);
+    assert.equal(parseJsonc(undone).mcp.other.url, "https://example.test");
+    assert.equal(parseJsonc(undone).mcp.agentklar, undefined);
+    assert.equal(existsSync(f.calls), false);
+  } finally { await f.cleanup(); }
+});
+test("OpenCode setup creates a private user file and rejects changed entries, previews and unsafe paths", async () => {
+  const f = await fixture();
+  try {
+    const folder = join(f.xdg, "opencode"), file = join(folder, "opencode.json");
+    const preview = await f.preview("opencode"); assert.equal(preview.configPath, file);
+    const applied = await (await f.apply(preview.id, "opencode")).json(); assert.equal(applied.state, "applied");
+    assert.equal(statSync(file).mode & 0o777, 0o600);
+    assert.equal(config(file).$schema, "https://opencode.ai/config.json");
+    const edited = config(file); edited.mcp.agentklar.environment.EXTRA = "changed"; writeFileSync(file, JSON.stringify(edited));
+    assert.equal((await (await f.call(f.base("opencode"))).json()).status, "conflict");
+    assert.equal((await f.call(`${f.base("opencode")}/undo`, "POST", { changeId: applied.id })).status, 409);
+    rmSync(file); const stale = await f.preview("opencode");
+    writeFileSync(file, '{}'); assert.equal((await f.apply(stale.id, "opencode")).status, 409);
+    rmSync(file); symlinkSync(join(f.dir, "elsewhere"), file);
+    assert.equal((await (await f.call(f.base("opencode"))).json()).status, "unavailable");
+    rmSync(file); writeFileSync(file, '{}'); linkSync(file, join(f.dir, "hardlink"));
+    assert.equal((await (await f.call(f.base("opencode"))).json()).status, "unavailable");
+    const linkedHome = join(f.dir, "linked config home"); symlinkSync(f.xdg, linkedHome, "dir");
+    f.nativeEnv.XDG_CONFIG_HOME = linkedHome; await f.restart();
+    assert.equal((await (await f.call(f.base("opencode"))).json()).status, "unavailable");
+    assert.equal((await f.call(`${f.base("opencode")}/preview`, "POST", {}, { Origin: "http://127.0.0.1:4317", "Content-Type": "application/json" })).status, 401);
+  } finally { await f.cleanup(); }
+});
+test("OpenCode setup checks project, ancestor, custom and managed layers without native commands", async () => {
+  const f = await fixture();
+  try {
+    const foreign = '{"mcp":{"agentklar":{"type":"local","command":["foreign"]}}}';
+    const parent = join(f.dir, "opencode.jsonc"); writeFileSync(parent, foreign);
+    assert.equal((await (await f.call(f.base("opencode"))).json()).status, "conflict");
+    rmSync(parent); const preview = await f.preview("opencode");
+    const global = join(f.xdg, "opencode", "config.json"); mkdirSync(dirname(global)); writeFileSync(global, foreign);
+    assert.equal((await f.apply(preview.id, "opencode")).status, 409);
+    rmSync(global);
+    const fresh = await f.preview("opencode");
+    const projectFile = join(f.project, ".opencode", "opencode.json"); mkdirSync(dirname(projectFile)); writeFileSync(projectFile, foreign);
+    assert.equal((await f.apply(fresh.id, "opencode")).status, 409);
+    rmSync(projectFile); writeFileSync(join(f.managed, "opencode.jsonc"), foreign);
+    assert.equal((await (await f.call(f.base("opencode"))).json()).status, "conflict");
+    rmSync(join(f.managed, "opencode.jsonc"));
+    f.nativeEnv.OPENCODE_CONFIG_CONTENT = foreign; await f.restart();
+    assert.equal((await (await f.call(f.base("opencode"))).json()).status, "conflict");
+    delete f.nativeEnv.OPENCODE_CONFIG_CONTENT;
+    const custom = join(f.dir, "custom.jsonc"); writeFileSync(custom, foreign); f.nativeEnv.OPENCODE_CONFIG = custom; await f.restart();
+    assert.equal((await (await f.call(f.base("opencode"))).json()).status, "conflict");
+    assert.equal(existsSync(f.calls), false);
+  } finally { await f.cleanup(); }
+});
+test("OpenCode setup refuses ambiguous MCP expansion and generated native paths", async () => {
+  const f = await fixture();
+  try {
+    const folder = join(f.xdg, "opencode"), file = join(folder, "opencode.jsonc"); mkdirSync(folder);
+    for (const text of ['{"m{env:X}p":{}}', '{"mcp":{"agentklar":{"command":["{file:secret}"]}}}', '{"mcp":{"agentklar":{}} , "mcp":{}}']) {
+      writeFileSync(file, text);
+      assert.equal((await (await f.call(f.base("opencode"))).json()).status, "unavailable");
+    }
+  } finally { await f.cleanup(); }
+  const pathFixture = await fixture(4317, "home {env:BAD}");
+  try { assert.equal((await (await pathFixture.call(pathFixture.base("opencode"))).json()).status, "unavailable"); }
+  finally { await pathFixture.cleanup(); }
+});
 test("Muse setup writes only its user MCP entry and restores other settings after restart", async () => {
   const f = await fixture();
   try {

@@ -2,13 +2,21 @@
 
 Verified on 2026-10-01 and 2026-10-02 using Node 24.21.0. The old application was not used.
 
+## OpenCode MCP setup — beta.16
+
+Offline tests used only temporary native homes and config files. They checked the OpenCode `type:"local"` entry, JSONC comments and other settings, a private new file, restart and guarded undo, stale previews, competing user/project/ancestor/custom/managed entries, unsafe links, ambiguous variable expansion and UI-only write access. No native config command or model call ran in these tests.
+
+In an isolated HOME and XDG config, the trusted UI previewed and applied the entry. Real OpenCode 1.18.34 then reported AgentKlar connected; its bridge listed 19 tools and `projects_list` returned the expected temporary project. After an AgentKlar restart, the saved managed entry still allowed undo. UI undo removed it; a fresh OpenCode session reported AgentKlar absent. The original JSONC comment and native permission settings stayed in place. At 320 pixels, Settings had no page or navigation overflow and no browser error. Evidence: `/tmp/agentklar-opencode-setup-qa/{native-connected.json,native-absent.json,bridge-evidence.json,preview.png,configured.png,undone.png,mobile.png}`. These checks sent no prompt or model turn and touched no real user native config.
+
+Local `npm run check`, `npm run build`, all 141 tests, and `git diff --check` passed. The beta.16 package smoke installed the production package, served the built UI, and exposed all 19 MCP tools through the installed bridge. It made no worker or model call.
+
 ## OpenCode worker — beta.15
 
 OpenCode CLI 1.18.34 served an authenticated loopback endpoint in an isolated project. A native metadata read listed eight connected text-and-tool models without a prompt. A separate bounded native test declined an `edit` permission: the file was not written, and the returned assistant step ended with `finish: tool-calls`, not a finished root answer. Evidence: `/tmp/agentklar-opencode-research/evidence.json` and `/tmp/agentklar-opencode-research/live/{permission,evidence}.json`.
 
 An integrated UI task pinned `opencode/mimo-v2.6-flash-free`. OpenCode requested a concrete file diff. The trusted local UI showed it and sent Allow once. The native worker wrote `AGENTKLAR_OPENCODE_UI_OK` with a newline, returned `Done`, and finished with a confirmed root answer. The saved task has native session and message IDs. Its 16,501 tokens equal the two recorded assistant steps (8,234 + 8,267); this is native task usage, not an account balance or bill. The result survived browser reload. Usage kept account and cost unknown. At 375 pixels there was no horizontal overflow or browser error. Evidence: `/tmp/agentklar-opencode-ui-qa/evidence.json`, `permission.png`, `completed.png`, `usage.png`, `mobile.png`, and `saved-run.json`.
 
-Offline tests cover connected model filtering without provider secrets, exact approval evidence, declined and recovered native steps, root completion, child permissions, unsupported questions, event reconnection, false permission replies, server exit, startup cancellation and the read-only API guard. OpenCode read-only work, managed MCP/skill setup and native session handoff are still unavailable. No account quota or cost is inferred from a free-labelled model or a native zero-cost step.
+Offline tests cover connected model filtering without provider secrets, exact approval evidence, declined and recovered native steps, root completion, child permissions, unsupported questions, event reconnection, false permission replies, server exit, startup cancellation and the read-only API guard. OpenCode read-only work, managed skill setup and native session handoff are still unavailable. No account quota or cost is inferred from a free-labelled model or a native zero-cost step.
 
 A separate native cancellation check started one known sleeping shell command through OpenCode's SDK without any model prompt or tokens. The native tool process existed before cancellation. `session.abort` returned true; after that request and the owned server close, the tool process was gone. This checks the abort-before-close order used by the adapter. Evidence: `/tmp/agentklar-opencode-cancel-check/evidence.json`.
 

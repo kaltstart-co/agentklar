@@ -58,8 +58,9 @@ export function NativeSetupForm({ projectId, connected }: { projectId: string; c
   }
   return <Stack gap="sm">
     <Select label="Native harness" value={harness} allowDeselect={false} disabled={Boolean(busy) && busy !== "status"}
-      data={[{ value: "codex", label: "Codex" }, { value: "claude", label: "Claude Code" }, { value: "muse", label: "Muse" }]} onChange={(value) => setHarness(value as SetupHarness)} />
-    <p className="hint">{harness === "codex" ? "User scope · available to your Codex projects." : harness === "muse" ? "User scope · available to your Muse projects." : "Local project scope · only this project's Claude Code sessions."} Setup adds MCP access. Your native session keeps its trust and permission settings.</p>
+      data={[{ value: "codex", label: "Codex" }, { value: "claude", label: "Claude Code" }, { value: "muse", label: "Muse" }, { value: "opencode", label: "OpenCode" }]} onChange={(value) => setHarness(value as SetupHarness)} />
+    <p className="hint">{harness === "claude" ? "Local project scope · only this project's Claude Code sessions." : `User scope · available to your ${harness === "codex" ? "Codex" : harness === "muse" ? "Muse" : "OpenCode"} projects.`} Setup adds MCP access. Your native session keeps its trust and permission settings.</p>
+    {harness === "opencode" && <p className="hint">Checks local config files. Restart OpenCode to load the entry.</p>}
     {status && <div aria-live="polite"><Badge color={status.status === "configured" ? "teal" : status.status === "conflict" ? "orange" : "gray"} variant="light">{status.status === "configured" ? "Entry configured" : status.status}</Badge><p className="hint">{status.message}</p></div>}
     {error && <Alert color="red">{error}</Alert>}
     {notice && <Alert color="teal">{notice}</Alert>}
@@ -76,7 +77,7 @@ export function NativeSetupForm({ projectId, connected }: { projectId: string; c
       {preview.command && <pre>{preview.command}</pre>}
       <details><summary>AgentKlar entry</summary><pre>{JSON.stringify(preview.entry, null, 2)}</pre></details>
       <p className="hint">The bridge uses this service's data home and port. It reads the private local token file. No token is added to native settings.</p>
-      <Button mt="sm" disabled={!connected || Boolean(busy)} loading={busy === "apply"} onClick={() => void change("apply")}>Add to {harness === "codex" ? "Codex" : harness === "muse" ? "Muse" : "Claude Code"}</Button>
+      <Button mt="sm" disabled={!connected || Boolean(busy)} loading={busy === "apply"} onClick={() => void change("apply")}>Add to {harness === "codex" ? "Codex" : harness === "muse" ? "Muse" : harness === "opencode" ? "OpenCode" : "Claude Code"}</Button>
     </div>}
   </Stack>;
 }

@@ -1,12 +1,14 @@
 import { createHash, randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { constants, openSync, closeSync, fstatSync, readSync, lstatSync, realpathSync, accessSync, mkdtempSync, rmSync, mkdirSync, writeFileSync, fsyncSync, fchmodSync, renameSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { homedir, tmpdir, userInfo } from "node:os";
 import { isAbsolute, join, dirname, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { DatabaseSync } from "node:sqlite";
 import type { Project, SetupHarness, SetupEntry, SetupStatus, SetupPreview, SetupChange } from "./contracts.ts";
 import { projectRootIdentity, rootStamp } from "./project-root.ts";
+import { applyEdits, getNodeValue, modify, parseTree, type Node as JsonNode, type ParseError } from "jsonc-parser";
+import type { OpenCodeSetupEntry } from "./contracts.ts";
 
 export class SetupError extends Error {
   constructor(message: string, public status: 400 | 404 | 409 | 422 | 503 = 422) { super(message); }
@@ -90,16 +92,102 @@ function museLayers(projectPath: string) {
   }
   return paths;
 }
-function museParentIdentity(path: string) {
+function museParentIdentity(path: string, name = "Muse") {
   for (let cursor = dirname(path); ; cursor = dirname(cursor)) {
     try {
       const st = lstatSync(cursor, { bigint: true });
       if (!st.isDirectory() || st.isSymbolicLink() || realpathSync(cursor) !== cursor) throw new Error();
       return `${cursor}:${rootStamp(st)}`;
     } catch (e) {
-      if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw new SetupError("Muse settings folder cannot be checked safely.");
+      if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw new SetupError(`${name} settings folder cannot be checked safely.`);
     }
-    if (dirname(cursor) === cursor) throw new SetupError("Muse settings folder cannot be checked safely.");
+    if (dirname(cursor) === cursor) throw new SetupError(`${name} settings folder cannot be checked safely.`);
+  }
+}
+const substitution = /\{(?:env|file):[^}]+\}/;
+function openCodeConfig(text: string | null): Record<string, unknown> {
+  if (text === null) return {};
+  const errors: ParseError[] = [];
+  const tree = parseTree(text, errors, { allowTrailingComma: true });
+  if (errors.length || !tree || tree.type !== "object") throw new SetupError("OpenCode configuration is unsupported. Inspect its native settings.");
+  function inspect(node: JsonNode) {
+    if (node.type === "object") {
+      const names = new Set<string>();
+      for (const property of node.children ?? []) {
+        const key = String(getNodeValue(property.children![0]));
+        if (names.has(key)) throw new SetupError("OpenCode configuration has duplicate keys. Inspect its native settings.");
+        names.add(key); inspect(property.children![1]);
+      }
+    } else for (const child of node.children ?? []) inspect(child);
+  }
+  inspect(tree);
+  const config = nativeObject(getNodeValue(tree));
+  const mcp = optionalObject(config.mcp);
+  if (Object.keys(config).some((key) => substitution.test(key)) || Object.keys(mcp).some((key) => substitution.test(key)) || (Object.hasOwn(mcp, "agentklar") && substitution.test(JSON.stringify(mcp.agentklar)))) throw new SetupError("OpenCode MCP keys or agentklar entry use native variable expansion. Inspect native settings.");
+  if (Object.hasOwn(mcp, "agentklar")) nativeObject(mcp.agentklar);
+  return config;
+}
+function openCodeLayers(projectPath: string, env: NodeJS.ProcessEnv, target: string) {
+  const userHome = env.HOME || homedir(), globalDir = dirname(target);
+  const paths = [join(globalDir, "config.json"), join(globalDir, "opencode.json"), join(globalDir, "opencode.jsonc")];
+  let root = projectPath;
+  for (let cursor = projectPath; ; cursor = dirname(cursor)) {
+    root = cursor;
+    try { const st = lstatSync(join(cursor, ".git")); if (!st.isDirectory() && !st.isFile()) throw new Error(); root = cursor; break; }
+    catch (e) { if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw new SetupError("OpenCode project scope cannot be checked safely."); }
+    if (dirname(cursor) === cursor) break;
+  }
+  for (let cursor = projectPath; ; cursor = dirname(cursor)) {
+    for (const name of ["opencode.json", "opencode.jsonc"]) paths.push(join(cursor, name), join(cursor, ".opencode", name));
+    if (cursor === root) break;
+  }
+  for (const dir of [join(userHome, ".opencode"), env.OPENCODE_CONFIG_DIR, env.OPENCODE_TEST_MANAGED_CONFIG_DIR || (process.platform === "darwin" ? "/Library/Application Support/opencode" : "/etc/opencode")]) {
+    if (!dir) continue;
+    if (!isAbsolute(dir)) throw new SetupError("OpenCode config directory must be an absolute path.");
+    for (const name of ["opencode.json", "opencode.jsonc"]) paths.push(join(dir, name));
+  }
+  if (env.OPENCODE_CONFIG) {
+    if (!isAbsolute(env.OPENCODE_CONFIG)) throw new SetupError("OpenCode custom config must be an absolute path.");
+    paths.push(env.OPENCODE_CONFIG);
+  }
+  if (process.platform === "darwin") {
+    for (const file of [join("/Library/Managed Preferences", userInfo().username, "ai.opencode.managed.plist"), "/Library/Managed Preferences/ai.opencode.managed.plist"]) {
+      try { lstatSync(file); throw new SetupError("OpenCode managed preferences cannot be checked safely. Inspect native settings."); }
+      catch (e) { if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e; }
+    }
+  }
+  return [...new Set(paths)];
+}
+function openCodeWrite(path: string, expected: string, expectedParent: string, operation: "apply" | "undo", entry: OpenCodeSetupEntry) {
+  const parent = dirname(path);
+  try {
+    if (museParentIdentity(path, "OpenCode") !== expectedParent) throw new SetupError("OpenCode settings folder changed. Refresh status.", 409);
+    mkdirSync(parent, { recursive: true, mode: 0o700 });
+    if (realpathSync(parent) !== parent || lstatSync(parent).isSymbolicLink()) throw new Error();
+    const parentIdentity = museParentIdentity(path, "OpenCode"), before = configRead(path);
+    if (before.fingerprint !== expected) throw new SetupError("OpenCode settings changed. Refresh status.", 409);
+    const config = openCodeConfig(before.text), mcp = optionalObject(config.mcp);
+    if (operation === "apply" && Object.hasOwn(mcp, "agentklar")) throw new SetupError("OpenCode agentklar entry already exists.", 409);
+    if (operation === "undo" && entryHash(mcp.agentklar) !== entryHash(entry)) throw new SetupError("OpenCode agentklar entry changed. It will not be removed.", 409);
+    const source = before.text ?? '{\n  "$schema": "https://opencode.ai/config.json"\n}\n';
+    const serialized = applyEdits(source, modify(source, ["mcp", "agentklar"], operation === "apply" ? entry : undefined, { formattingOptions: { insertSpaces: true, tabSize: 2 } }));
+    if (Buffer.byteLength(serialized) > maxConfigBytes) throw new SetupError("OpenCode settings would exceed the safe file size.");
+    const updated = openCodeConfig(serialized), updatedEntry = optionalObject(updated.mcp).agentklar;
+    if (operation === "apply" ? entryHash(updatedEntry) !== entryHash(entry) : updatedEntry !== undefined) throw new SetupError("OpenCode settings edit could not be verified.");
+    const mode = before.text === null ? 0o600 : lstatSync(path).mode & 0o777;
+    const temporary = join(parent, `.agentklar-${randomUUID()}.tmp`);
+    let fd: number | undefined;
+    try {
+      fd = openSync(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, mode);
+      fchmodSync(fd, mode); writeFileSync(fd, serialized); fsyncSync(fd); closeSync(fd); fd = undefined;
+      if (configRead(path).fingerprint !== expected || museParentIdentity(path, "OpenCode") !== parentIdentity) throw new SetupError("OpenCode settings changed. Refresh status.", 409);
+      renameSync(temporary, path);
+      const dirFd = openSync(parent, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+      try { fsyncSync(dirFd); } finally { closeSync(dirFd); }
+    } finally { if (fd !== undefined) closeSync(fd); rmSync(temporary, { force: true }); }
+  } catch (e) {
+    if (e instanceof SetupError) throw e;
+    throw new SetupError("OpenCode settings cannot be changed safely. Inspect native settings.");
   }
 }
 function museWrite(path: string, expected: string, expectedParent: string, operation: "apply" | "undo", entry: SetupEntry) {
@@ -174,7 +262,7 @@ export function nativeSetupCommand(command: string, args: string[], cwd: string,
 }
 type ReadState = { target: string; targetFingerprint: string; parentIdentity: string | null; fingerprint: string; entry: unknown | null; entryHash: string | null; root: string; shadow: boolean };
 type SavedPreview = SetupPreview & Omit<ReadState, "entry"> & { expires: number };
-type SavedChange = SetupChange & { target: string; entry: SetupEntry; entryHash: string; root: string; projectPath: string };
+type SavedChange = SetupChange & { target: string; entry: SetupEntry | OpenCodeSetupEntry; entryHash: string; root: string; projectPath: string };
 const changeMetadata = ({ target, entry, entryHash, root, projectPath, ...change }: SavedChange): SetupChange => change;
 export class NativeSetup {
   private env: NodeJS.ProcessEnv;
@@ -186,7 +274,7 @@ export class NativeSetup {
   private abort = new AbortController();
   readonly entry: SetupEntry;
   private neutral: string;
-  constructor(private db: DatabaseSync, private home: string, private port: number, private commands: Record<"codex" | "claude", string | null> & { muse?: string | null }, private options: NativeSetupOptions = {}) {
+  constructor(private db: DatabaseSync, private home: string, private port: number, private commands: Record<"codex" | "claude", string | null> & { muse?: string | null; opencode?: string | null }, private options: NativeSetupOptions = {}) {
     this.env = { ...(options.env ?? process.env) };
     const source = import.meta.url.endsWith(".ts");
     this.entry = { type: "stdio", command: process.execPath, args: source
@@ -211,6 +299,21 @@ export class NativeSetup {
   undo(project: Project, harness: SetupHarness, id: string) { return this.tracked(() => this.undoOperation(project, harness, id)); }
   private target(harness: SetupHarness) {
     const userHome = this.env.HOME || homedir();
+    if (harness === "opencode") {
+      const configHome = this.env.XDG_CONFIG_HOME || join(userHome, ".config");
+      if (!isAbsolute(configHome)) throw new SetupError("OpenCode config home must be an absolute path.");
+      try { if (lstatSync(configHome).isSymbolicLink()) throw new Error(); }
+      catch (e) { if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw new SetupError("OpenCode config home cannot be checked safely."); }
+      const resolvedHome = canonicalHome(configHome);
+      if (resolvedHome !== configHome) throw new SetupError("OpenCode config home follows a linked folder. Use its real path.");
+      const folder = join(resolvedHome, "opencode");
+      // OpenCode loads all three files. Select its preferred user file, but inspect every layer.
+      for (const name of ["opencode.jsonc", "opencode.json"]) {
+        const path = join(folder, name);
+        if (configRead(path).text !== null) return path;
+      }
+      return join(folder, "opencode.json");
+    }
     if (harness === "muse") {
       const configHome = this.env.XDG_CONFIG_HOME || join(userHome, ".config");
       if (!isAbsolute(configHome)) throw new SetupError("Muse config home must be an absolute path. Restart AgentKlar with an absolute XDG_CONFIG_HOME.");
@@ -232,8 +335,11 @@ export class NativeSetup {
       try { accessSync(path, path === this.entry.command ? constants.X_OK : constants.R_OK); } catch { throw new SetupError("MCP bridge files are unavailable. Reinstall AgentKlar and restart it."); }
     }
     if (harness === "muse" && Object.values(this.entry.env).some((value) => value.includes("${"))) throw new SetupError("Muse would expand a variable in the AgentKlar data path. Use a data home without ${ in its name.");
-    if (!this.commands[harness]) throw new SetupError(`Install ${harness === "codex" ? "Codex" : harness === "muse" ? "Muse" : "Claude Code"} through its native setup first.`);
+    if (harness === "opencode" && [...Object.values(this.openCodeEntry().environment), ...this.openCodeEntry().command].some((value) => substitution.test(value))) throw new SetupError("OpenCode would expand a variable in the AgentKlar bridge path. Use a path without native variable markers.");
+    if (!this.commands[harness]) throw new SetupError(`Install ${harness === "codex" ? "Codex" : harness === "muse" ? "Muse" : harness === "opencode" ? "OpenCode" : "Claude Code"} through its native setup first.`);
   }
+  private openCodeEntry(): OpenCodeSetupEntry { return { type: "local", command: [this.entry.command, ...this.entry.args], environment: this.entry.env }; }
+  private desired(harness: SetupHarness): SetupEntry | OpenCodeSetupEntry { return harness === "opencode" ? this.openCodeEntry() : this.entry; }
   private async command(harness: SetupHarness, args: string[], project: Project) {
     if (this.closing) throw new SetupError("Service is shutting down.", 503);
     this.supported(harness);
@@ -288,9 +394,24 @@ export class NativeSetup {
   private async read(project: Project, harness: SetupHarness): Promise<ReadState> {
     if (this.closing) throw new SetupError("Service is shutting down.", 503);
     this.supported(harness);
-    const root = projectRoot(project), target = this.target(harness), parentIdentity = harness === "muse" ? museParentIdentity(target) : null, before = configRead(target);
+    const root = projectRoot(project), target = this.target(harness), parentIdentity = harness === "muse" || harness === "opencode" ? museParentIdentity(target, harness === "opencode" ? "OpenCode" : "Muse") : null, before = configRead(target);
     let entry: unknown | null, shadow = false, provenance: unknown = null;
-    if (harness === "muse") {
+    if (harness === "opencode") {
+      const paths = openCodeLayers(project.path, this.env, target), fingerprints: string[] = [];
+      for (const path of paths) {
+        museParentIdentity(path, "OpenCode");
+        const layer = configRead(path); fingerprints.push(layer.fingerprint);
+        const candidate = optionalObject(openCodeConfig(layer.text).mcp).agentklar;
+        if (path !== target && candidate !== undefined) shadow = true;
+      }
+      const content = this.env.OPENCODE_CONFIG_CONTENT;
+      if (content) {
+        if (Buffer.byteLength(content) > maxConfigBytes) throw new SetupError("OpenCode inline configuration is too large to inspect safely.");
+        if (optionalObject(openCodeConfig(content).mcp).agentklar !== undefined) shadow = true;
+      }
+      entry = optionalObject(openCodeConfig(before.text).mcp).agentklar ?? null;
+      provenance = [paths, fingerprints, content ? hash(content) : null];
+    } else if (harness === "muse") {
       const settings = museSettings(before.text);
       const servers = optionalObject(settings.mcpServers);
       entry = servers.agentklar ?? null;
@@ -346,9 +467,10 @@ export class NativeSetup {
       // Fingerprint every layer, including parent, managed and system settings.
       provenance = config.layers.map((raw) => { const layer = record(raw); return [layer.name, layer.version]; });
     }
-    if (configRead(target).fingerprint !== before.fingerprint || projectRoot(project) !== root || (harness === "muse" && museParentIdentity(target) !== parentIdentity)) throw new SetupError("Native settings changed while checking. Refresh status.", 409);
-    const projectConfig = harness === "claude" ? configRead(join(project.path, ".mcp.json")).fingerprint : harness === "muse" ? museLayers(project.path).map((path) => configRead(path).fingerprint) : this.codexProjectFingerprint(project);
+    if (configRead(target).fingerprint !== before.fingerprint || projectRoot(project) !== root || ((harness === "muse" || harness === "opencode") && museParentIdentity(target, harness === "opencode" ? "OpenCode" : "Muse") !== parentIdentity)) throw new SetupError("Native settings changed while checking. Refresh status.", 409);
+    const projectConfig = harness === "claude" ? configRead(join(project.path, ".mcp.json")).fingerprint : harness === "muse" ? museLayers(project.path).map((path) => configRead(path).fingerprint) : harness === "opencode" ? openCodeLayers(project.path, this.env, target).map((path) => configRead(path).fingerprint) : this.codexProjectFingerprint(project);
     if (harness === "muse" && hash(projectConfig) !== hash((provenance as [string[], string[]])[1])) throw new SetupError("Muse project MCP settings changed while checking. Refresh status.", 409);
+    if (harness === "opencode" && (hash(projectConfig) !== hash((provenance as [string[], string[]])[1]) || (this.env.OPENCODE_CONFIG_CONTENT ? hash(this.env.OPENCODE_CONFIG_CONTENT) : null) !== (provenance as [string[], string[], string | null])[2])) throw new SetupError("OpenCode settings changed while checking. Refresh status.", 409);
     return { target, targetFingerprint: before.fingerprint, parentIdentity, fingerprint: hash([before.fingerprint, parentIdentity, projectConfig, provenance]), entry, entryHash: entry === null ? null : entryHash(entry), root, shadow };
   }
   private codexProjectFingerprint(project: Project) {
@@ -356,6 +478,7 @@ export class NativeSetup {
     return configRead(join(project.path, ".codex", "config.toml")).fingerprint;
   }
   private exact(harness: SetupHarness, value: unknown) {
+    if (harness === "opencode") return entryHash(value) === entryHash(this.openCodeEntry());
     if (harness === "claude" || harness === "muse") return entryHash(value) === entryHash(this.entry);
     return entryHash(value) === entryHash({ command: this.entry.command, args: this.entry.args, env: this.entry.env });
   }
@@ -370,14 +493,14 @@ export class NativeSetup {
       const current = await this.read(project, harness);
       const configured = current.entry !== null && this.exact(harness, current.entry);
       const canUndo = !!change && ["applied", "interrupted"].includes(change.state) && (change.operation === "apply" || change.state === "interrupted") && change.target === current.target && change.root === current.root && change.entryHash === current.entryHash && !current.shadow;
-      return { ...base, canUndo, status: current.shadow || (current.entry !== null && !configured) ? "conflict" : configured ? "configured" : "missing", message: current.shadow ? "Another native scope defines agentklar. Resolve it in native MCP settings before using setup here." : configured ? "AgentKlar entry is configured. Start or restart your native session to load it. Native trust and permissions still apply." : current.entry !== null ? "A different agentklar entry exists. Resolve it in native MCP settings; AgentKlar will not overwrite it." : "AgentKlar has no entry in this native scope." };
+      return { ...base, canUndo, status: current.shadow || (current.entry !== null && !configured) ? "conflict" : configured ? "configured" : "missing", message: current.shadow ? "Another native scope defines agentklar. Resolve it in native MCP settings before using setup here." : configured ? harness === "opencode" ? "AgentKlar has a local OpenCode config entry. Start or restart OpenCode to load it. Runtime and remote settings are not verified; native trust and permissions still apply." : "AgentKlar entry is configured. Start or restart your native session to load it. Native trust and permissions still apply." : current.entry !== null ? "A different agentklar entry exists. Resolve it in native MCP settings; AgentKlar will not overwrite it." : "AgentKlar has no entry in this native scope." };
     } catch (e) { return { ...base, status: "unavailable", message: e instanceof SetupError ? e.message : "Native MCP status is unavailable." }; }
   }
   private async previewOperation(project: Project, harness: SetupHarness): Promise<SetupPreview> {
     const current = await this.read(project, harness);
     if (current.shadow || current.entry !== null) throw new SetupError(current.entry !== null && this.exact(harness, current.entry) ? "AgentKlar is already configured. Start or restart a native session." : "A native agentklar entry already exists or another scope defines it. Resolve it in native settings first.", 409);
-    const args = harness === "muse" ? null : this.addArgs(harness);
-    const preview: SetupPreview = { id: randomUUID(), projectId: project.id, harness, scope: harness === "claude" ? "Local project" : "User", configPath: current.target, cwd: harness === "claude" ? project.path : null, command: args ? [this.commands[harness]!, ...args].map(quote).join(" ") : null, entry: this.entry, createdAt: new Date().toISOString() };
+    const args = harness === "muse" || harness === "opencode" ? null : this.addArgs(harness);
+    const preview: SetupPreview = { id: randomUUID(), projectId: project.id, harness, scope: harness === "claude" ? "Local project" : "User", configPath: current.target, cwd: harness === "claude" ? project.path : null, command: args ? [this.commands[harness]!, ...args].map(quote).join(" ") : null, entry: this.desired(harness), createdAt: new Date().toISOString() };
     for (const [id, saved] of this.previews) if (saved.expires <= Date.now()) this.previews.delete(id);
     // ponytail: one local service holds at most 100 previews; use session limits if multi-user support is added.
     if (this.previews.size >= 100) this.previews.delete(this.previews.keys().next().value!);
@@ -401,12 +524,13 @@ export class NativeSetup {
       const current = await this.read(project, harness);
       if (current.target !== preview.target || current.fingerprint !== preview.fingerprint || current.root !== preview.root || current.entry !== null || current.shadow) throw new SetupError("Native settings changed. Refresh status and preview setup again.", 409);
       const now = new Date().toISOString();
-      const change: SavedChange = { id: randomUUID(), projectId: project.id, harness, operation: "apply", state: "prepared", message: null, createdAt: now, updatedAt: now, target: current.target, root: current.root, projectPath: project.path, entry: this.entry, entryHash: "" };
+      const change: SavedChange = { id: randomUUID(), projectId: project.id, harness, operation: "apply", state: "prepared", message: null, createdAt: now, updatedAt: now, target: current.target, root: current.root, projectPath: project.path, entry: this.desired(harness), entryHash: "" };
       // Desired native metadata is durable before add, so interrupted changes remain explicitly recoverable.
-      change.entryHash = entryHash(harness === "codex" ? { command: this.entry.command, args: this.entry.args, env: this.entry.env } : this.entry);
+      change.entryHash = entryHash(harness === "codex" ? { command: this.entry.command, args: this.entry.args, env: this.entry.env } : change.entry);
       this.save(change); this.previews.delete(id);
       return this.finish(change, project, async () => {
         if (harness === "muse") museWrite(current.target, current.targetFingerprint, current.parentIdentity!, "apply", this.entry);
+        else if (harness === "opencode") openCodeWrite(current.target, current.targetFingerprint, current.parentIdentity!, "apply", this.openCodeEntry());
         else {
           const result = await this.command(harness, this.addArgs(harness), project);
           if (result.code !== 0) throw new SetupError("Native add did not finish successfully. Refresh status before trying again.", 503);
@@ -427,7 +551,8 @@ export class NativeSetup {
       if (change.target !== current.target || change.projectPath !== project.path || change.root !== current.root || change.entryHash !== current.entryHash || current.shadow) throw new SetupError("Native entry has changed or is absent. AgentKlar will not remove it. Inspect native MCP settings.", 409);
       change.state = "prepared"; change.operation = "undo"; change.message = null; change.updatedAt = new Date().toISOString(); this.save(change);
       return this.finish(change, project, async () => {
-        if (harness === "muse") museWrite(current.target, current.targetFingerprint, current.parentIdentity!, "undo", change.entry);
+        if (harness === "muse") museWrite(current.target, current.targetFingerprint, current.parentIdentity!, "undo", change.entry as SetupEntry);
+        else if (harness === "opencode") openCodeWrite(current.target, current.targetFingerprint, current.parentIdentity!, "undo", change.entry as OpenCodeSetupEntry);
         else {
           const result = await this.command(harness, harness === "codex" ? ["mcp", "remove", "agentklar"] : ["mcp", "remove", "--scope", "local", "agentklar"], project);
           if (result.code !== 0) throw new SetupError("Native removal did not finish successfully. Refresh status and inspect native MCP settings.", 503);

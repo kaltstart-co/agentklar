@@ -302,8 +302,9 @@ export type InstructionSnapshot = {
   changes: InstructionChange[];
 };
 
-export type SetupHarness = "codex" | "claude" | "muse";
+export type SetupHarness = "codex" | "claude" | "muse" | "opencode";
 export type SetupEntry = { type: "stdio"; command: string; args: string[]; env: Record<string, string> };
+export type OpenCodeSetupEntry = { type: "local"; command: string[]; environment: Record<string, string> };
 export type SetupChange = { id: string; projectId: string; harness: SetupHarness; operation: "apply" | "undo"; state: "prepared" | "applied" | "undone" | "interrupted"; message: string | null; createdAt: string; updatedAt: string };
 export type SetupStatus = { projectId: string; harness: SetupHarness; scope: "User" | "Local project"; status: "missing" | "configured" | "conflict" | "unavailable"; message: string; checkedAt: string; change: SetupChange | null; canUndo: boolean };
-export type SetupPreview = { id: string; projectId: string; harness: SetupHarness; scope: "User" | "Local project"; configPath: string; cwd: string | null; command: string | null; entry: SetupEntry; createdAt: string };
+export type SetupPreview = { id: string; projectId: string; harness: SetupHarness; scope: "User" | "Local project"; configPath: string; cwd: string | null; command: string | null; entry: SetupEntry | OpenCodeSetupEntry; createdAt: string };
