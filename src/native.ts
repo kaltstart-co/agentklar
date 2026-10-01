@@ -2,6 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createInterface } from "node:readline";
 import type { Run, Approval } from "./contracts.ts";
 import { randomUUID } from "node:crypto";
+import { composeWorkerPrompt } from "./prompt.ts";
 export type NativeCallbacks = {
   update: (patch: Partial<Run>) => void;
   event: (kind: string, text: string) => void;
@@ -124,9 +125,7 @@ export class NativeWorker {
       input: [
         {
           type: "text",
-          text: this.run.roleSnapshot
-            ? `Assigned role: ${this.run.roleSnapshot.name}\nResponsibility: ${this.run.roleSnapshot.responsibility}\n\nTask:\n${this.run.prompt}`
-            : this.run.prompt,
+          text: composeWorkerPrompt(this.run),
           text_elements: [],
         },
       ],

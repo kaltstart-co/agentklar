@@ -11,6 +11,7 @@ import {
 } from "@anthropic-ai/claude-agent-sdk";
 import type { Run } from "./contracts.ts";
 import type { NativeCallbacks } from "./native.ts";
+import { composeWorkerPrompt } from "./prompt.ts";
 
 const reads = ["Read", "Glob", "Grep"];
 const actions = {
@@ -218,9 +219,7 @@ export class ClaudeWorker {
 
   private async start(queryFactory: typeof query) {
     try {
-      const prompt = this.run.roleSnapshot
-        ? `Assigned role: ${this.run.roleSnapshot.name}\nResponsibility: ${this.run.roleSnapshot.responsibility}\n\nTask:\n${this.run.prompt}`
-        : this.run.prompt;
+      const prompt = composeWorkerPrompt(this.run);
       const stream = queryFactory({ prompt, options: this.options() });
       for await (const message of stream) this.message(message);
       if (!this.finished) {

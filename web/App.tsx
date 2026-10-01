@@ -17,9 +17,10 @@ import type {
   RunEvent,
   Role,
   Preference,
+  ProjectContext,
 } from "../src/contracts.js";
 
-type View = "Work" | "Team" | "Usage" | "Settings";
+type View = "Work" | "Context" | "Team" | "Usage" | "Settings";
 const local = ["127.0.0.1", "localhost"].includes(location.hostname);
 const empty: Snapshot = {
   projects: [],
@@ -52,8 +53,11 @@ async function api<T>(
   });
   const data = await response.json();
   if (!response.ok)
-    throw new Error(
-      data.error || "The local service could not complete this request.",
+    throw Object.assign(
+      new Error(
+        data.error || "The local service could not complete this request.",
+      ),
+      { status: response.status },
     );
   return data;
 }
@@ -91,6 +95,7 @@ export function App() {
   const [harness, setHarness] = useState("codex");
   const [model, setModel] = useState("");
   const [readOnly, setReadOnly] = useState(true);
+  const [includeProjectContext, setIncludeProjectContext] = useState(true);
   const [roles, setRoles] = useState<Role[]>([]);
   const [preference, setPreference] = useState<Preference>("balanced");
   const project = snapshot.projects.find((p) => p.id === projectId);
@@ -318,21 +323,23 @@ export function App() {
           ＋ Add existing project
         </button>
         <nav aria-label="Main navigation">
-          {(["Work", "Team", "Usage", "Settings"] as View[]).map((item, i) => (
-            <button
-              key={item}
-              className={view === item ? "nav active" : "nav"}
-              aria-current={view === item ? "page" : undefined}
-              onClick={() => setView(item)}
-            >
-              <span aria-hidden="true">{["▦", "♧", "◷", "⚙"][i]}</span>
-              {item}
-              {item === "Work" &&
-                snapshot.runs.some((r) => r.state === "running") && (
-                  <span className="nav-dot" />
-                )}
-            </button>
-          ))}
+          {(["Work", "Context", "Team", "Usage", "Settings"] as View[]).map(
+            (item, i) => (
+              <button
+                key={item}
+                className={view === item ? "nav active" : "nav"}
+                aria-current={view === item ? "page" : undefined}
+                onClick={() => setView(item)}
+              >
+                <span aria-hidden="true">{["▦", "≡", "♧", "◷", "⚙"][i]}</span>
+                {item}
+                {item === "Work" &&
+                  snapshot.runs.some((r) => r.state === "running") && (
+                    <span className="nav-dot" />
+                  )}
+              </button>
+            ),
+          )}
         </nav>
         <div className="sidebar-bottom">
           <span
@@ -375,6 +382,15 @@ export function App() {
           >
             {error}
           </Alert>
+        )}
+        {project && (
+          <div hidden={view !== "Context" || !connected}>
+            <ContextForm
+              key={project.id}
+              projectId={project.id}
+              connected={connected}
+            />
+          </div>
         )}
         {!loaded ? (
           <div className="setup">
@@ -507,6 +523,11 @@ export function App() {
                               "Harness default model"}{" "}
                             · {time(run.createdAt)}
                           </p>
+                          <RunContext
+                            key={run.id}
+                            run={run}
+                            connected={connected}
+                          />
                           {snapshot.approvals
                             .filter((a) => a.runId === run.id)
                             .map((a) => (
@@ -631,6 +652,11 @@ export function App() {
                   </button>
                 </div>
               ))}
+            {view === "Context" && !project && (
+              <p className="empty-note">
+                Add an existing project to save its context.
+              </p>
+            )}
             {view === "Team" &&
               (project ? (
                 <section className="content-panel">
@@ -893,8 +919,8 @@ export function App() {
                   </p>
                 )}
                 <p className="hint">
-                  Installed means the executable was found. Sign in through
-                  your native harness before starting a worker.
+                  Installed means the executable was found. Sign in through your
+                  native harness before starting a worker.
                 </p>
               </section>
             )}
@@ -962,6 +988,7 @@ export function App() {
                 harness: taskHarness,
                 model: model.trim() || undefined,
                 readOnly,
+                includeProjectContext,
               });
               setRunId(task.id);
               setTaskModal(false);
@@ -1024,6 +1051,16 @@ export function App() {
               onChange={(e) => setModel(e.currentTarget.value)}
             />
             <Checkbox
+              label="Use project context"
+              checked={includeProjectContext}
+              onChange={(e) =>
+                setIncludeProjectContext(e.currentTarget.checked)
+              }
+            />
+            <p className="hint">
+              Uses the saved project brief, decisions and next steps at launch.
+            </p>
+            <Checkbox
               label="Read only"
               checked={readOnly}
               onChange={(e) => setReadOnly(e.currentTarget.checked)}
@@ -1036,8 +1073,8 @@ export function App() {
               </p>
             )}
             <p className="hint">
-              Runs a native {harnessName(taskHarness)} worker in {project?.name}.
-              Native permission requests appear in the task detail.
+              Runs a native {harnessName(taskHarness)} worker in {project?.name}
+              . Native permission requests appear in the task detail.
             </p>
             <Button type="submit" loading={busy} disabled={!taskWorker}>
               Start worker
@@ -1083,7 +1120,9 @@ function PermissionDetails({
     return (
       <>
         <div className="permission-label">File</div>
-        <p><strong>{d.file_path}</strong></p>
+        <p>
+          <strong>{d.file_path}</strong>
+        </p>
         {d.tool === "Write" && typeof d.content === "string" && (
           <>
             <div className="permission-label">Proposed content</div>
@@ -1148,4 +1187,248 @@ function groupEvents(events: RunEvent[]): RunEvent[] {
     } else grouped.push({ ...event });
   }
   return grouped;
+}
+
+function ContextForm({
+  projectId,
+  connected,
+}: {
+  projectId: string;
+  connected: boolean;
+}) {
+  const [context, setContext] = useState<ProjectContext | null>(null);
+  const [draft, setDraft] = useState({ brief: "", memory: "", handoff: "" });
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [conflict, setConflict] = useState(false);
+  const [saved, setSaved] = useState(false);
+  useEffect(() => {
+    let active = true;
+    api<ProjectContext>(`/projects/${projectId}/context`)
+      .then((value) => {
+        if (!active) return;
+        setContext(value);
+        setDraft({
+          brief: value.brief,
+          memory: value.memory,
+          handoff: value.handoff,
+        });
+      })
+      .catch((e) => {
+        if (active) setError(e.message);
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [projectId]);
+  async function loadLatest() {
+    setLoading(true);
+    setError("");
+    try {
+      const value = await api<ProjectContext>(`/projects/${projectId}/context`);
+      setContext(value);
+      setDraft({
+        brief: value.brief,
+        memory: value.memory,
+        handoff: value.handoff,
+      });
+      setConflict(false);
+      setSaved(false);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }
+  return (
+    <section className="content-panel context-panel">
+      <h2>Shared project context</h2>
+      <p className="muted">
+        Save the brief, decisions and next steps for your native harnesses and
+        new tasks. Your harness stays in charge.
+      </p>
+      <p className="hint">
+        Memory is saved by you or through MCP. AgentKlar does not collect it
+        automatically from chats or files.
+      </p>
+      {loading && <p className="hint">Loading project context…</p>}
+      {context && (
+        <p className="hint">
+          {context.revision === 0
+            ? "No saved context yet."
+            : `Revision ${context.revision}`}
+          {context.updatedAt && ` · Saved ${time(context.updatedAt)}`}
+          {context.updatedVia &&
+            ` · ${context.updatedVia === "ui" ? "Local UI" : "MCP"}`}
+        </p>
+      )}
+      {error && (
+        <Alert
+          color="red"
+          title={
+            conflict ? "Context changed" : "Could not save or load context"
+          }
+        >
+          {conflict
+            ? "Someone saved a newer revision. Your draft is still here. Load the latest context to replace this draft."
+            : error}
+        </Alert>
+      )}
+      {saved && <Alert color="teal">Project context saved.</Alert>}
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (!context || saving || loading || !connected || conflict) return;
+          setSaving(true);
+          setError("");
+          setSaved(false);
+          void api<ProjectContext>(
+            `/projects/${projectId}/context`,
+            {
+              ...draft,
+              expectedRevision: context.revision,
+            },
+            "PUT",
+          )
+            .then((value) => {
+              setContext(value);
+              setDraft({
+                brief: value.brief,
+                memory: value.memory,
+                handoff: value.handoff,
+              });
+              setSaved(true);
+            })
+            .catch((e: Error & { status?: number }) => {
+              setError(e.message);
+              setConflict(e.status === 409);
+            })
+            .finally(() => setSaving(false));
+        }}
+      >
+        <Stack>
+          {(
+            [
+              [
+                "brief",
+                "Project brief",
+                2000,
+                "What are we building, and what matters?",
+              ],
+              [
+                "memory",
+                "Decisions and lessons",
+                4000,
+                "What should future work remember?",
+              ],
+              ["handoff", "Next steps", 2000, "What should happen next?"],
+            ] as const
+          ).map(([field, label, maxLength, placeholder]) => (
+            <Textarea
+              key={field}
+              label={label}
+              placeholder={placeholder}
+              description={`Up to ${maxLength.toLocaleString()} characters.`}
+              maxLength={maxLength}
+              minRows={field === "memory" ? 5 : 3}
+              autosize
+              disabled={loading || saving || !context || !connected}
+              value={draft[field]}
+              onChange={(e) => {
+                setDraft({ ...draft, [field]: e.currentTarget.value });
+                setSaved(false);
+              }}
+            />
+          ))}
+          <Group>
+            <Button
+              type="submit"
+              loading={saving}
+              disabled={!connected || !context || loading || conflict}
+            >
+              Save context
+            </Button>
+            <Button
+              variant="subtle"
+              onClick={() => void loadLatest()}
+              disabled={!connected || saving || loading}
+            >
+              Load latest (replaces draft)
+            </Button>
+          </Group>
+        </Stack>
+      </form>
+    </section>
+  );
+}
+
+function RunContext({ run, connected }: { run: Run; connected: boolean }) {
+  const [snapshot, setSnapshot] = useState<ProjectContext | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  async function load() {
+    if (!connected || loaded || loading) return;
+    setLoading(true);
+    setError("");
+    try {
+      const data = await api<{
+        runId: string;
+        contextSnapshot: ProjectContext | null;
+      }>(`/runs/${run.id}/context`);
+      setSnapshot(data.contextSnapshot);
+      setLoaded(true);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }
+  if (run.contextRevision == null)
+    return (
+      <p className="hint">Project context was not included in this task.</p>
+    );
+  return (
+    <details
+      className="run-context"
+      onToggle={(e) => {
+        if (e.currentTarget.open) void load();
+      }}
+    >
+      <summary>Project context · revision {run.contextRevision}</summary>
+      <p className="hint">Saved context used when this task started.</p>
+      {loading && <p className="hint">Loading context…</p>}
+      {error && (
+        <Alert color="red">
+          {error}{" "}
+          <Button size="xs" variant="subtle" onClick={() => void load()}>
+            Try again
+          </Button>
+        </Alert>
+      )}
+      {loaded &&
+        (snapshot ? (
+          <>
+            {(
+              [
+                ["brief", "Project brief"],
+                ["memory", "Decisions and lessons"],
+                ["handoff", "Next steps"],
+              ] as const
+            ).map(([field, label]) => (
+              <div key={field}>
+                <h3>{label}</h3>
+                <pre>{snapshot[field] || "None saved."}</pre>
+              </div>
+            ))}
+          </>
+        ) : (
+          <p className="hint">No saved context was included.</p>
+        ))}
+    </details>
+  );
 }

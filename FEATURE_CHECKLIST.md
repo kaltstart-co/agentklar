@@ -20,6 +20,8 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 - [x] Restart detection
 - [x] Support dashboard
 - [x] Independent review
+- [x] Shared memory
+- [x] Project context
 
 ## In progress
 
@@ -28,8 +30,6 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 ## Next
 
 - [ ] Other harness workers
-- [ ] Shared memory
-- [ ] Project context
 - [ ] Model recommendations
 - [ ] Quality benchmarks
 - [ ] Account quotas

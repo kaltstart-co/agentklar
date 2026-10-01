@@ -27,8 +27,8 @@ createInterface({ input: process.stdin }).on("line", (line) => {
           turn: { id: turnId, status: "completed" },
         },
       });
-      if (mode === "wait") return;
-      if (mode.includes("Assigned role:")) {
+      if (mode === "wait" || mode.endsWith("\nTask:\nwait")) return;
+      if (mode.includes("<project_data_json>")) {
         send({
           method: "item/completed",
           params: {

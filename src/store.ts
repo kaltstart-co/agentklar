@@ -1,7 +1,13 @@
 import { DatabaseSync } from "node:sqlite";
 import { mkdirSync, chmodSync } from "node:fs";
 import { join } from "node:path";
-import type { Project, Run, RunEvent, Approval } from "./contracts.ts";
+import type {
+  Project,
+  ProjectContext,
+  Run,
+  RunEvent,
+  Approval,
+} from "./contracts.ts";
 export class Store {
   db: DatabaseSync;
   constructor(home: string) {
@@ -11,6 +17,9 @@ export class Store {
     chmodSync(join(home, "state.sqlite"), 0o600);
     this.db.exec(
       `PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS projects(id TEXT PRIMARY KEY,path TEXT UNIQUE NOT NULL,data TEXT NOT NULL); CREATE TABLE IF NOT EXISTS runs(id TEXT PRIMARY KEY,projectId TEXT NOT NULL,key TEXT NOT NULL,data TEXT NOT NULL,UNIQUE(projectId,key)); CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY AUTOINCREMENT,runId TEXT NOT NULL,kind TEXT NOT NULL,text TEXT NOT NULL,createdAt TEXT NOT NULL,textTruncated INTEGER NOT NULL DEFAULT 0); CREATE TABLE IF NOT EXISTS approvals(id TEXT PRIMARY KEY,runId TEXT NOT NULL,data TEXT NOT NULL);`,
+    );
+    this.db.exec(
+      "CREATE TABLE IF NOT EXISTS project_context(projectId TEXT PRIMARY KEY,revision INTEGER NOT NULL,data TEXT NOT NULL)",
     );
     if (
       !this.db
@@ -43,6 +52,42 @@ export class Store {
         "INSERT INTO projects VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data",
       )
       .run(p.id, p.path, JSON.stringify(p));
+  }
+  context(projectId: string): ProjectContext {
+    const row = this.db
+      .prepare("SELECT data FROM project_context WHERE projectId=?")
+      .get(projectId);
+    return row
+      ? JSON.parse(row.data as string)
+      : {
+          projectId,
+          revision: 0,
+          brief: "",
+          memory: "",
+          handoff: "",
+          updatedAt: null,
+          updatedVia: null,
+        };
+  }
+  saveContext(context: ProjectContext, expectedRevision: number): boolean {
+    // One SQLite statement checks the revision and saves, including the first write.
+    return (
+      this.db
+        .prepare(
+          `INSERT INTO project_context(projectId,revision,data)
+      SELECT ?,?,? WHERE ?=0 OR EXISTS(SELECT 1 FROM project_context WHERE projectId=?)
+      ON CONFLICT(projectId) DO UPDATE SET revision=excluded.revision,data=excluded.data
+      WHERE project_context.revision=?`,
+        )
+        .run(
+          context.projectId,
+          context.revision,
+          JSON.stringify(context),
+          expectedRevision,
+          context.projectId,
+          expectedRevision,
+        ).changes === 1
+    );
   }
   runs(): Run[] {
     return this.db

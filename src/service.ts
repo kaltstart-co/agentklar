@@ -33,14 +33,28 @@ const role = z
   })
   .strict();
 function compactRun(r: Run): Run {
+  const { contextSnapshot, ...metadata } = r;
   return {
-    ...r,
+    ...metadata,
+    contextRevision: contextSnapshot?.revision ?? null,
     prompt: r.prompt.slice(0, 300),
     promptTruncated: r.prompt.length > 300,
     result: r.result.slice(0, 1000),
     resultTruncated: !!r.resultTruncated || r.result.length > 1000,
   };
 }
+export const contextUpdateSchema = z
+  .object({
+    brief: z.string().max(2000),
+    memory: z.string().max(4000),
+    handoff: z.string().max(2000),
+    expectedRevision: z
+      .number()
+      .int()
+      .nonnegative()
+      .max(Number.MAX_SAFE_INTEGER - 1),
+  })
+  .strict();
 export const startSchema = z
   .object({
     projectId: z.uuid(),
@@ -50,6 +64,7 @@ export const startSchema = z
     harness: z.enum(["codex", "claude"]).optional(),
     model: z.string().min(1).max(120).optional(),
     readOnly: z.boolean().default(false),
+    includeProjectContext: z.boolean().default(true),
   })
   .strict();
 export function processGroupAlive(pid: number) {
@@ -172,6 +187,45 @@ export function createService(
     return c.redirect("/");
   });
   app.get("/api/projects", (c) => c.json(store.projects()));
+  app.get("/api/projects/:id/context", (c) => {
+    const id = c.req.param("id");
+    return store.projects().some((p) => p.id === id)
+      ? c.json(store.context(id))
+      : c.json({ error: "Project not found" }, 404);
+  });
+  app.put("/api/projects/:id/context", async (c) => {
+    const id = c.req.param("id");
+    if (!store.projects().some((p) => p.id === id))
+      return c.json({ error: "Project not found" }, 404);
+    const parsed = contextUpdateSchema.safeParse(
+      await c.req.json().catch(() => null),
+    );
+    if (!parsed.success)
+      return c.json(
+        { error: parsed.error.issues[0]?.message || "Invalid project context" },
+        400,
+      );
+    const { expectedRevision, ...text } = parsed.data;
+    const context = {
+      projectId: id,
+      revision: expectedRevision + 1,
+      ...text,
+      updatedAt: new Date().toISOString(),
+      updatedVia:
+        c.req.header("authorization") === `Bearer ${bearer}`
+          ? ("mcp" as const)
+          : ("ui" as const),
+    };
+    return store.saveContext(context, expectedRevision)
+      ? c.json(context)
+      : c.json(
+          {
+            error:
+              "Project context changed. Read the latest context and review your edits before saving again.",
+          },
+          409,
+        );
+  });
   app.get("/api/harnesses", (c) => c.json(harnesses()));
   app.get("/api/snapshot", (c) =>
     c.json({
@@ -255,8 +309,14 @@ export function createService(
     const data = parsed.data;
     const p = store.projects().find((p) => p.id === data.projectId);
     if (!p) return c.json({ error: "Project not found" }, 404);
+    const { includeProjectContext, ...originalInputs } = data;
     const launchHash = createHash("sha256")
-      .update(JSON.stringify(data))
+      .update(
+        JSON.stringify({
+          ...originalInputs,
+          ...(includeProjectContext ? {} : { includeProjectContext: false }),
+        }),
+      )
       .digest("hex");
     const prior = store.existing(p.id, data.idempotencyKey);
     if (prior) {
@@ -304,6 +364,9 @@ export function createService(
         409,
       );
     const now = new Date().toISOString();
+    const context = data.includeProjectContext
+      ? store.context(p.id)
+      : undefined;
     const r: Run = {
       id: randomUUID(),
       harness: harness as "codex" | "claude",
@@ -312,6 +375,9 @@ export function createService(
       prompt: data.prompt,
       model: data.model || selected?.model,
       roleSnapshot: selected,
+      ...(context && (context.brief || context.memory || context.handoff)
+        ? { contextSnapshot: context }
+        : {}),
       readOnly: data.readOnly,
       state: "running",
       result: "",
@@ -371,6 +437,12 @@ export function createService(
     const r = store.run(c.req.param("id"));
     return r ? c.json(compactRun(r)) : c.json({ error: "Run not found" }, 404);
   });
+  app.get("/api/runs/:id/context", (c) => {
+    const r = store.run(c.req.param("id"));
+    return r
+      ? c.json({ runId: r.id, contextSnapshot: r.contextSnapshot ?? null })
+      : c.json({ error: "Run not found" }, 404);
+  });
   app.get("/api/runs/:id/tail", (c) => {
     if (!store.run(c.req.param("id")))
       return c.json({ error: "Run not found" }, 404);
@@ -402,6 +474,7 @@ export function createService(
           turnId: r.turnId,
           effectiveModel: r.effectiveModel,
           harness: r.harness || "codex",
+          contextRevision: r.contextSnapshot?.revision ?? null,
         })
       : c.json({ error: "Run not found" }, 404);
   });
@@ -417,7 +490,7 @@ export function createService(
       });
       store.clearApprovals(r.id);
     }
-    return c.json(store.run(r.id)!);
+    return c.json(compactRun(store.run(r.id)!));
   });
   app.post("/api/approvals/:id", async (c) => {
     const a = store.approvals().find((a) => a.id === c.req.param("id"));

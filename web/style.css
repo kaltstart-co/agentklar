@@ -579,3 +579,23 @@ code {
     width: 100%;
   }
 }
+.context-panel {
+  max-width: 760px;
+}
+.run-context {
+  margin-top: 20px;
+  font-size: 12px;
+  color: #596376;
+}
+.run-context summary {
+  cursor: pointer;
+  padding: 10px 0;
+}
+@media (max-width: 650px) {
+  nav {
+    flex-wrap: wrap;
+  }
+  .nav {
+    min-width: 58px;
+  }
+}

@@ -1,6 +1,6 @@
 # AgentKlar
 
-Keep your native coding harness. AgentKlar gives registered projects a shared local work record, team roles, and durable worker runs. Start from Codex, Claude Code, Gemini CLI, Cursor, or OpenCode and connect its MCP client to AgentKlar. Codex and Claude Code have worker adapters. Other installed CLIs are discovered as hosts; their worker adapters are planned.
+Keep your native coding harness. AgentKlar gives registered projects a shared local work record, saved project context, team roles, and durable worker runs. Start from Codex, Claude Code, Gemini CLI, Cursor, or OpenCode and connect its MCP client to AgentKlar. Codex and Claude Code have worker adapters. Other installed CLIs are discovered as hosts; their worker adapters are planned.
 
 This is a fresh TypeScript rewrite. The old Go application is preserved in Git at `archive/pre-rewrite-2026-10-01`. Old databases and configuration are never imported. A run marked **completed** means the worker finished. Review the changes in your normal editor and harness.
 
@@ -20,6 +20,12 @@ Register an existing project folder. Add roles with a harness, optional model, a
 
 Project cost preference is saved as economical, balanced, or best. This first version uses your explicit model pin or native default. It does not infer the best model from benchmarks. Role responsibility is sent with the task, and the role snapshot, worker harness, and actual native model stay in its history. Choose an installed worker harness in the local UI. A selected role chooses its harness. Changing the harness clears the model pin so a model name from another harness is not carried over.
 
+## Shared project context
+
+Open **Context** to save a project brief, decisions and lessons, and next steps. This is a shared local record that your native harnesses can read and update through MCP. Memory is saved explicitly; AgentKlar does not collect it automatically from chats or project files. The fields allow 2,000, 4,000, and 2,000 characters respectively.
+
+Each save creates a revision. If another harness saves first, the UI keeps your draft and shows a conflict. **Load latest (replaces draft)** loads that newer revision. New tasks use saved project context by default; turn off **Use project context** to skip it. Each task retains the exact context used at launch. Open its **Project context** disclosure to inspect that snapshot. Unsaved edits apply after you save them.
+
 ## Connect MCP
 
 Use your harness's normal MCP setup. Replace the folder below with the checkout path:
@@ -29,7 +35,13 @@ Use your harness's normal MCP setup. Replace the folder below with the checkout 
   "mcpServers": {
     "agentklar": {
       "command": "npm",
-      "args": ["--prefix", "/absolute/path/to/Agentklar", "run", "--silent", "mcp"]
+      "args": [
+        "--prefix",
+        "/absolute/path/to/Agentklar",
+        "run",
+        "--silent",
+        "mcp"
+      ]
     }
   }
 }

@@ -14,6 +14,15 @@ export type Project = {
   roles: Role[];
   createdAt: string;
 };
+export type ProjectContext = {
+  projectId: string;
+  revision: number;
+  brief: string;
+  memory: string;
+  handoff: string;
+  updatedAt: string | null;
+  updatedVia: "ui" | "mcp" | null;
+};
 export type RunState =
   | "running"
   | "needs_attention"
@@ -30,6 +39,8 @@ export type Run = {
   model?: string;
   effectiveModel?: string;
   roleSnapshot?: Role;
+  contextSnapshot?: ProjectContext;
+  contextRevision?: number | null;
   readOnly: boolean;
   state: RunState;
   result: string;

@@ -5,7 +5,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { z } from "zod";
-import { startSchema } from "./service.ts";
+import { startSchema, contextUpdateSchema } from "./service.ts";
 export function bounded(result: unknown) {
   const text = JSON.stringify(result);
   return text.length <= 24000
@@ -100,16 +100,40 @@ export function createMcp(base: string, token: string) {
       call(`/api/projects/${projectId}`, "PATCH", body),
   );
   server.registerTool(
+    "project_context_read",
+    {
+      description:
+        "Read the latest manually saved brief, memory and handoff for a registered project. Revision 0 means no context has been saved.",
+      inputSchema: z.object({ projectId: z.uuid() }).strict(),
+    },
+    ({ projectId }) => call(`/api/projects/${projectId}/context`),
+  );
+  server.registerTool(
+    "project_context_update",
+    {
+      description:
+        "Save all three project context fields using the revision you read. A stale revision returns a conflict: reread and review the latest context before retrying; do not overwrite another writer's edits blindly. This does not modify native config or approve actions.",
+      inputSchema: contextUpdateSchema.extend({ projectId: z.uuid() }).strict(),
+    },
+    ({ projectId, ...body }) =>
+      call(`/api/projects/${projectId}/context`, "PUT", body),
+  );
+  server.registerTool(
     "task_start",
     {
       description:
-        "Start one durable native Codex or Claude Code worker for a registered project. Returns promptly. Completion means worker finished; review is separate. Keep the returned run ID.",
+        "Start one durable native Codex or Claude Code worker for a registered project. Includes a saved project context snapshot by default; includeProjectContext:false opts out. Returns promptly. Completion means worker finished; review is separate. Keep the returned run ID.",
       inputSchema: startSchema,
     },
     (args) => call("/api/tasks/start", "POST", args),
   );
   for (const [name, suffix, description] of [
     ["run_status", "", "Read worker state and native IDs."],
+    [
+      "run_context_read",
+      "/context",
+      "Inspect the immutable saved project context captured when this run started, or null if absent or disabled.",
+    ],
     [
       "run_result",
       "/result",
