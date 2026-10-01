@@ -26,7 +26,7 @@ import { ClaudeWorker } from "./claude.ts";
 import { MuseWorker } from "./muse.ts";
 import { CatalogCache, readCatalog, type CatalogReader } from "./catalog.ts";
 import { BenchmarkCache } from "./benchmarks.ts";
-import type { Run, Project, ProjectRun, RoutingDecision, FollowUpContext } from "./contracts.ts";
+import type { Run, Project, ProjectRun, ProjectLead, RoutingDecision, FollowUpContext } from "./contracts.ts";
 import { sourceFromHeader } from "./launch-source.ts";
 import { recommendationSchema, recommendWorker } from "./recommend.ts";
 import { Instructions, InstructionError, instructionFileSchema, instructionPreviewSchema } from "./instructions.ts";
@@ -103,6 +103,15 @@ export const startSchema = z
     workspace: z.enum(["project", "worktree"]).optional(),
   })
   .strict();
+const leadActionSchema = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("claim") }).strict(),
+  z.object({ action: z.literal("takeover"), observedClaimId: z.uuid() }).strict(),
+  z.object({ action: z.literal("release"), observedClaimId: z.uuid() }).strict(),
+]);
+const leadRenewSchema = z.object({
+  claims: z.array(z.object({ projectId: z.uuid(), claimId: z.uuid() }).strict()).min(1).max(16)
+    .refine((claims) => new Set(claims.map((item) => item.projectId)).size === claims.length),
+}).strict();
 export function processGroupAlive(pid: number) {
   try {
     process.kill(process.platform === "win32" ? pid : -pid, 0);
@@ -151,6 +160,7 @@ export function createService(
   skillOptions: { timeoutMs?: number; sourceOverride?: (source: string) => string } = {},
   benchmarkOptions: { fetcher?: typeof fetch; timeoutMs?: number } = {},
   museCommand: string | null = executable("muse"),
+  leadOptions: { now?: () => number; wallNow?: () => number; leaseMs?: number } = {},
 ) {
   const release = ownHome(home);
   let store: Store;
@@ -213,6 +223,23 @@ export function createService(
     return overlaps(aPath, bPath);
   };
   const answers = new Map<string, (decision: string) => void>();
+  const leads = new Map<string, ProjectLead & { bridgeId: string; deadline: number }>();
+  const leadNow = leadOptions.now || (() => performance.now());
+  const leadWallNow = leadOptions.wallNow || Date.now;
+  const leadLeaseMs = leadOptions.leaseMs ?? 90_000;
+  const publicLead = (lead: ProjectLead & { bridgeId: string; deadline: number }): ProjectLead => {
+    const { bridgeId: _bridgeId, deadline: _deadline, ...publicFields } = lead;
+    return publicFields;
+  };
+  const currentLead = (projectId: string) => {
+    const lead = leads.get(projectId);
+    if (lead && lead.deadline <= leadNow()) { leads.delete(projectId); return undefined; }
+    return lead;
+  };
+  const leadReply = (projectId: string) => {
+    const lead = currentLead(projectId);
+    return { projectId, lead: lead ? publicLead(lead) : null };
+  };
   const secretPath = join(home, "mcp-token");
   if (!existsSync(secretPath))
     writeFileSync(secretPath, randomBytes(32).toString("hex"), { mode: 0o600 });
@@ -366,6 +393,92 @@ export function createService(
     }
     const hasMore = runs.length < rows.length;
     return c.json({ projectId, runs, nextCursor: hasMore ? nextCursor : null, hasMore });
+  });
+  app.get("/api/projects/:id/lead", (c) => {
+    c.header("Cache-Control", "no-store");
+    const projectId = c.req.param("id");
+    if (!z.uuid().safeParse(projectId).success) return c.json({ error: "Invalid project ID" }, 400);
+    if (!store.projects().some((p) => p.id === projectId)) return c.json({ error: "Project not found" }, 404);
+    if (new URL(c.req.url).search) return c.json({ error: "Lead queries are not supported" }, 400);
+    return c.json(leadReply(projectId));
+  });
+  app.post("/api/projects/:id/lead", async (c) => {
+    c.header("Cache-Control", "no-store");
+    if (stopping) return c.json({ error: "Local service is stopping" }, 503);
+    if (!matches(c.req.header("authorization"), `Bearer ${bearer}`)) return c.json({ error: "MCP bridge required" }, 403);
+    const bridgeId = c.req.header("x-agentklar-bridge-id");
+    if (!bridgeId || !/^[a-f0-9]{64}$/.test(bridgeId)) return c.json({ error: "MCP bridge identity required" }, 400);
+    const projectId = c.req.param("id");
+    if (!z.uuid().safeParse(projectId).success) return c.json({ error: "Invalid project ID" }, 400);
+    if (!store.projects().some((p) => p.id === projectId)) return c.json({ error: "Project not found" }, 404);
+    const parsed = leadActionSchema.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: "Invalid lead action" }, 400);
+    if (stopping) return c.json({ error: "Local service is stopping" }, 503);
+    const current = currentLead(projectId);
+    const { action } = parsed.data;
+    if (action === "release") {
+      if (!current || current.bridgeId !== bridgeId || current.claimId !== parsed.data.observedClaimId)
+        return c.json({ error: "Lead claim changed", ...leadReply(projectId) }, 409);
+      leads.delete(projectId);
+      return c.json(leadReply(projectId));
+    }
+    if (action === "claim" && current && current.bridgeId !== bridgeId)
+      return c.json({ error: "Project lead already connected", ...leadReply(projectId) }, 409);
+    if (action === "takeover" && (!current || current.claimId !== parsed.data.observedClaimId))
+      return c.json({ error: "Lead claim changed", ...leadReply(projectId) }, 409);
+    if ((!current || current.bridgeId !== bridgeId) &&
+        [...leads.keys()].filter((id) => currentLead(id)?.bridgeId === bridgeId).length >= 16)
+      return c.json({ error: "One MCP bridge can lead at most 16 projects" }, 409);
+    const clock = leadNow();
+    const wall = leadWallNow();
+    const seen = new Date(wall).toISOString();
+    const source = sourceFromHeader(c.req.header("x-agentklar-mcp-client"));
+    const lead = action === "claim" && current
+      ? { ...current, lastSeenAt: seen, expiresAt: new Date(wall + leadLeaseMs).toISOString(), deadline: clock + leadLeaseMs }
+      : { claimId: randomUUID(), projectId, clientName: source?.kind === "mcp" ? source.clientName : null,
+          ...(source?.kind === "mcp" && source.clientVersion ? { clientVersion: source.clientVersion } : {}),
+          claimedAt: seen, lastSeenAt: seen, expiresAt: new Date(wall + leadLeaseMs).toISOString(),
+          bridgeId, deadline: clock + leadLeaseMs };
+    leads.set(projectId, lead);
+    return c.json(leadReply(projectId));
+  });
+  app.delete("/api/projects/:id/lead", async (c) => {
+    c.header("Cache-Control", "no-store");
+    if (stopping) return c.json({ error: "Local service is stopping" }, 503);
+    if (!matches(getCookie(c, `agentklar_session_${port}`), session) ||
+        matches(c.req.header("authorization"), `Bearer ${bearer}`))
+      return c.json({ error: "Local UI required" }, 403);
+    const projectId = c.req.param("id");
+    if (!z.uuid().safeParse(projectId).success) return c.json({ error: "Invalid project ID" }, 400);
+    if (!store.projects().some((p) => p.id === projectId)) return c.json({ error: "Project not found" }, 404);
+    const parsed = z.object({ observedClaimId: z.uuid() }).strict().safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: "Provide the observed lead claim ID" }, 400);
+    if (stopping) return c.json({ error: "Local service is stopping" }, 503);
+    if (currentLead(projectId)?.claimId !== parsed.data.observedClaimId)
+      return c.json({ error: "Lead claim changed", ...leadReply(projectId) }, 409);
+    leads.delete(projectId);
+    return c.json(leadReply(projectId));
+  });
+  app.post("/api/leads/renew", async (c) => {
+    c.header("Cache-Control", "no-store");
+    if (stopping) return c.json({ error: "Local service is stopping" }, 503);
+    if (!matches(c.req.header("authorization"), `Bearer ${bearer}`)) return c.json({ error: "MCP bridge required" }, 403);
+    const bridgeId = c.req.header("x-agentklar-bridge-id");
+    if (!bridgeId || !/^[a-f0-9]{64}$/.test(bridgeId)) return c.json({ error: "MCP bridge identity required" }, 400);
+    const parsed = leadRenewSchema.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: "Provide 1–16 distinct lead claims" }, 400);
+    if (stopping) return c.json({ error: "Local service is stopping" }, 503);
+    const renewed: { projectId: string; claimId: string }[] = [];
+    for (const item of parsed.data.claims) {
+      const current = currentLead(item.projectId);
+      if (!current || current.bridgeId !== bridgeId || current.claimId !== item.claimId) continue;
+      const clock = leadNow();
+      const wall = leadWallNow();
+      leads.set(item.projectId, { ...current, lastSeenAt: new Date(wall).toISOString(),
+        expiresAt: new Date(wall + leadLeaseMs).toISOString(), deadline: clock + leadLeaseMs });
+      renewed.push(item);
+    }
+    return c.json({ renewed });
   });
   app.get("/api/projects/:id/setup/:harness", async (c) => {
     const project = store.projects().find((p) => p.id === c.req.param("id"));
@@ -541,14 +654,19 @@ export function createService(
         );
   });
   app.get("/api/harnesses", (c) => c.json(harnesses()));
-  app.get("/api/snapshot", (c) =>
-    c.json({
+  app.get("/api/snapshot", (c) => {
+    c.header("Cache-Control", "no-store");
+    return c.json({
       projects: store.projects(),
       runs: store.runs().map(compactRun),
       approvals: store.approvals(),
       harnesses: harnesses(),
-    }),
-  );
+      leads: Object.fromEntries(store.projects().flatMap((p) => {
+        const lead = currentLead(p.id);
+        return lead ? [[p.id, publicLead(lead)]] : [];
+      })),
+    });
+  });
   app.post("/api/projects", async (c) => {
     const parsed = z
       .object({
@@ -999,6 +1117,7 @@ export function createService(
     close: () => {
       stopping = true;
       quiesced = true;
+      leads.clear();
       return closing ??= (async () => {
         await skills.close();
         await nativeSetup.close();

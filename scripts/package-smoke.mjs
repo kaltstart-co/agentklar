@@ -92,6 +92,16 @@ try {
   const runs = await client.callTool({ name: "project_runs_list", arguments: { projectId: project.id } });
   assert.equal(runs.isError, false);
   assert.deepEqual(JSON.parse(runs.content[0].text), { projectId: project.id, runs: [], nextCursor: null, hasMore: false });
+  const leadStatus = await client.callTool({ name: "project_lead", arguments: { projectId: project.id, action: "status" } });
+  assert.equal(leadStatus.isError, false);
+  assert.equal(JSON.parse(leadStatus.content[0].text).lead, null);
+  const leadClaim = await client.callTool({ name: "project_lead", arguments: { projectId: project.id, action: "claim" } });
+  assert.equal(leadClaim.isError, false);
+  const claimed = JSON.parse(leadClaim.content[0].text).lead;
+  assert.equal(claimed.clientName, "package-smoke");
+  const leadRelease = await client.callTool({ name: "project_lead", arguments: { projectId: project.id, action: "release", observedClaimId: claimed.claimId } });
+  assert.equal(leadRelease.isError, false);
+  assert.equal(JSON.parse(leadRelease.content[0].text).lead, null);
   console.log(`Package smoke passed: ${version}, built UI, installed MCP bridge, ${tools.tools.length} tools.`);
 } finally {
   if (client) await client.close().catch(() => {});

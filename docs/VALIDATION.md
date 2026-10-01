@@ -2,6 +2,14 @@
 
 Verified on 2026-10-01 and 2026-10-02 using Node 24.21.0. The old application was not used.
 
+## Advisory project lead — beta.12
+
+Service and MCP tests cover explicit claim, same-bridge repeat, another bridge's conflict, observed-ID takeover, exact-owner release, stale renew and UI clear, unknown or changed client reports, deterministic expiry, and restart without an automatic reclaim. A delayed claim response after MCP close is released; concurrent lead actions for one project are ordered. The official stdio client test closes a claimed bridge and confirms its separate worker stays active. No lead claim is made by project reads or task starts. These tests use local protocol fixtures and no model inference.
+
+Independent local QA used separate official MCP clients and the native protocol fixture. It verified graceful EOF release while a worker survived, takeover after an observed claim, a stale bridge heartbeat that could not restore its claim, real expiry about 90 seconds after an abrupt bridge kill, and no reclaim after a service restart. Another harness could still stop a worker while a different lead was shown. The local Work UI displayed the reported client, cleared the claim with the observed ID, and did not show it again after the next heartbeat. At 320 pixels it had no horizontal overflow and the browser console had no errors. Evidence: `/tmp/agentklar-lead-qa/evidence.json`, `lead-mobile.png`, and `cleared.png`. These checks made zero provider calls and changed no native configuration. The lead marks a connected coordinator; it does not prove a model is working or transfer control.
+
+TypeScript checking, all 121 tests, the production build, and diff whitespace checks passed. The beta.12 package smoke installed production dependencies in a clean temporary prefix, verified the built UI and 19 MCP tools, then called lead status, claim, and release through the installed bridge. No worker or model ran during that package check.
+
 ## Cross-harness run discovery — beta.11
 
 Offline service and MCP SDK tests cover authenticated project-only run pages, bad IDs and cursors, and 50 large run records with JSON-escaped control text. Every page stays within the MCP character budget and omits results, private paths and process data. Inserting a new run or updating a saved state between pages does not move older entries. Tests also cover UI start attribution, rejected model-supplied source fields, ignored UI header spoofing, idempotent retries, modern per-request client metadata, legacy initialized client info, invalid names, Unicode transport, and discovery after a new stdio connection. These fixtures make no model call.

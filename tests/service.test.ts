@@ -228,6 +228,83 @@ test("project run pages stay small and stable while new runs and state updates a
   }
 });
 
+test("advisory lead claims require exact ownership and expire without affecting tasks", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "agentklar-lead-"));
+  const home = join(dir, "home"), project = join(dir, "project");
+  mkdirSync(project);
+  let tick = 1000, wall = Date.UTC(2026, 9, 2);
+  const make = () => createService(home, 4317,
+    (cmd, r, p, cb) => new NativeWorker(cmd, r, p, cb, [fixture]), process.execPath,
+    null, undefined, undefined, undefined, undefined, undefined, null,
+    { now: () => tick, wallNow: () => wall, leaseMs: 100 });
+  let s = make();
+  const bridge = (id: string, name: string) => ({ Authorization: `Bearer ${s.bearer}`,
+    "Content-Type": "application/json", "x-agentklar-bridge-id": id.repeat(64),
+    ...clientSourceHeader({ kind: "mcp", clientName: name, clientVersion: "1" }) });
+  const call = (path: string, method = "GET", body?: unknown, headers?: Record<string, string>) =>
+    s.app.request(`http://127.0.0.1:4317${path}`, { method,
+      headers: headers || { Authorization: `Bearer ${s.bearer}`, "Content-Type": "application/json" },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+  try {
+    const p = await (await call("/api/projects", "POST", { name: "lead", path: project })).json();
+    const route = `/api/projects/${p.id}/lead`;
+    assert.equal((await call(route, "GET", undefined, {})).status, 401);
+    assert.equal((await call("/api/projects/bad/lead")).status, 400);
+    assert.equal((await call(`/api/projects/${randomUUID()}/lead`)).status, 404);
+    assert.equal((await call(`${route}?anything=1`)).status, 400);
+    assert.deepEqual((await (await call(route)).json()).lead, null);
+    assert.deepEqual((await (await call("/api/snapshot")).json()).leads, {});
+    assert.equal((await call(route, "POST", { action: "claim" }, { Authorization: `Bearer ${s.bearer}` })).status, 400);
+    assert.equal((await call(route, "POST", { action: "claim", bridgeId: "model" }, bridge("a", "A"))).status, 400);
+    const a = (await (await call(route, "POST", { action: "claim" }, bridge("a", "A"))).json()).lead;
+    assert.equal(a.clientName, "A");
+    assert.equal(a.clientVersion, "1");
+    assert.equal(a.claimedAt, new Date(wall).toISOString());
+    assert.doesNotMatch(JSON.stringify(a), /bridgeId|aaaaaaaa/);
+    assert.equal((await (await call(route, "POST", { action: "claim" }, bridge("a", "renamed"))).json()).lead.claimId, a.claimId);
+    assert.equal((await (await call(route)).json()).lead.clientName, "A");
+    const conflict = await call(route, "POST", { action: "claim" }, bridge("b", "B"));
+    assert.equal(conflict.status, 409);
+    assert.doesNotMatch(await conflict.text(), /bridgeId|aaaaaaaa/);
+    assert.equal((await call(route, "POST", { action: "takeover", observedClaimId: randomUUID() }, bridge("b", "B"))).status, 409);
+    const b = (await (await call(route, "POST", { action: "takeover", observedClaimId: a.claimId }, bridge("b", "B"))).json()).lead;
+    assert.notEqual(b.claimId, a.claimId);
+    assert.equal(b.clientName, "B");
+    assert.deepEqual((await (await call("/api/leads/renew", "POST", { claims: [{ projectId: p.id, claimId: a.claimId }] }, bridge("a", "A"))).json()).renewed, []);
+    assert.equal((await call(route, "POST", { action: "release", observedClaimId: a.claimId }, bridge("a", "A"))).status, 409);
+    const setup = await s.app.request(s.setupUrl);
+    const ui = { Cookie: setup.headers.get("set-cookie")!.split(";")[0], Origin: "http://127.0.0.1:4317", "Content-Type": "application/json" };
+    assert.equal((await call(route, "DELETE", { observedClaimId: a.claimId }, ui)).status, 409);
+    assert.equal((await call(route, "DELETE", { observedClaimId: b.claimId }, bridge("b", "B"))).status, 403);
+    assert.equal((await call(route, "DELETE", { observedClaimId: b.claimId }, ui)).status, 200);
+    assert.equal((await (await call(route)).json()).lead, null);
+    assert.deepEqual((await (await call("/api/leads/renew", "POST", { claims: [{ projectId: p.id, claimId: b.claimId }] }, bridge("b", "B"))).json()).renewed, []);
+    const again = (await (await call(route, "POST", { action: "claim" }, bridge("a", "A"))).json()).lead;
+    tick += 101; wall += 101;
+    assert.equal((await (await call(route)).json()).lead, null);
+    assert.equal((await call(route, "POST", { action: "takeover", observedClaimId: again.claimId }, bridge("b", "B"))).status, 409);
+    assert.deepEqual((await (await call("/api/leads/renew", "POST", { claims: [{ projectId: p.id, claimId: again.claimId }] }, bridge("a", "A"))).json()).renewed, []);
+    const fresh = (await (await call(route, "POST", { action: "claim" }, bridge("b", "B"))).json()).lead;
+    tick += 20; wall += 20;
+    const renewed = await (await call("/api/leads/renew", "POST", { claims: [{ projectId: p.id, claimId: fresh.claimId }] }, bridge("b", "different"))).json();
+    assert.deepEqual(renewed.renewed, [{ projectId: p.id, claimId: fresh.claimId }]);
+    assert.equal((await (await call(route)).json()).lead.clientName, "B");
+    assert.equal((await call("/api/leads/renew", "POST", { claims: Array.from({ length: 17 }, () => ({ projectId: p.id, claimId: fresh.claimId })) }, bridge("b", "B"))).status, 400);
+    await s.close();
+    s = make();
+    assert.equal((await (await call(route)).json()).lead, null);
+    assert.deepEqual((await (await call("/api/leads/renew", "POST", { claims: [{ projectId: p.id, claimId: fresh.claimId }] }, bridge("b", "B"))).json()).renewed, []);
+    const unknownBridge = { Authorization: `Bearer ${s.bearer}`, "Content-Type": "application/json", "x-agentklar-bridge-id": "c".repeat(64) };
+    const unknownLead = (await (await call(route, "POST", { action: "claim" }, unknownBridge)).json()).lead;
+    assert.equal(unknownLead.clientName, null);
+    assert.equal(unknownLead.clientVersion, undefined);
+    assert.equal((await call(route, "POST", { action: "release", observedClaimId: unknownLead.claimId }, unknownBridge)).status, 200);
+  } finally {
+    await s.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("Muse account snapshot survives storage and appears only as whitelisted run data", async () => {
   const t = setup();
   try {

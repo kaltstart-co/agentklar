@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Client } from "@modelcontextprotocol/client";
+import { InMemoryTransport } from "@modelcontextprotocol/server";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import { serve } from "@hono/node-server";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
@@ -9,6 +10,7 @@ import { join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { createService } from "../src/service.ts";
 import { NativeWorker } from "../src/native.ts";
+import { createMcp } from "../src/mcp.ts";
 test("SDK stdio wire lists and calls tools; closing MCP leaves service worker alive", async () => {
   const dir = mkdtempSync(join(tmpdir(), "agentklar-mcp-"));
   const project = join(dir, "project");
@@ -63,7 +65,7 @@ test("SDK stdio wire lists and calls tools; closing MCP leaves service worker al
     assert.equal(service.store.runs().length, 0);
     assert.equal(catalogReads, 0);
     const list = await client.listTools();
-    assert.equal(list.tools.length, 18);
+    assert.equal(list.tools.length, 19);
     assert.equal(
       list.tools.some((t) => /approve/.test(t.name)),
       false,
@@ -223,6 +225,85 @@ test("request-scoped MCP client info wins over legacy info and unsafe names stay
   assert.equal(sourceFromHeader("not%%%base64"), undefined);
 });
 
+test("concurrent lead calls are ordered and a delayed claim is released after MCP close", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "agentklar-lead-race-"));
+  const project = join(dir, "project");
+  mkdirSync(project);
+  const port = 24000 + Math.floor(Math.random() * 10000);
+  const service = createService(join(dir, "home"), port,
+    (cmd, run, path, callbacks) => new NativeWorker(cmd, run, path, callbacks, [resolve("tests/fixtures/native.mjs")]),
+    process.execPath);
+  const registered = await service.app.request(`http://127.0.0.1:${port}/api/projects`, {
+    method: "POST", headers: { Authorization: `Bearer ${service.bearer}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ name: "race", path: project }),
+  });
+  const p = await registered.json();
+  let releaseGate: (() => void) | undefined;
+  let gate: Promise<void> | undefined;
+  let claimRequests = 0;
+  const pauseOneClaim = () => { gate = new Promise<void>((resolve) => { releaseGate = resolve; }); };
+  const http = serve({ hostname: "127.0.0.1", port, fetch: async (request) => {
+    if (new URL(request.url).pathname === `/api/projects/${p.id}/lead` && request.method === "POST" &&
+        (await request.clone().json()).action === "claim") {
+      claimRequests++;
+      if (gate) {
+        const waiting = gate;
+        gate = undefined;
+        const response = await service.app.fetch(request);
+        await waiting;
+        return response;
+      }
+    }
+    return service.app.fetch(request);
+  } });
+  const server = createMcp(`http://127.0.0.1:${port}`, service.bearer);
+  const client = new Client({ name: "race-host", version: "1" });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  try {
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+    const call = () => client.callTool({ name: "project_lead", arguments: { projectId: p.id, action: "claim" } });
+    const waitFor = async (check: () => boolean) => {
+      for (let i = 0; i < 100 && !check(); i++) await new Promise((resolve) => setTimeout(resolve, 5));
+      assert.ok(check(), "timed out waiting for held claim");
+    };
+    pauseOneClaim();
+    const first = call();
+    await waitFor(() => claimRequests === 1);
+    const second = call();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(claimRequests, 1, "second action waits for the first response");
+    releaseGate!();
+    const [a, b] = await Promise.all([first, second]);
+    const firstId = JSON.parse((a.content as { text: string }[])[0].text).lead.claimId;
+    assert.equal(JSON.parse((b.content as { text: string }[])[0].text).lead.claimId, firstId);
+    const released = await client.callTool({ name: "project_lead", arguments: { projectId: p.id, action: "release", observedClaimId: firstId } });
+    assert.equal(JSON.parse((released.content as { text: string }[])[0].text).lead, null);
+    pauseOneClaim();
+    const delayed = call().catch(() => null);
+    await waitFor(() => claimRequests === 3);
+    await client.close();
+    releaseGate!();
+    await delayed;
+    for (let i = 0; i < 100; i++) {
+      const status = await service.app.request(`http://127.0.0.1:${port}/api/projects/${p.id}/lead`,
+        { headers: { Authorization: `Bearer ${service.bearer}` } });
+      if (!(await status.json()).lead) break;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    const status = await service.app.request(`http://127.0.0.1:${port}/api/projects/${p.id}/lead`,
+      { headers: { Authorization: `Bearer ${service.bearer}` } });
+    assert.equal((await status.json()).lead, null);
+  } finally {
+    releaseGate?.();
+    await client.close().catch(() => {});
+    await server.close().catch(() => {});
+    await service.close();
+    await new Promise<void>((resolve) => http.close(() => resolve()));
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("independent MCP stdio clients share saved context with stale writer protection and compact run reads", async () => {
   const dir = mkdtempSync(join(tmpdir(), "agentklar-shared-mcp-"));
   const home = join(dir, "home");
@@ -339,6 +420,9 @@ test("independent MCP stdio clients share saved context with stale writer protec
     };
     const started = (await call(clients[0], "task_start", startArgs)).data;
     assert.deepEqual(started.launchSource, { kind: "mcp", clientName: "codex-host", clientVersion: "1" });
+    assert.equal((await call(clients[1], "project_lead", { projectId: p.id, action: "status" })).data.lead, null);
+    const claimed = (await call(clients[0], "project_lead", { projectId: p.id, action: "claim" })).data.lead;
+    assert.equal(claimed.clientName, "codex-host");
     const discovered = (await call(clients[1], "project_runs_list", readArgs)).data;
     assert.equal(discovered.projectId, p.id);
     assert.equal(discovered.runs[0].id, started.id);
@@ -359,6 +443,10 @@ test("independent MCP stdio clients share saved context with stale writer protec
     assert.equal(replay.id, started.id);
     assert.deepEqual(replay.launchSource, started.launchSource);
     await clients[0].close();
+    for (let i = 0; i < 50 && (await call(clients[1], "project_lead", { projectId: p.id, action: "status" })).data.lead; i++)
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal((await call(clients[1], "project_lead", { projectId: p.id, action: "status" })).data.lead, null);
+    assert.equal(service.store.run(started.id)?.state, "running");
     reconnect = new Client({ name: "fresh-host", version: "3" });
     await reconnect.connect(new StdioClientTransport({
       command: "npm", args: ["--prefix", resolve("."), "run", "--silent", "mcp"],

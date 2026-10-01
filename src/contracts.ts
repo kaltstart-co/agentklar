@@ -34,6 +34,15 @@ export type RunState =
 export type LaunchSource =
   | { kind: "ui" }
   | { kind: "mcp"; clientName: string; clientVersion?: string };
+export type ProjectLead = {
+  claimId: string;
+  projectId: string;
+  clientName: string | null;
+  clientVersion?: string;
+  claimedAt: string;
+  lastSeenAt: string;
+  expiresAt: string;
+};
 export type FollowUp = { kind: "review" | "fix"; parentRunId: string; rootRunId: string };
 export type FollowUpContext = {
   originalPrompt: string;
@@ -153,6 +162,7 @@ export type Snapshot = {
   runs: Run[];
   approvals: Approval[];
   harnesses: Harness[];
+  leads: Record<string, ProjectLead>;
 };
 
 export type CatalogModel = {
