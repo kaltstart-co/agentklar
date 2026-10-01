@@ -591,6 +591,10 @@ code {
   cursor: pointer;
   padding: 10px 0;
 }
+.native-command {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 @media (max-width: 650px) {
   nav {
     flex-wrap: wrap;

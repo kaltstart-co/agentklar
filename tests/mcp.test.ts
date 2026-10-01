@@ -63,7 +63,7 @@ test("SDK stdio wire lists and calls tools; closing MCP leaves service worker al
     assert.equal(service.store.runs().length, 0);
     assert.equal(catalogReads, 0);
     const list = await client.listTools();
-    assert.equal(list.tools.length, 15);
+    assert.equal(list.tools.length, 16);
     assert.equal(
       list.tools.some((t) => /approve/.test(t.name)),
       false,
@@ -135,6 +135,12 @@ test("SDK stdio wire lists and calls tools; closing MCP leaves service worker al
     });
     const r = JSON.parse((started.content as { text: string }[])[0].text);
     assert.equal(r.state, "running");
+    const handoff = await client.callTool({ name: "run_handoff", arguments: { runId: r.id } });
+    assert.equal(handoff.isError, false);
+    const handoffData = JSON.parse((handoff.content as { text: string }[])[0].text);
+    assert.equal(handoffData.available, false);
+    assert.equal(handoffData.command, null);
+    assert.match(handoffData.reason, /active/);
     const routedPath = join(dir, "routed");
     mkdirSync(routedPath);
     const routedProjectResult = await client.callTool({

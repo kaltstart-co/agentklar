@@ -1,8 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, rmSync, symlinkSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { tmpdir, homedir } from "node:os";
+import { join, resolve, isAbsolute } from "node:path";
 import { randomUUID } from "node:crypto";
 import { createService } from "../src/service.ts";
 import { NativeWorker } from "../src/native.ts";
@@ -82,6 +82,9 @@ test("durable runs, explicit project scope, idempotency, busy, canonical paths a
       readOnly: true,
     };
     const r = await (await t.call("/api/tasks/start", "POST", body)).json();
+    assert.equal(t.s.store.run(r.id)?.nativeHome,
+      process.env.CODEX_HOME === undefined ? join(homedir(), ".codex") :
+        isAbsolute(process.env.CODEX_HOME) ? process.env.CODEX_HOME : undefined);
     await wait(() => !!t.s.store.run(r.id)?.turnId);
     assert.equal(
       (await (await t.call("/api/tasks/start", "POST", body)).json()).id,

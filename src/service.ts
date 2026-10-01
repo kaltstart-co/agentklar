@@ -18,6 +18,7 @@ import {
   chmodSync,
 } from "node:fs";
 import { isAbsolute, join } from "node:path";
+import { homedir } from "node:os";
 import { Store } from "./store.ts";
 import { harnesses, executable } from "./harnesses.ts";
 import { NativeWorker, type NativeCallbacks } from "./native.ts";
@@ -28,6 +29,7 @@ import { recommendationSchema, recommendWorker } from "./recommend.ts";
 import { Instructions, InstructionError, instructionFileSchema, instructionPreviewSchema } from "./instructions.ts";
 import { NativeSetup, SetupError, type NativeSetupOptions } from "./setup.ts";
 import { ProjectSkills, SkillError, skillPreviewInput, skillIdInput, skillRemoveInput } from "./skills.ts";
+import { runHandoff } from "./handoff.ts";
 const role = z
   .object({
     id: z.string().min(1).max(80),
@@ -38,7 +40,7 @@ const role = z
   })
   .strict();
 function compactRun(r: Run): Run {
-  const { contextSnapshot, followUpContext, ...metadata } = r;
+  const { contextSnapshot, followUpContext, nativeHome, ...metadata } = r;
   return {
     ...metadata,
     contextRevision: contextSnapshot?.revision ?? null,
@@ -154,6 +156,10 @@ export function createService(
     string,
     { stop: () => void; closed?: Promise<void> }
   >();
+  const projectBusy = (projectId: string) => store.runs().some((r) =>
+    r.projectId === projectId &&
+    (["running", "needs_attention"].includes(r.state) || workers.has(r.id) ||
+      (r.workerPid !== undefined && processGroupAlive(r.workerPid))));
   const answers = new Map<string, (decision: string) => void>();
   const secretPath = join(home, "mcp-token");
   if (!existsSync(secretPath))
@@ -546,17 +552,7 @@ export function createService(
       const linked = linkedSource(p.id, data.followUp);
       if (linked.error) return c.json({ error: linked.error }, 409);
     }
-    if (
-      store
-        .runs()
-        .some(
-          (r) =>
-            r.projectId === p.id &&
-            (["running", "needs_attention"].includes(r.state) ||
-              workers.has(r.id) ||
-              (r.workerPid !== undefined && processGroupAlive(r.workerPid))),
-        )
-    )
+    if (projectBusy(p.id))
       return c.json(
         { error: "Project busy. Wait for or stop its active worker." },
         409,
@@ -596,9 +592,7 @@ export function createService(
       if (existing) return existing.launchHash === launchHash
         ? c.json(compactRun(existing))
         : c.json({ error: "Idempotency key already used for a different task" }, 409);
-      if (store.runs().some((r) => r.projectId === p.id &&
-        (["running", "needs_attention"].includes(r.state) || workers.has(r.id) ||
-          (r.workerPid !== undefined && processGroupAlive(r.workerPid)))))
+      if (projectBusy(p.id))
         return c.json({ error: "Project busy. Wait for or stop its active worker." }, 409);
       const latest = store.projects().find((item) => item.id === p.id);
       if (!latest || JSON.stringify(latest) !== JSON.stringify(p))
@@ -657,6 +651,11 @@ export function createService(
     const context = data.includeProjectContext
       ? store.context(p.id)
       : undefined;
+    const homeVariable = harness === "codex" ? "CODEX_HOME" : "CLAUDE_CONFIG_DIR";
+    const configuredHome = process.env[homeVariable];
+    const nativeHome = configuredHome === undefined
+      ? join(homedir(), harness === "codex" ? ".codex" : ".claude")
+      : isAbsolute(configuredHome) ? configuredHome : undefined;
     const r: Run = {
       id: randomUUID(),
       harness: harness as "codex" | "claude",
@@ -674,6 +673,7 @@ export function createService(
         ? { contextSnapshot: context }
         : {}),
       readOnly: data.readOnly,
+      nativeHome,
       state: "running",
       result: "",
       tokens: null,
@@ -735,6 +735,14 @@ export function createService(
   app.get("/api/runs/:id", (c) => {
     const r = store.run(c.req.param("id"));
     return r ? c.json(compactRun(r)) : c.json({ error: "Run not found" }, 404);
+  });
+  app.get("/api/runs/:id/handoff", (c) => {
+    const run = store.run(c.req.param("id"));
+    if (!run) return c.json({ error: "Run not found" }, 404);
+    c.header("Cache-Control", "no-store");
+    const project = store.projects().find((p) => p.id === run.projectId);
+    const cli = run.harness === "codex" || run.harness === "claude" ? executable(run.harness) : null;
+    return c.json(runHandoff(run, project, projectBusy(run.projectId), cli));
   });
   app.get("/api/runs/:id/context", (c) => {
     const r = store.run(c.req.param("id"));

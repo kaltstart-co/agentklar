@@ -26,6 +26,7 @@ import type {
   Preference,
   ProjectContext,
   WorkerAdvice,
+  RunHandoff,
 } from "../src/contracts.js";
 
 type View = "Work" | "Instructions" | "Context" | "Team" | "Models" | "Usage" | "Settings";
@@ -734,10 +735,15 @@ export function App() {
                             </details>
                           )}
                           <RunContext
-                            key={run.id}
+                            key={`context-${run.id}`}
                             run={run}
                             connected={connected}
                           />
+                          {!["running", "needs_attention"].includes(run.state) && (
+                            <NativeHandoff key={`handoff-${run.id}`} runId={run.id} connected={connected}
+                              projectBusy={snapshot.runs.some((item) => item.projectId === run.projectId &&
+                                ["running", "needs_attention"].includes(item.state))} />
+                          )}
                           {snapshot.approvals
                             .filter((a) => a.runId === run.id)
                             .map((a) => (
@@ -1798,6 +1804,96 @@ function ContextForm({
         </Stack>
       </form>
     </section>
+  );
+}
+
+function NativeHandoff({ runId, connected, projectBusy }: { runId: string; connected: boolean; projectBusy: boolean }) {
+  const [packet, setPacket] = useState<RunHandoff | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [copied, setCopied] = useState(false);
+  const mounted = useRef(true);
+  const pending = useRef(false);
+  const canShow = connected && !projectBusy;
+  const currentCanShow = useRef(canShow);
+  currentCanShow.current = canShow;
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
+  useEffect(() => {
+    if (!canShow) { setPacket(null); setCopied(false); }
+  }, [canShow]);
+  async function load() {
+    if (!canShow || pending.current) return;
+    pending.current = true;
+    setLoading(true);
+    setError("");
+    setPacket(null);
+    setCopied(false);
+    try {
+      const data = await api<RunHandoff>(`/runs/${runId}/handoff`);
+      if (mounted.current && currentCanShow.current) setPacket(data);
+    } catch (e) {
+      if (mounted.current) setError((e as Error).message);
+    } finally {
+      pending.current = false;
+      if (mounted.current) setLoading(false);
+    }
+  }
+  async function copy() {
+    if (!packet?.command || !canShow || pending.current) return;
+    pending.current = true;
+    setLoading(true);
+    setCopied(false);
+    setError("");
+    try {
+      let current: RunHandoff;
+      try {
+        current = await api<RunHandoff>(`/runs/${runId}/handoff`);
+      } catch (e) {
+        if (mounted.current) {
+          setPacket(null);
+          setError(`Could not refresh the native command: ${(e as Error).message} Show it again to retry.`);
+        }
+        return;
+      }
+      if (!mounted.current || !currentCanShow.current) return;
+      setPacket(current);
+      if (!current.command) return;
+      try {
+        await navigator.clipboard.writeText(current.command.display);
+        if (mounted.current && currentCanShow.current) setCopied(true);
+      } catch {
+        if (mounted.current && currentCanShow.current)
+          setError("Could not copy the command. Select the text below instead.");
+      }
+    } finally {
+      pending.current = false;
+      if (mounted.current) setLoading(false);
+    }
+  }
+  return (
+    <details className="run-context">
+      <summary>Continue in native harness</summary>
+      <p className="hint">Show a command for your terminal. AgentKlar will not run it.</p>
+      <Button size="xs" variant="light" loading={loading} disabled={!canShow} onClick={() => void load()}>
+        Show native command
+      </Button>
+      {projectBusy && <p className="hint">A worker is active in this project. Close it before preparing a native command.</p>}
+      {error && <Alert color="red">{error}</Alert>}
+      {canShow && packet && !packet.available && <Alert color="yellow">{packet.reason}</Alert>}
+      {canShow && packet?.command && (
+        <div>
+          <p className="hint">Copy into your terminal (macOS or Linux):</p>
+          <pre className="result native-command">{packet.command.display}</pre>
+          <Button size="xs" variant="light" disabled={loading} onClick={() => void copy()}>
+            {copied ? "Copied" : "Copy command"}
+          </Button>
+          {packet.notes.map((note) => <p className="hint" key={note}>{note}</p>)}
+        </div>
+      )}
+    </details>
   );
 }
 

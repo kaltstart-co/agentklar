@@ -23,6 +23,7 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 - [x] Support dashboard
 - [x] Independent review
 - [x] Linked review and fix
+- [x] Native continuation commands
 - [x] Shared memory
 - [x] Project context
 - [x] Native model list

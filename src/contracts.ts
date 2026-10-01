@@ -63,6 +63,7 @@ export type Run = {
   tokens: number | null;
   threadId?: string;
   turnId?: string;
+  nativeHome?: string;
   workerPid?: number;
   launchHash?: string;
   routing?: RoutingDecision;
@@ -76,6 +77,22 @@ export type RunEvent = {
   text: string;
   textTruncated?: boolean;
   createdAt: string;
+};
+export type RunHandoff = {
+  runId: string;
+  available: boolean;
+  reason: string | null;
+  harness: "codex" | "claude" | null;
+  nativeSessionId: string | null;
+  command: null | {
+    executable: string;
+    argv: string[];
+    cwd: string;
+    env: Record<string, string>;
+    shell: "posix";
+    display: string;
+  };
+  notes: string[];
 };
 export type Approval = {
   id: string;

@@ -179,6 +179,7 @@ Use projects_list or project_register for the folder, then project_context_read 
       "/result",
       "Read compact result and actual token count when reported.",
     ],
+    ["run_handoff", "/handoff", "Read a safe native continuation command for a finished run, if available. This does not start or monitor a native session."],
     ["run_stop", "/stop", "Interrupt and terminate this owned worker."],
   ] as const)
     server.registerTool(
