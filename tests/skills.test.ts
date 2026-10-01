@@ -27,6 +27,8 @@ async function fixture(timeoutMs = 10000) {
     "---\nname: agentklar-qa\ndescription: Test skill.\n---\n\n# Test\nReview me.\n",
   );
   writeFileSync(join(source, "references", "example.md"), "example\n");
+  const requestedSources: string[] = [];
+  const sourceOverride = (requested: string) => { requestedSources.push(requested); return source; };
   let service = createService(
     home,
     4317,
@@ -36,7 +38,7 @@ async function fixture(timeoutMs = 10000) {
     undefined,
     {},
     undefined,
-    { sourceOverride: () => source, timeoutMs },
+    { sourceOverride, timeoutMs },
   );
   let cookie = "";
   async function auth() {
@@ -78,6 +80,7 @@ async function fixture(timeoutMs = 10000) {
     home,
     project,
     source,
+    requestedSources,
     p,
     base,
     call,
@@ -96,7 +99,7 @@ async function fixture(timeoutMs = 10000) {
         undefined,
         {},
         undefined,
-        { sourceOverride: () => source, timeoutMs },
+        { sourceOverride, timeoutMs },
       );
       await auth();
     },
@@ -236,7 +239,7 @@ test("skill API limits native writes to trusted UI and rejects invalid sources a
       "Content-Type": "application/json",
     };
     assert.equal((await f.call(f.base, "GET", undefined, bearer)).status, 200);
-    for (const operation of ["preview", "install", "remove"])
+    for (const operation of ["preview", "preview-update", "install", "update", "remove"])
       assert.equal(
         (await f.call(`${f.base}/${operation}`, "POST", {}, bearer)).status,
         403,
@@ -375,4 +378,119 @@ test("staged links and plugin bundles cannot be installed", async () => {
   } finally {
     await f.close();
   }
+});
+
+
+test("skill updates re-stage the saved source, preview both trees, and keep durable per-harness ownership", async () => {
+  const f = await fixture();
+  try {
+    const original = await (await f.call(`${f.base}/preview`, "POST", {
+      harness: "codex", source: "example/skills#main", name: "agentklar-qa",
+    })).json();
+    const installed = await (await f.call(`${f.base}/install`, "POST", { previewId: original.id })).json();
+    const currentIdentity = lstatSync(original.path).ino;
+    const unchanged = await (await f.call(`${f.base}/preview-update`, "POST", { installId: installed.id })).json();
+    assert.equal(unchanged.hasChanges, false);
+    assert.equal((await (await f.call(`${f.base}/update`, "POST", { previewId: unchanged.id })).json()).unchanged, true);
+    assert.equal(lstatSync(original.path).ino, currentIdentity);
+    const claude = await f.preview("claude");
+    await f.call(`${f.base}/install`, "POST", { previewId: claude.id });
+    writeFileSync(join(f.source, "SKILL.md"), original.text.replace("Review me.", "Updated upstream."));
+    rmSync(join(f.source, "references"), { recursive: true });
+    writeFileSync(join(f.source, "extra.txt"), "upstream file");
+    const response = await f.call(`${f.base}/preview-update`, "POST", { installId: installed.id });
+    assert.equal(response.status, 200, await response.clone().text());
+    const update = await response.json();
+    assert.equal(f.requestedSources.at(-1), "example/skills#main");
+    assert.equal(update.source, installed.source);
+    assert.equal(update.updateInstallId, installed.id);
+    assert.equal(update.currentText, original.text);
+    assert.deepEqual(update.currentFiles.map((x: { path: string }) => x.path), ["SKILL.md", "references", "references/example.md"]);
+    assert.match(update.text, /Updated upstream/);
+    assert.equal(readFileSync(join(original.path, "SKILL.md"), "utf8"), original.text);
+    assert.equal((await f.call(`${f.base}/install`, "POST", { previewId: update.id })).status, 409);
+    const stale = await (await f.call(`${f.base}/preview-update`, "POST", { installId: installed.id })).json();
+    const applied = await f.call(`${f.base}/update`, "POST", { previewId: update.id });
+    assert.equal(applied.status, 200, await applied.clone().text());
+    assert.equal((await applied.json()).id, installed.id);
+    assert.equal(readFileSync(join(original.path, "SKILL.md"), "utf8"), update.text);
+    assert.equal(lstatMissing(join(original.path, "references")), true);
+    assert.equal(readFileSync(join(original.path, "extra.txt"), "utf8"), "upstream file");
+    assert.equal(readFileSync(join(claude.path, "SKILL.md"), "utf8"), original.text);
+    assert.equal((await f.call(`${f.base}/update`, "POST", { previewId: stale.id })).status, 409);
+    assert.equal((await f.call(`${f.base}/update`, "POST", { previewId: update.id })).status, 404);
+    await f.restart();
+    const list = await (await f.call(f.base)).json();
+    assert.equal(list.skills.find((s: { id: string }) => s.id === installed.id).state, "installed");
+    assert.equal((await f.call(`${f.base}/remove`, "POST", { installId: installed.id })).status, 200);
+    assert.equal(lstatMissing(original.path), true);
+    assert.equal(lstatMissing(claude.path), false);
+    assert.equal(readdirSync(join(f.project, ".agents")).some(x => x.startsWith(".skill-update-")), false);
+  } finally { await f.close(); }
+});
+
+test("skill update refuses local edits, changed staging, wrong project and changed source fields", async () => {
+  const f = await fixture();
+  try {
+    const original = await f.preview();
+    assert.equal((await f.call(`${f.base}/update`, "POST", { previewId: original.id })).status, 409);
+    const installed = await (await f.call(`${f.base}/install`, "POST", { previewId: original.id })).json();
+    assert.equal((await f.call(`${f.base}/preview-update`, "POST", { installId: installed.id, source: "other/repo" })).status, 400);
+    const other = await (await f.call("/api/projects", "POST", { name: "other", path: f.source })).json();
+    assert.equal((await f.call(`/api/projects/${other.id}/skills/preview-update`, "POST", { installId: installed.id })).status, 404);
+    const update = await (await f.call(`${f.base}/preview-update`, "POST", { installId: installed.id })).json();
+    const staged = readdirSync(f.home).find(name => name.startsWith("skill-stage-"))!;
+    writeFileSync(join(f.home, staged, ".agents/skills/agentklar-qa/SKILL.md"), "changed stage");
+    assert.equal((await f.call(`${f.base}/update`, "POST", { previewId: update.id })).status, 409);
+    assert.equal(readFileSync(join(original.path, "SKILL.md"), "utf8"), original.text);
+    const next = await (await f.call(`${f.base}/preview-update`, "POST", { installId: installed.id })).json();
+    writeFileSync(join(original.path, "SKILL.md"), "local changes");
+    assert.equal((await f.call(`${f.base}/update`, "POST", { previewId: next.id })).status, 409);
+    assert.equal((await f.call(`${f.base}/preview-update`, "POST", { installId: installed.id })).status, 409);
+    assert.equal(readFileSync(join(original.path, "SKILL.md"), "utf8"), "local changes");
+    const listed = await (await f.call(f.base)).json();
+    assert.equal(listed.skills[0].state, "changed");
+    assert.match(listed.skills[0].message, /Update and remove are disabled/);
+  } finally { await f.close(); }
+});
+
+test("skill update rolls back a failed durable save and preserves conflicting files with a recovery path", async () => {
+  const f = await fixture();
+  try {
+    const original = await f.preview();
+    const installed = await (await f.call(`${f.base}/install`, "POST", { previewId: original.id })).json();
+    writeFileSync(join(f.source, "SKILL.md"), original.text.replace("Review me.", "Updated upstream."));
+    const update = await (await f.call(`${f.base}/preview-update`, "POST", { installId: installed.id })).json();
+    f.service.store.db.exec(`CREATE TRIGGER reject_skill_update BEFORE UPDATE ON project_skills
+      WHEN json_extract(NEW.data, '$.state')='installed' AND json_extract(NEW.data, '$.files[0].hash') != json_extract(OLD.data, '$.files[0].hash')
+      BEGIN SELECT RAISE(ABORT, 'fixture durable save failure'); END`);
+    const response = await f.call(`${f.base}/update`, "POST", { previewId: update.id });
+    assert.equal(response.status, 409);
+    assert.match((await response.json()).error, /previous skill was restored/);
+    assert.equal(readFileSync(join(original.path, "SKILL.md"), "utf8"), original.text);
+    assert.equal((await (await f.call(f.base)).json()).skills[0].state, "installed");
+    assert.equal(readdirSync(join(f.project, ".agents")).some(x => x.startsWith(".skill-update-")), false);
+    f.service.store.db.exec("DROP TRIGGER reject_skill_update");
+    const conflict = await (await f.call(`${f.base}/preview-update`, "POST", { installId: installed.id })).json();
+    f.service.store.db.function("fixture_edit_skill", () => {
+      writeFileSync(join(original.path, "SKILL.md"), "concurrent user edit");
+      throw new Error("fixture durable save failure after edit");
+    });
+    f.service.store.db.exec(`CREATE TRIGGER edit_skill_update BEFORE UPDATE ON project_skills
+      WHEN json_extract(NEW.data, '$.state')='installed' AND json_extract(NEW.data, '$.files[0].hash') != json_extract(OLD.data, '$.files[0].hash')
+      BEGIN SELECT fixture_edit_skill(); END`);
+    const failed = await f.call(`${f.base}/update`, "POST", { previewId: conflict.id });
+    assert.equal(failed.status, 409);
+    assert.match((await failed.json()).error, /Previous and replacement files may be in/);
+    assert.equal(readFileSync(join(original.path, "SKILL.md"), "utf8"), "concurrent user edit");
+    const kept = readdirSync(join(f.project, ".agents")).find(x => x.startsWith(".skill-update-"))!;
+    assert.equal(readFileSync(join(f.project, ".agents", kept, "previous/SKILL.md"), "utf8"), original.text);
+    f.service.store.db.exec("DROP TRIGGER edit_skill_update");
+    await f.restart();
+    const listed = await (await f.call(f.base)).json();
+    assert.equal(listed.skills[0].state, "interrupted");
+    assert.match(listed.skills[0].message, new RegExp(kept.replaceAll(".", "\\.")));
+    assert.equal((await f.call(`${f.base}/remove`, "POST", { installId: installed.id })).status, 409);
+    assert.equal(readFileSync(join(original.path, "SKILL.md"), "utf8"), "concurrent user edit");
+  } finally { await f.close(); }
 });

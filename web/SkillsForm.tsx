@@ -31,6 +31,11 @@ type Preview = {
   sourceVersion: string | null;
   installerVersion: string;
   expiresAt: string;
+  updateInstallId: string | null;
+  hasChanges: boolean;
+  unchanged?: boolean;
+  currentText: string | null;
+  currentFiles: { path: string; bytes: number }[] | null;
 };
 async function request<T>(
   projectId: string,
@@ -105,7 +110,7 @@ export function SkillsForm({
     setNotice("");
   }
   async function act(
-    operation: "preview" | "install" | "remove",
+    operation: "preview" | "preview-update" | "install" | "update" | "remove",
     body: unknown,
   ) {
     const id = ++generation.current;
@@ -115,11 +120,15 @@ export function SkillsForm({
     try {
       const result = await request<Preview>(projectId, `/${operation}`, body);
       if (id !== generation.current || !currentConnected.current) return;
-      if (operation === "preview") setPreview(result);
+      if (operation === "preview" || operation === "preview-update") setPreview(result);
       else {
         setPreview(null);
         setNotice(
-          operation === "install"
+          result.unchanged
+            ? "Already up to date."
+            : operation === "update"
+            ? "Skill updated. Start a new native session to load it."
+            : operation === "install"
             ? "Skill installed. Start a new native session to load it."
             : "Managed skill removed. Start a new native session to unload it.",
         );
@@ -144,7 +153,8 @@ export function SkillsForm({
         folder may also be read by other native tools.
       </p>
       <p className="hint">
-        Review the skill text and full file list before installing. Skills may
+        Review the skill text and full file list before installing or updating.
+        Updates use the saved source and need your review each time. Skills may
         tell a future agent to run commands. Start a new native session after a
         change.
       </p>
@@ -196,39 +206,53 @@ export function SkillsForm({
             >
               Preview skill
             </Button>
-            {preview && (
-              <div className="instruction-preview">
-                <h3>Review {preview.name}</h3>
-                <p className="instruction-path">
-                  <code>{preview.path}</code>
-                </p>
-                <p className="hint">
-                  Source: {preview.source} · Ref:{" "}
-                  {preview.sourceVersion || "default branch"} · Installer:{" "}
-                  {preview.installerVersion} · Source hash:{" "}
-                  {preview.upstreamHash || "unavailable"}
-                </p>
-                <h4>SKILL.md</h4>
-                <pre>{preview.text}</pre>
-                <h4>Files</h4>
+          </Stack>
+        </details>
+        {preview && (
+          <div className="instruction-preview">
+            <h3>Review {preview.updateInstallId ? "update to " : ""}{preview.name}</h3>
+            <p className="instruction-path">
+              <code>{preview.path}</code>
+            </p>
+            <p className="hint">
+              Source: {preview.source} · Ref:{" "}
+              {preview.sourceVersion || "default branch"} · Installer:{" "}
+              {preview.installerVersion} · Source hash:{" "}
+              {preview.upstreamHash || "unavailable"}
+            </p>
+            {preview.updateInstallId && (
+              <details>
+                <summary>Current installed skill</summary>
+                <pre>{preview.currentText}</pre>
                 <ul>
-                  {preview.files.map((f) => (
-                    <li key={f.path}>
-                      <code>{f.path}</code> · {f.bytes.toLocaleString()} bytes
+                  {preview.currentFiles?.map((file) => (
+                    <li key={file.path}>
+                      <code>{file.path}</code> · {file.bytes.toLocaleString()} bytes
                     </li>
                   ))}
                 </ul>
-                <Button
-                  disabled={!connected || Boolean(busy)}
-                  loading={busy === "install"}
-                  onClick={() => void act("install", { previewId: preview.id })}
-                >
-                  Install reviewed skill
-                </Button>
-              </div>
+              </details>
             )}
-          </Stack>
-        </details>
+            <h4>{preview.updateInstallId ? "Upstream SKILL.md" : "SKILL.md"}</h4>
+            <pre>{preview.text}</pre>
+            <h4>Files</h4>
+            <ul>
+              {preview.files.map((f) => (
+                <li key={f.path}>
+                  <code>{f.path}</code> · {f.bytes.toLocaleString()} bytes
+                </li>
+              ))}
+            </ul>
+            {!preview.hasChanges && <Alert color="teal">Already up to date.</Alert>}
+            {preview.hasChanges && <Button
+              disabled={!connected || Boolean(busy)}
+              loading={busy === "install" || busy === "update"}
+              onClick={() => void act(preview.updateInstallId ? "update" : "install", { previewId: preview.id })}
+            >
+              {preview.updateInstallId ? "Apply reviewed update" : "Install reviewed skill"}
+            </Button>}
+          </div>
+        )}
         {error && <Alert color="red">{error}</Alert>}
         {notice && <Alert color="teal">{notice}</Alert>}
         <Group>
@@ -270,16 +294,27 @@ export function SkillsForm({
                 {item.source && <p className="hint">Source: {item.source}</p>}
                 {item.message && <p className="hint">{item.message}</p>}
                 {item.id && item.state === "installed" && (
-                  <Button
-                    size="xs"
-                    variant="light"
-                    color="red"
-                    disabled={!connected || Boolean(busy)}
-                    loading={busy === "remove"}
-                    onClick={() => void act("remove", { installId: item.id })}
-                  >
-                    Remove managed skill
-                  </Button>
+                  <Group>
+                    <Button
+                      size="xs"
+                      variant="light"
+                      disabled={!connected || Boolean(busy)}
+                      loading={busy === "preview-update"}
+                      onClick={() => void act("preview-update", { installId: item.id })}
+                    >
+                      Preview upstream update
+                    </Button>
+                    <Button
+                      size="xs"
+                      variant="light"
+                      color="red"
+                      disabled={!connected || Boolean(busy)}
+                      loading={busy === "remove"}
+                      onClick={() => void act("remove", { installId: item.id })}
+                    >
+                      Remove managed skill
+                    </Button>
+                  </Group>
                 )}
               </div>
             ))

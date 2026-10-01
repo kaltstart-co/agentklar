@@ -303,15 +303,15 @@ export function createService(
     c.header("Cache-Control", "no-store");
     return project ? c.json(skills.list(project)) : c.json({ error: "Project not found" }, 404);
   });
-  for (const operation of ["preview", "install", "remove"] as const)
+  for (const operation of ["preview", "preview-update", "install", "update", "remove"] as const)
     app.post(`/api/projects/:id/skills/${operation}`, async (c) => {
       const project = store.projects().find((p) => p.id === c.req.param("id"));
       if (!project) return c.json({ error: "Project not found" }, 404);
-      const schema = operation === "preview" ? skillPreviewInput : operation === "install" ? skillIdInput : skillRemoveInput;
+      const schema = operation === "preview" ? skillPreviewInput : (operation === "install" || operation === "update") ? skillIdInput : skillRemoveInput;
       const parsed = schema.safeParse(await c.req.json().catch(() => null));
       if (!parsed.success) return c.json({ error: "Provide one native harness, a GitHub owner/repo, and one exact skill name or saved ID." }, 400);
       c.header("Cache-Control", "no-store");
-      return c.json(operation === "preview" ? await skills.preview(project, parsed.data as typeof skillPreviewInput._output) : operation === "install" ? skills.install(project, (parsed.data as typeof skillIdInput._output).previewId) : skills.remove(project, (parsed.data as typeof skillRemoveInput._output).installId));
+      return c.json(operation === "preview" ? await skills.preview(project, parsed.data as typeof skillPreviewInput._output) : operation === "preview-update" ? await skills.previewUpdate(project, (parsed.data as typeof skillRemoveInput._output).installId) : operation === "update" ? skills.update(project, (parsed.data as typeof skillIdInput._output).previewId) : operation === "install" ? skills.install(project, (parsed.data as typeof skillIdInput._output).previewId) : skills.remove(project, (parsed.data as typeof skillRemoveInput._output).installId));
     });
   app.get("/api/projects/:id/instructions/:file", (c) => {
     const project = store.projects().find((p) => p.id === c.req.param("id"));

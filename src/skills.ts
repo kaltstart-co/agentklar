@@ -11,6 +11,7 @@ import {
   openSync,
   opendirSync,
   readFileSync,
+  renameSync,
   realpathSync,
   rmSync,
   rmdirSync,
@@ -68,6 +69,7 @@ type Preview = {
   stageParents: string[];
   expires: number;
   upstreamHash: string | null;
+  previous: Install | null;
 };
 type Install = {
   id: string;
@@ -80,7 +82,7 @@ type Install = {
   parents: string[];
   files: File[];
   targetIdentity: string;
-  state: "prepared" | "installed" | "removing" | "removed" | "interrupted";
+  state: "prepared" | "installed" | "updating" | "removing" | "removed" | "interrupted";
   message: string | null;
   upstreamHash: string | null;
   createdAt: string;
@@ -447,12 +449,12 @@ export class ProjectSkills {
     );
     for (const row of db.prepare("SELECT data FROM project_skills").all()) {
       const install: Install = JSON.parse(row.data as string);
-      if (["prepared", "removing"].includes(install.state))
+      if (["prepared", "updating", "removing"].includes(install.state))
         this.save({
           ...install,
           state: "interrupted",
           message:
-            "Change was interrupted. Inspect the skill folder; no automatic recovery was attempted.",
+            install.message ?? "Change was interrupted. Inspect the skill folder; no automatic recovery was attempted.",
         });
     }
   }
@@ -528,7 +530,7 @@ export class ProjectSkills {
             source: owned?.source ?? null,
             message:
               state === "changed"
-                ? "Managed skill changed outside AgentKlar. Remove is disabled."
+                ? "Managed skill changed outside AgentKlar. Update and remove are disabled."
                 : (owned?.message ?? null),
           });
         }
@@ -573,12 +575,12 @@ export class ProjectSkills {
       skills,
     };
   }
-  preview(project: Project, input: z.infer<typeof skillPreviewInput>) {
+  preview(project: Project, input: z.infer<typeof skillPreviewInput>, previous: Install | null = null) {
     if (this.busy)
       return Promise.reject(
         new SkillError("A skill preview is already running.", 409),
       );
-    const work = this.buildPreview(project, input);
+    const work = this.buildPreview(project, input, previous);
     this.activePreview = work.then(
       () => {},
       () => {},
@@ -588,6 +590,7 @@ export class ProjectSkills {
   private async buildPreview(
     project: Project,
     input: z.infer<typeof skillPreviewInput>,
+    previous: Install | null,
   ) {
     if (this.closed) throw new SkillError("Service is stopping.", 503);
     this.cleanup();
@@ -599,7 +602,8 @@ export class ProjectSkills {
     const rootBefore = root(project),
       path = folder(project, input.harness, input.name);
     const parentBefore = parents(project, input.harness).map(maybeIdentity);
-    if (maybeIdentity(path) !== null)
+    if (previous) this.unchanged(project, previous);
+    else if (maybeIdentity(path) !== null)
       throw new SkillError("A skill already exists at this target.", 409);
     const stage = mkdtempSync(join(this.home, "skill-stage-"));
     const stageIdentity = identity(stage);
@@ -656,7 +660,7 @@ export class ProjectSkills {
         parents(project, input.harness).some(
           (p, i) => maybeIdentity(p) !== parentBefore[i],
         ) ||
-        maybeIdentity(path) !== null
+        (previous ? !this.matches(project, previous) : maybeIdentity(path) !== null)
       )
         throw new SkillError(
           "Project or skill target changed during preview.",
@@ -678,6 +682,7 @@ export class ProjectSkills {
         stageParents,
         expires: Date.now() + 600000,
         upstreamHash: typeof entry.hash === "string" ? entry.hash : null,
+        previous,
       };
       this.previews.set(preview.id, preview);
       return this.publicPreview(preview);
@@ -696,16 +701,21 @@ export class ProjectSkills {
       root,
       parents,
       expires,
+      previous,
       ...safe
     } = p;
     return {
       ...safe,
+      updateInstallId: previous?.id ?? null,
+      hasChanges: previous ? !sameFiles(p.files, previous.files) : true,
+      currentText: previous ? textFile(previous.path, previous.files) : null,
+      currentFiles: previous?.files.map(({ identity, ...file }) => file) ?? null,
       expiresAt: new Date(expires).toISOString(),
       sourceVersion: p.source.includes("#") ? p.source.split("#")[1] : null,
       installerVersion: "skills@1.7.0",
     };
   }
-  install(project: Project, id: string) {
+  private reviewed(project: Project, id: string) {
     if (this.closed) throw new SkillError("Service is stopping.", 503);
     const p = this.previews.get(id);
     if (!p || p.projectId !== project.id || p.expires <= Date.now())
@@ -722,13 +732,15 @@ export class ProjectSkills {
       parents(project, p.harness).some(
         (path, i) => maybeIdentity(path) !== p.parents[i],
       ) ||
-      maybeIdentity(p.path) !== null ||
+      (p.previous ? !this.matches(project, p.previous) : maybeIdentity(p.path) !== null) ||
       !sameFiles(manifest(sourceDir), p.files)
     )
-      throw new SkillError(
-        "Reviewed skill or target changed. Preview again.",
-        409,
-      );
+      throw new SkillError("Reviewed skill or target changed. Preview again.", 409);
+    return { p, sourceDir };
+  }
+  install(project: Project, id: string) {
+    const { p, sourceDir } = this.reviewed(project, id);
+    if (p.previous) throw new SkillError("Use the update action for this preview.", 409);
     const install: Install = {
       id: randomUUID(),
       projectId: project.id,
@@ -786,30 +798,131 @@ export class ProjectSkills {
       rmSync(p.stage, { recursive: true, force: true });
     }
   }
-  remove(project: Project, id: string) {
+  private managed(project: Project, id: string) {
     if (this.closed) throw new SkillError("Service is stopping.", 503);
     const row = this.db
       .prepare("SELECT data FROM project_skills WHERE id=? AND projectId=?")
       .get(id, project.id);
     if (!row) throw new SkillError("Managed skill not found.", 404);
-    const install = JSON.parse(row.data as string) as Install;
-    if (install.state !== "installed")
-      throw new SkillError(
-        "Only an unchanged managed skill can be removed.",
-        409,
-      );
-    const dirs = parents(project, install.harness);
-    if (
-      root(project) !== install.root ||
-      install.path !== folder(project, install.harness, install.name) ||
-      dirs.some((dir, i) => identity(dir) !== install.parents[i]) ||
-      identity(install.path) !== install.targetIdentity ||
-      !sameFiles(manifest(install.path, true), install.files, true)
-    )
-      throw new SkillError(
-        "Skill or project folder changed. AgentKlar will keep it.",
-        409,
-      );
+    return JSON.parse(row.data as string) as Install;
+  }
+  private matches(project: Project, install: Install) {
+    try {
+      const current = this.managed(project, install.id);
+      return current.state === "installed" &&
+        current.targetIdentity === install.targetIdentity &&
+        install.path === folder(project, install.harness, install.name) &&
+        root(project) === install.root &&
+        parents(project, install.harness).every((dir, i) => identity(dir) === install.parents[i]) &&
+        identity(install.path) === install.targetIdentity &&
+        sameFiles(manifest(install.path, true), install.files, true);
+    } catch {
+      return false;
+    }
+  }
+  private unchanged(project: Project, install: Install) {
+    if (!this.matches(project, install))
+      throw new SkillError("Skill or project folder changed. AgentKlar will keep it.", 409);
+  }
+  previewUpdate(project: Project, id: string) {
+    const previous = this.managed(project, id);
+    this.unchanged(project, previous);
+    return this.preview(project, {
+      harness: previous.harness, source: previous.source, name: previous.name,
+    }, previous);
+  }
+  update(project: Project, id: string) {
+    const { p, sourceDir } = this.reviewed(project, id);
+    if (!p.previous) throw new SkillError("Use the install action for this preview.", 409);
+    const previous = p.previous;
+    this.unchanged(project, previous);
+    if (sameFiles(p.files, previous.files)) {
+      this.previews.delete(id);
+      rmSync(p.stage, { recursive: true, force: true });
+      return { ...this.publicInstall(previous), unchanged: true };
+    }
+    const transaction = mkdtempSync(join(parents(project, p.harness)[0], ".skill-update-"));
+    const transactionIdentity = identity(transaction);
+    const replacement = join(transaction, "next"), backup = join(transaction, "previous");
+    let replacementIdentity = "", moved = false, applied = false, restored = false;
+    const recoveryMessage = `Update interrupted. Previous and replacement files may be in ${transaction}. Inspect before making changes.`;
+    const install: Install = { ...previous, state: "updating", message: recoveryMessage };
+    this.previews.delete(id);
+    try {
+      mkdirSync(replacement, { mode: 0o700 });
+      copyTree(sourceDir, replacement, p.files);
+      replacementIdentity = identity(replacement);
+      if (!sameFiles(manifest(replacement), p.files))
+        throw new SkillError("Replacement skill changed during preparation.", 409);
+      this.unchanged(project, previous);
+      if (identity(transaction) !== transactionIdentity)
+        throw new SkillError("Update folder changed during preparation.", 409);
+      this.save(install);
+      renameSync(p.path, backup);
+      moved = true;
+      if (identity(backup) !== previous.targetIdentity || !sameFiles(manifest(backup, true), previous.files, true) || maybeIdentity(p.path) !== null)
+        throw new SkillError("Skill target changed during update.", 409);
+      renameSync(replacement, p.path);
+      applied = true;
+      if (identity(p.path) !== replacementIdentity || !sameFiles(manifest(p.path), p.files) || root(project) !== p.root || parents(project, p.harness).some((dir, i) => identity(dir) !== p.parents[i]))
+        throw new SkillError("Skill or project changed during update.", 409);
+      for (const dir of [transaction, parents(project, p.harness)[1]]) {
+        const fd = openSync(dir, constants.O_RDONLY | constants.O_DIRECTORY);
+        try { fsyncSync(fd); } finally { closeSync(fd); }
+      }
+      install.state = "installed";
+      install.message = null;
+      install.files = manifest(p.path, true);
+      install.targetIdentity = replacementIdentity;
+      install.upstreamHash = p.upstreamHash;
+      this.save(install);
+      // Only discard the backup if its exact saved tree is still present.
+      let backupKept = true;
+      try {
+        if (identity(transaction) === transactionIdentity && identity(backup) === previous.targetIdentity && sameFiles(manifest(backup, true), previous.files, true)) {
+          rmSync(transaction, { recursive: true });
+          backupKept = false;
+        }
+      } catch {}
+      if (backupKept) {
+        install.message = `Update applied. A changed backup was kept at ${backup}.`;
+        this.save(install);
+      }
+      return this.publicInstall(install);
+    } catch {
+      try {
+        if (identity(transaction) !== transactionIdentity)
+          throw new SkillError("Update folder changed. Keep it for inspection.", 409);
+        if (applied && identity(p.path) === replacementIdentity && sameFiles(manifest(p.path), p.files)) {
+          renameSync(p.path, replacement);
+          applied = false;
+        }
+        if (moved && !applied && maybeIdentity(p.path) === null && identity(backup) === previous.targetIdentity && sameFiles(manifest(backup, true), previous.files, true)) {
+          renameSync(backup, p.path);
+          restored = true;
+        }
+        if (!moved || restored) {
+          this.save(previous);
+          rmSync(transaction, { recursive: true });
+        } else {
+          install.state = "interrupted";
+          install.message = recoveryMessage;
+          this.save(install);
+        }
+      } catch {
+        // Keep both trees if rollback cannot prove ownership or finish safely.
+        install.state = "interrupted";
+        install.message = recoveryMessage;
+        try { this.save(install); } catch {}
+      }
+      throw new SkillError(restored ? "Skill update failed. The previous skill was restored." : !moved ? "Skill update failed before replacing the current skill." : recoveryMessage, 409);
+    } finally {
+      rmSync(p.stage, { recursive: true, force: true });
+    }
+  }
+  remove(project: Project, id: string) {
+    const install = this.managed(project, id);
+    this.unchanged(project, install);
     install.state = "removing";
     this.save(install);
     try {

@@ -9,7 +9,7 @@ This is a fresh TypeScript rewrite. The old Go application is preserved in Git a
 Requires Node 24 and npm on macOS or Linux. Install this pinned GitHub beta package, then start the local service:
 
 ```sh
-npm install -g https://github.com/kaltstart-co/agentklar/releases/download/v0.1.0-beta.2/agentklar-0.1.0-beta.2.tgz
+npm install -g https://github.com/kaltstart-co/agentklar/releases/download/v0.1.0-beta.3/agentklar-0.1.0-beta.3.tgz
 agentklar start
 ```
 
@@ -88,7 +88,9 @@ Drafts stay in the open app when you switch views or harnesses, or the local ser
 
 Open **Instructions → Project skills**. Choose Codex or Claude Code, then enter a GitHub `owner/repo` (optionally `#ref`) and one exact skill name. **Preview skill** shows its target folder, source hash, full `SKILL.md` text, and a list of every file and folder with sizes. **Install reviewed skill** copies those exact staged bytes into `.agents/skills/<name>` for Codex or `.claude/skills/<name>` for Claude Code. Codex's `.agents/skills` folder can also be read by other native tools. Start a new native session to check whether the skill loads.
 
-The trusted local UI can stage, install, and remove skills. The authenticated local HTTP API can list folder metadata. There is no MCP skill tool. AgentKlar installs only when the target name is free. **Remove managed skill** checks the original project and parent folders, every managed file, its mode, and its folder identity. External or changed skills stay in place. A failed or interrupted write can leave a partial folder. Inspect it manually; AgentKlar does not recover or delete it automatically. No global skill or native user config is changed. This first slice does not update skills or install plugin, hook, or MCP bundles.
+For a managed skill, choose **Preview upstream update**. AgentKlar stages the same saved repository, ref and skill name. Review the upstream text and file list alongside the current install, then choose **Apply reviewed update**. A matching tree shows **Already up to date** and makes no project write. A pinned ref stays pinned; updating does not select a newer tag.
+
+The trusted local UI can stage, install, update, and remove skills. The authenticated local HTTP API can list folder metadata. There is no MCP skill tool. AgentKlar installs only when the target name is free. **Remove managed skill** checks the original project and parent folders, every managed file, its mode, and its folder identity. External or changed skills stay in place. Update checks the current managed tree and the reviewed stage again before replacing it. It prepares the new tree first and keeps the old tree in a temporary backup during the swap. An ordinary failed update restores the old tree when both paths still match. A conflicting edit or interrupted process keeps recovery files and shows their path for manual inspection; restart makes no recovery writes. A failed install or remove can leave a partial folder. No global skill or native user config is changed. Plugin, hook, and MCP bundles are outside this support.
 
 ## Connect MCP
 
