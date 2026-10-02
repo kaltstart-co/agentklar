@@ -43,6 +43,7 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 - [x] Shared skill folders
 - [x] Personal skills
 - [x] Reviewed skill updates
+- [x] Workflow skill
 - [x] Parallel worktrees
 
 ## In progress

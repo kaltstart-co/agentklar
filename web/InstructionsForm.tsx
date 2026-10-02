@@ -3,7 +3,7 @@ import { Alert, Badge, Button, Group, Select, Stack, Textarea } from "@mantine/c
 import type { InstructionChange, InstructionDocument, InstructionFileId, InstructionPreview, InstructionSnapshot } from "../src/contracts.js";
 
 const filenames = { agents: "AGENTS.md", claude: "CLAUDE.md" };
-const fileUsers = { agents: "Codex + Muse", claude: "Claude Code" };
+const fileUsers = { agents: "Shared", claude: "Claude Code" };
 async function request<T>(projectId: string, suffix = "", body?: unknown): Promise<T> {
   const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/instructions${suffix}`, {
     credentials: "same-origin",
@@ -43,8 +43,8 @@ export function InstructionsForm({ projectId, connected }: { projectId: string; 
   const metadata = snapshot?.files.find((entry) => entry.id === file);
   return <section className="content-panel instructions-panel">
     <h2>Native project instructions</h2>
-    <p className="muted">Edit this project's root instruction files. Codex and Muse can read AGENTS.md. Claude Code reads CLAUDE.md. Muse checks AGENTS.md first and can use CLAUDE.md when AGENTS.md is absent.</p>
-    <p className="hint">Muse loads trusted project rules. Native settings, parent files, and active sessions can affect what loads. Start a new native session to check.</p>
+    <p className="muted">Edit this project's root instruction files. Codex, Muse, and OpenCode can read AGENTS.md. Claude Code reads CLAUDE.md. Muse and OpenCode prefer AGENTS.md in this folder and can use CLAUDE.md when it is absent.</p>
+    <p className="hint">Native trust, compatibility settings, parent files, and active sessions can affect what loads. Start a new native session to check.</p>
     <Group justify="space-between">
       <Select style={{ width: "min(100%, 360px)" }} label="Instruction file" value={file} onChange={(value) => setFile(value as InstructionFileId)} allowDeselect={false}
         data={Object.entries(filenames).map(([value, label]) => ({ value, label: `${label} · ${fileUsers[value as InstructionFileId]}` }))} />
@@ -142,7 +142,7 @@ function InstructionEditor({ projectId, file, connected, active, unavailable, ag
     {preview && <div className="instruction-preview">
       <h3>Proposed change</h3>
       <p className="instruction-path"><code>{preview.path}</code></p>
-      {file === "agents" && preview.before === null && claudePresent && <Alert color="orange">Creating AGENTS.md makes Muse read it before CLAUDE.md in this folder.</Alert>}
+      {file === "agents" && preview.before === null && claudePresent && <Alert color="orange">Creating AGENTS.md makes Muse and OpenCode read it before CLAUDE.md in this folder.</Alert>}
       {file === "claude" && preview.before === null && agentsPresent && <Alert color="orange">Creating CLAUDE.md may stop Claude from loading AGENTS.md under its default settings.</Alert>}
       <details open={preview.before !== preview.after}>
         <summary>{preview.before === preview.after ? "No content change · show file" : "Before and after"}</summary>

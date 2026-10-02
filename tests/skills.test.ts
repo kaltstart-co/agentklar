@@ -15,7 +15,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createService } from "../src/service.ts";
 
-async function fixture(timeoutMs = 10000) {
+async function fixture(timeoutMs = 10000, stagedSkill?: string) {
   const dir = mkdtempSync(join(tmpdir(), "agentklar-skills-"));
   const home = join(dir, "home");
   const userHome = join(dir, "user-home");
@@ -24,12 +24,12 @@ async function fixture(timeoutMs = 10000) {
   mkdirSync(project);
   mkdirSync(userHome);
   mkdirSync(source);
-  mkdirSync(join(source, "references"));
+  if (!stagedSkill) mkdirSync(join(source, "references"));
   writeFileSync(
     join(source, "SKILL.md"),
-    "---\nname: agentklar-qa\ndescription: Test skill.\n---\n\n# Test\nReview me.\n",
+    stagedSkill ?? "---\nname: agentklar-qa\ndescription: Test skill.\n---\n\n# Test\nReview me.\n",
   );
-  writeFileSync(join(source, "references", "example.md"), "example\n");
+  if (!stagedSkill) writeFileSync(join(source, "references", "example.md"), "example\n");
   const requestedSources: string[] = [];
   const sourceOverride = (requested: string) => { requestedSources.push(requested); return source; };
   let service = createService(
@@ -167,6 +167,23 @@ test("project skills stage exact CLI bytes, install separately by harness, survi
   } finally {
     await f.close();
   }
+});
+test("the shipped AgentKlar workflow skill stages through the existing reviewed installer", async () => {
+  const skill = readFileSync(new URL("../skills/agentklar-workflow/SKILL.md", import.meta.url), "utf8");
+  const f = await fixture(10000, skill);
+  try {
+    const source = "kaltstart-co/agentklar#v0.1.0-beta.17";
+    const response = await f.call(`${f.base}/preview`, "POST", { harness: "codex", source, name: "agentklar-workflow" });
+    assert.equal(response.status, 200);
+    const preview = await response.json();
+    assert.equal(preview.text, skill);
+    assert.equal(preview.sourceVersion, "v0.1.0-beta.17");
+    assert.deepEqual(preview.files.map((file: { path: string }) => file.path), ["SKILL.md"]);
+    assert.deepEqual(f.requestedSources, [source]);
+    const installed = await (await f.call(`${f.base}/install`, "POST", { previewId: preview.id })).json();
+    assert.equal(readFileSync(join(f.project, ".agents", "skills", "agentklar-workflow", "SKILL.md"), "utf8"), skill);
+    assert.equal((await f.call(`${f.base}/remove`, "POST", { installId: installed.id })).status, 200);
+  } finally { await f.close(); }
 });
 
 test("personal skills have one durable owner across projects and keep scope-specific previews", async () => {

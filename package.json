@@ -1,6 +1,6 @@
 {
   "name": "agentklar",
-  "version": "0.1.0-beta.16",
+  "version": "0.1.0-beta.17",
   "private": true,
   "type": "module",
   "bin": {
@@ -9,6 +9,7 @@
   "files": [
     "bin",
     "dist",
+    "skills",
     "LICENSE",
     "README.md",
     "THIRD_PARTY_NOTICES.md"

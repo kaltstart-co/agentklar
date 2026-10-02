@@ -11,6 +11,7 @@ import {
 
 type Harness = "codex" | "claude";
 type Scope = "project" | "personal";
+const workflowSource = "kaltstart-co/agentklar#v0.1.0-beta.17";
 type Item = {
   id: string | null;
   harness: Harness;
@@ -115,6 +116,13 @@ export function SkillsForm({
     setPreview(null);
     setNotice("");
   }
+  function useWorkflowSource() {
+    generation.current++;
+    setDrafts((v) => ({ ...v, [harness]: { source: workflowSource, name: "agentklar-workflow" } }));
+    setPreview(null);
+    setNotice("");
+    setError("");
+  }
   async function act(
     operation: "preview" | "preview-update" | "install" | "update" | "remove",
     body: unknown,
@@ -155,7 +163,8 @@ export function SkillsForm({
       <h2>Skills</h2>
       <p className="muted">
         Add one skill from a GitHub repo to this project or your personal skill folder.
-        Codex uses .agents/skills; Claude Code uses .claude/skills.
+        Shared .agents/skills works with Codex and OpenCode. Claude Code uses .claude/skills.
+        OpenCode can read both folders unless native compatibility is disabled.
         {scope === "project" && " Muse can read both project folders."}
       </p>
       <p className="hint">
@@ -189,7 +198,7 @@ export function SkillsForm({
           value={harness}
           disabled={Boolean(busy)}
           data={[
-            { value: "codex", label: scope === "personal" ? "Codex · ~/.agents/skills" : "Shared · .agents/skills" },
+            { value: "codex", label: scope === "personal" ? "Shared · ~/.agents/skills" : "Shared · .agents/skills" },
             { value: "claude", label: scope === "personal" ? "Claude · ~/.claude/skills" : "Claude · .claude/skills" },
           ]}
           allowDeselect={false}
@@ -204,6 +213,7 @@ export function SkillsForm({
         <details>
           <summary>Add a skill from GitHub</summary>
           <Stack gap="sm" mt="sm">
+            <Button size="xs" variant="subtle" style={{ alignSelf: "flex-start" }} disabled={Boolean(busy)} onClick={useWorkflowSource}>Use AgentKlar workflow</Button>
             <TextInput
               label="GitHub repository"
               placeholder="vercel-labs/skills"

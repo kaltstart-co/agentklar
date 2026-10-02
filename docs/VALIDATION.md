@@ -2,6 +2,14 @@
 
 Verified on 2026-10-01 and 2026-10-02 using Node 24.21.0. The old application was not used.
 
+## AgentKlar workflow skill — beta.17
+
+The portable [workflow skill](../skills/agentklar-workflow/SKILL.md) uses current MCP tools and schemas. It keeps user pins, saved cost preference, exact-key retries, worktree limits, local approvals, and lead review in the native harness. The skill-creator `quick_validate.py` passed. An isolated skill-installer test mapped the pinned repository source to this same `SKILL.md`, previewed the full text, installed the exact bytes in a temporary `.agents/skills` folder, then removed the managed copy.
+
+In a separate isolated HOME and XDG setup, the trusted UI previewed and installed the skill in a project `.agents/skills` folder. OpenCode 1.18.34 listed it through native skill metadata; after UI removal, a fresh native read did not list it. The UI then installed one personal copy in a temporary `~/.agents/skills` folder. OpenCode listed that same skill from two separate projects. After removal, fresh native reads from both projects returned no skill. At 320 pixels, the Instructions and Skills page had no horizontal overflow or clipped shortcut, and browser errors were empty. Evidence: `/tmp/agentklar-workflow-skill-qa/native-*.json`, `project-installed.png`, `personal-installed.png`, and `mobile.png`. No real user skill folder, native config, worker, or model call was touched. Native discovery is verified; invocation and adherence are not.
+
+`npm run check`, `npm run build`, all 142 tests, `git diff --check`, and the beta.17 package smoke passed. The smoke installed the production package, confirmed the shipped skill has the exact source bytes, served the built UI, and exposed 19 MCP tools. The pinned public GitHub source still needs a release tag before it can be fetched without the test-only source override.
+
 ## OpenCode MCP setup — beta.16
 
 Offline tests used only temporary native homes and config files. They checked the OpenCode `type:"local"` entry, JSONC comments and other settings, a private new file, restart and guarded undo, stale previews, competing user/project/ancestor/custom/managed entries, unsafe links, ambiguous variable expansion and UI-only write access. No native config command or model call ran in these tests.
