@@ -384,8 +384,30 @@ test("Claude malformed relevant config shapes are unavailable and never reach a 
 test("native command timeout/output bounds kill the owned group and return fixed errors", async () => {
   const f=await fixture();
   try {
-    writeFileSync(f.mode,"timeout"); await assert.rejects(nativeSetupCommand(f.command,["mcp","add"],f.project,{...process.env,CODEX_HOME:f.codex,CLAUDE_CONFIG_DIR:f.claude,SETUP_MODE:f.mode,SETUP_CALLS:f.calls},{timeoutMs:180}),/timed out/);
-    const pids=JSON.parse(readFileSync(`${f.mode}.pids`,"utf8")); for(const pid of pids) assert.throws(()=>process.kill(pid,0));
+    function stopped(pid: number) {
+      if (process.platform === "linux") {
+        let stat: string;
+        try { stat = readFileSync(`/proc/${pid}/stat`, "utf8"); }
+        catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return true; throw error; }
+        // PID 1 may leave a killed orphan as a zombie. It cannot run or hold pipes.
+        return ["Z", "X", "x"].includes(stat.charAt(stat.lastIndexOf(") ") + 2));
+      }
+      try { process.kill(pid, 0); return false; }
+      catch (error) { if ((error as NodeJS.ErrnoException).code === "ESRCH") return true; throw error; }
+    }
+    assert.equal(stopped(process.pid), false, "The process check must reject a live process.");
+    // Allow slow CI startup so this checks cleanup of a running fixture, not a pre-start timeout.
+    writeFileSync(f.mode,"timeout"); await assert.rejects(nativeSetupCommand(f.command,["mcp","add"],f.project,{...process.env,CODEX_HOME:f.codex,CLAUDE_CONFIG_DIR:f.claude,SETUP_MODE:f.mode,SETUP_CALLS:f.calls},{timeoutMs:2000}),/timed out/);
+    assert.ok(existsSync(`${f.mode}.pids`), "The timeout fixture must start before process cleanup is checked.");
+    const pids: unknown = JSON.parse(readFileSync(`${f.mode}.pids`,"utf8"));
+    assert.ok(Array.isArray(pids)); assert.equal(pids.length, 2);
+    assert.ok(pids.every((pid) => Number.isSafeInteger(pid) && pid > 0));
+    assert.equal(new Set(pids).size, 2);
+    for(const pid of pids) {
+      const deadline = Date.now() + 1000;
+      while (!stopped(pid) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 10));
+      assert.ok(stopped(pid), `Owned PID ${pid} is still running after timeout cleanup.`);
+    }
     writeFileSync(f.mode,"overflow"); await assert.rejects(nativeSetupCommand(f.command,["mcp","add"],f.project,{...process.env,CODEX_HOME:f.codex,CLAUDE_CONFIG_DIR:f.claude,SETUP_MODE:f.mode,SETUP_CALLS:f.calls},{timeoutMs:1200,maxOutputBytes:1024}),/exceeded/);
   } finally { await f.cleanup(); }
 });
