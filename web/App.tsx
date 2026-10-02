@@ -527,7 +527,7 @@ export function App() {
     <main id="main-content">{setup}
       <section className="settings-card mac-preview">
         <div><h3>Mac app preview</h3><p className="hint">Apple Silicon development preview. Signing and public automatic app updates are still pending.</p></div>
-        <Button component="a" variant="default" href="https://github.com/kaltstart-co/agentklar/releases/download/v0.1.0-beta.32/AgentKlar-0.1.0-beta.32-arm64.dmg">Download Mac preview</Button>
+        <Button component="a" variant="default" href="https://github.com/kaltstart-co/agentklar/releases/download/v0.1.0-beta.33/AgentKlar-0.1.0-beta.33-arm64.dmg">Download Mac preview</Button>
       </section>
     </main>
   </div>;
