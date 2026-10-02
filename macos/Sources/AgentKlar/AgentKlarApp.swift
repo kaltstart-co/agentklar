@@ -12,10 +12,10 @@ import AppKit
     var body: some Scene {
         WindowGroup { MainView(client: client).environmentObject(updates) }
             .commands {
-                CommandGroup(after: .appInfo) { Button("Check for App Updates…") { updates.checkForUpdates() }.disabled(!updates.canCheck) }
+                CommandGroup(after: .appInfo) { Button("Check for App Updates…") { updates.checkForUpdates() }.disabled(!updates.canCheck || !client.maintenanceReady) }
                 CommandGroup(after: .newItem) {
-                    Button("Reconnect Local Service") { Task { await client.connect() } }.disabled(client.busy || client.runtime.mutationRunning)
-                    Button("Update Local Service…") { confirmServiceUpdate() }.disabled(client.busy || client.runtime.mutationRunning)
+                    Button("Reconnect Local Service") { Task { await client.connect() } }.disabled(!client.maintenanceReady)
+                    Button("Update Local Service…") { confirmServiceUpdate() }.disabled(!client.maintenanceReady)
                 }
             }
     }

@@ -6,14 +6,15 @@ The TypeScript service still owns projects, saved work, workers and approvals. I
 
 ## Preview features
 
-- Work: create an explicit worker task, stop it, read results and events, and review supported concrete approvals once.
+- Work: create a worker task with automatic model advice or explicit pins, set image/tool requirements, stop it, read results and events, and review supported concrete approvals once. Local review/fix actions preserve their source workspace.
 - Context: edit the shared brief, memory and handoff with revision checks.
-- Instructions: read AGENTS.md or CLAUDE.md, preview a change, apply it and undo an unchanged owned change.
-- Team: save roles, responsibilities, harness/model pins and cost preference.
-- Models and Usage: read native metadata, available allowance and reported task usage. Missing values stay unknown.
-- Settings: connect a harness, choose a native installation, save the main harness and check service updates.
+- Instructions: read AGENTS.md or CLAUDE.md, preview a change, apply it and undo an unchanged owned change. Native tabs manage project/personal skills and the separate Claude workflow plugin through reviewed receipts.
+- Team: save roles, responsibilities, local/remote harness/model pins and cost preference.
+- Models and Usage: read native metadata, cached benchmark evidence, available allowance and reported task usage. Missing values stay unknown.
+- Settings: connect a harness, choose a native installation, save the main harness, preview model/effort defaults, manage paired devices and check updates.
+- Remote work: choose a saved remote role or include connected computers in automatic selection; read compact owner status/results, request stop and review supported concrete remote approvals. Remote task selection never requests an unsupported local event tail.
 
-This preview has not reached browser feature parity. Remote workflows and approvals, plugins and skills, benchmark advice and advanced defaults still use the existing browser support dashboard. Open-main-harness guidance uses the terminal. Unknown approval kinds cannot be accepted in the native app. Worker completion is not human review.
+These extended screens are in the source build and have not been released in beta.32. This preview has not reached browser feature parity. Remote linked review/fix, explicit Git change handoff and coordinated-control UI still use the existing browser support dashboard. Open-main-harness guidance uses the terminal. Unknown approval kinds cannot be accepted in the native app. Worker completion is not human review.
 
 ## Build locally
 
@@ -42,7 +43,7 @@ App updates and service updates are separate. Local preview builds keep Sparkle 
 
 The signed packaging path uses `python3 macos/scripts/package.py --signed` with `AGENTKLAR_SIGN_IDENTITY`, `AGENTKLAR_NOTARY_PROFILE` and `AGENTKLAR_SPARKLE_PUBLIC_KEY`. It requires a Developer ID identity, a notarization profile and a 32-byte base64 Sparkle public key. The script signs nested components and the app, verifies the signature, notarizes and staples the app and DMG. A public release also needs signed update metadata and archives at the fixed appcast URL, `https://agentklar-seven.vercel.app/appcast.xml`.
 
-Sparkle activation checks the signed-release marker, fixed feed, key and Apple Developer ID signature. Automatic checks are enabled only for that signed path; automatic installation is disabled. The restart callback asks for confirmation and checks for idle service work and no setup or service update in progress. The background service remains running during an app restart.
+Sparkle activation checks the signed-release marker, fixed feed, key and Apple Developer ID signature. Automatic checks are enabled only for that signed path; automatic installation is disabled. The restart callback asks for confirmation and checks for idle service work and no local API write, setup or service update in progress. The background service remains running during an app restart.
 
 ## Verification limits
 

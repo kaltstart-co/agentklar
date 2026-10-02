@@ -26,6 +26,12 @@ import Foundation
         client.adoptOnboarding(.object(["revision": .number(3)]))
         client.adoptOnboarding(.object(["revision": .number(2)]))
         try expect(client.onboarding["revision"].number == 3, "Preferences regressed")
+        try expect(AgentKlarClient.requestTimeout("/projects/id/skills/preview") == 135 && AgentKlarClient.requestTimeout("/projects/id/native-settings/claude") == 60 && AgentKlarClient.requestTimeout("/snapshot") == 20, "Native operation request budgets changed")
+        client.busy = true
+        await client.updateService()
+        try expect(client.error == "Finish the current local change before updating." && !runtime.mutationRunning, "An update overlapped a local change")
+        client.busy = false
+        try expect(client.maintenanceReady, "Maintenance gate stayed closed after local change")
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }

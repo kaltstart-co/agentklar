@@ -17,6 +17,7 @@ private final class LocalSessionDelegate: NSObject, URLSessionTaskDelegate, @unc
     @Published var projectID = ""
     @Published var connected = false
     @Published var busy = false
+    @Published private(set) var pendingWrites = 0
     @Published var error = ""
     let runtime: LocalRuntime
     private var session: URLSession?
@@ -26,9 +27,11 @@ private final class LocalSessionDelegate: NSObject, URLSessionTaskDelegate, @unc
     var project: JSON { projects.first { $0["id"].string == projectID } ?? .object([:]) }
     var runs: [JSON] { (snapshot["runs"].array ?? []).filter { projectID.isEmpty || $0["projectId"].string == projectID } }
     var harnesses: [JSON] { snapshot["harnesses"].array ?? [] }
+    var maintenanceReady: Bool { !busy && !runtime.mutationRunning && pendingWrites == 0 }
 
     init(runtime: LocalRuntime? = nil) { self.runtime = runtime ?? LocalRuntime() }
     func connect() async {
+        guard maintenanceReady else { error = "Finish the current local change before reconnecting."; return }
         do { try await runtime.performMutation { try await reconnectInsideMutation() } }
         catch { self.error = errorText(error) }
     }
@@ -37,7 +40,7 @@ private final class LocalSessionDelegate: NSObject, URLSessionTaskDelegate, @unc
         let link = try await runtime.privateLink()
         let base = URL(string: "http://127.0.0.1:\(link.port!)")!
         let config = URLSessionConfiguration.ephemeral
-        config.timeoutIntervalForRequest = 20; config.timeoutIntervalForResource = 45
+        config.timeoutIntervalForRequest = 20; config.timeoutIntervalForResource = 150
         config.httpShouldSetCookies = true
         let newSession = URLSession(configuration: config, delegate: LocalSessionDelegate(origin: base), delegateQueue: nil)
         let (_, response) = try await bounded(newSession, URLRequest(url: link))
@@ -56,9 +59,15 @@ private final class LocalSessionDelegate: NSObject, URLSessionTaskDelegate, @unc
         guard ["GET", "POST", "PUT", "PATCH", "DELETE"].contains(method) else { throw LocalError.message("Unsupported local API method.") }
         var request = URLRequest(url: try LocalBoundary.apiURL(path, origin: origin))
         request.httpMethod = method
-        if path.contains("/setup/") { request.timeoutInterval = 35 }
+        request.timeoutInterval = Self.requestTimeout(path)
         if method != "GET" { request.setValue(origin.absoluteString, forHTTPHeaderField: "Origin") }
         if let body { request.setValue("application/json", forHTTPHeaderField: "Content-Type"); request.httpBody = try JSONSerialization.data(withJSONObject: body) }
+        let writing = method != "GET"
+        if writing {
+            guard !busy, !runtime.mutationRunning else { throw LocalError.message("Finish setup or the service update before changing local work.") }
+            pendingWrites += 1
+        }
+        defer { if writing { pendingWrites -= 1 } }
         let (data, response) = try await bounded(session, request)
         guard let response = response as? HTTPURLResponse, let url = response.url, LocalBoundary.sameOrigin(url, origin) else {
             throw LocalError.message("Only the authenticated local service may answer this request.")
@@ -87,7 +96,8 @@ private final class LocalSessionDelegate: NSObject, URLSessionTaskDelegate, @unc
         return (data, response)
     }
     private func loadSnapshot() async throws {
-        snapshot = try await request("/snapshot")
+        let next = try await request("/snapshot")
+        if snapshot != next { snapshot = next }
         adoptOnboarding(try await request("/onboarding"))
         if !projects.contains(where: { $0["id"].string == projectID }) {
             projectID = onboarding["projectId"].string ?? projects.first?["id"].string ?? ""
@@ -95,7 +105,7 @@ private final class LocalSessionDelegate: NSObject, URLSessionTaskDelegate, @unc
         }
     }
     func adoptOnboarding(_ next: JSON) {
-        if (next["revision"].number ?? -1) >= (onboarding["revision"].number ?? -1) { onboarding = next }
+        if next != onboarding, (next["revision"].number ?? -1) >= (onboarding["revision"].number ?? -1) { onboarding = next }
     }
     func refresh() async {
         guard connected, !busy, !refreshing else { return }
@@ -118,6 +128,7 @@ private final class LocalSessionDelegate: NSObject, URLSessionTaskDelegate, @unc
         } catch { self.error = errorText(error) }
     }
     func installService() async {
+        guard maintenanceReady else { error = "Finish the current local change before setup."; return }
         do { try await runtime.performMutation {
             let alert = NSAlert(); alert.messageText = "Set up AgentKlar locally?"
             alert.informativeText = "The checked installer will install the AgentKlar service for your user. Your coding apps and accounts stay in place."
@@ -129,6 +140,7 @@ private final class LocalSessionDelegate: NSObject, URLSessionTaskDelegate, @unc
         } } catch { self.error = errorText(error) }
     }
     func updateService() async {
+        guard maintenanceReady else { error = "Finish the current local change before updating."; return }
         do { try await runtime.performMutation {
             busy = true; defer { busy = false }
             guard LocalBoundary.idleService(try await runtime.runCLI(["service", "status"])) else {
@@ -140,5 +152,12 @@ private final class LocalSessionDelegate: NSObject, URLSessionTaskDelegate, @unc
     }
     private func errorText(_ error: Error) -> String {
         (error as? LocalError)?.errorDescription ?? "The local service could not finish this request. Reconnect and try again."
+    }
+    static func requestTimeout(_ path: String) -> TimeInterval {
+        let parts = path.split(separator: "?", maxSplits: 1)[0].split(separator: "/")
+        if parts.contains("skills") { return 135 }
+        if parts.contains("plugins") || parts.contains("recommend") || path == "/tasks/start" { return 120 }
+        if parts.contains("native-settings") { return 60 }
+        return parts.contains("setup") ? 35 : 20
     }
 }

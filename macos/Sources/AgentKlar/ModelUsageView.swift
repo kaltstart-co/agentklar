@@ -7,12 +7,24 @@ struct ModelUsageView: View {
     @State private var working = false
     @State private var failure = ""
     @State private var search = ""
+    @State private var benchmarks: JSON = .null
+    @State private var benchmarkBusy = false
+    @State private var benchmarkFailure = ""
     private var projectRuns: [JSON] { client.runs.filter { $0["projectId"].string == client.projectID } }
 
     var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text(section).font(.title2)
+                Spacer()
+                Button("Refresh native metadata", systemImage: "arrow.clockwise") { Task { await load(refresh: true) } }
+                    .disabled(working || !client.connected || client.projectID.isEmpty)
+                if section == "Models" {
+                    Button("Refresh benchmarks") { Task { await loadBenchmarks(refresh: true) } }.disabled(benchmarkBusy || !client.connected)
+                }
+            }.padding()
         List {
             Section {
-                Button("Refresh native models and allowance", systemImage: "arrow.clockwise") { Task { await load(refresh: true) } }.disabled(working || !client.connected || client.projectID.isEmpty)
                 if working { ProgressView("Reading native metadata…") }
                 if let checked = catalog["checkedAt"].string { Text("Checked: \(checked)").font(.caption).foregroundStyle(.secondary) }
                 if !failure.isEmpty { Label(failure, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
@@ -21,6 +33,7 @@ struct ModelUsageView: View {
             if section == "Models" {
                 Section { TextField("Find a model", text: $search); Text("Native descriptions are metadata. Effective tools and model access remain unknown until checked in a native session.").foregroundStyle(.secondary) }
             } else { usageSection }
+            if section == "Models" { benchmarkSummary }
             ForEach(catalog["harnesses"].array ?? [], id: \.self) { entry in
                 Section {
                     if section == "Models" { models(entry) } else { quota(entry["quota"]) }
@@ -29,11 +42,12 @@ struct ModelUsageView: View {
                 }
             }
         }
+        }
         .navigationTitle(section)
         .task(id: client.projectID + ":" + String(client.connected)) {
             catalog = .null; failure = ""
             while working { do { try await Task.sleep(for: .milliseconds(50)) } catch { return } }
-            if !Task.isCancelled { await load(refresh: false) }
+            if !Task.isCancelled { await load(refresh: false); await loadBenchmarks(refresh: false) }
         }
     }
 
@@ -62,6 +76,12 @@ struct ModelUsageView: View {
                 Text(model["id"].string ?? "Unknown model ID").font(.caption).textSelection(.enabled)
                 if let description = model["description"].string, !description.isEmpty { Text(description).foregroundStyle(.secondary) }
                 if let resolved = model["resolvedModel"].string { Text("Resolves to: \(resolved)").font(.caption) }
+                if let evidence = model["toolEvidence"].objectValue {
+                    let names = evidence["tools"]?.array?.compactMap(\.string) ?? []
+                    Text("Advertised tools: " + (names.isEmpty ? "Unknown" : names.joined(separator: ", "))).font(.caption)
+                    Text(evidence["message"]?.string ?? "Advertised metadata does not grant tool permission.").font(.caption).foregroundStyle(.secondary)
+                } else { Text("Effective web search / image generation: unknown").font(.caption).foregroundStyle(.secondary) }
+                benchmarkDetail(harness: entry["harness"].string ?? "", model: model["resolvedModel"].string ?? model["id"].string ?? "")
                 Text("Image input: \(model["inputModalities"].array == nil ? "Unknown" : (model["inputModalities"].array ?? []).contains { $0.string == "image" } ? "Advertised" : "Not advertised")").font(.caption)
             }.padding(.vertical, 4)
         }
@@ -86,6 +106,41 @@ struct ModelUsageView: View {
             if let reset = window["resetsAt"].number { Text("Resets: \(Date(timeIntervalSince1970: reset).formatted())").font(.caption) }
             if let reset = window["resetsAtMs"].number { Text("Resets: \(Date(timeIntervalSince1970: reset / 1000).formatted())").font(.caption) }
         } else { LabeledContent(title, value: "Unknown") }
+    }
+    private var benchmarkSummary: some View {
+        Section("LiveBench reference scores") {
+            Text("Max-effort scores are reference evidence. They do not predict task results or subscription cost.").font(.caption)
+            if let checked = benchmarks["checkedAt"].string {
+                Text("Release \(benchmarks["release"].string ?? "Unknown") · Checked \(checked)").font(.caption)
+                Text(benchmarkFresh ? "Fresh: may break policy ties" : "Stale: excluded from tie breaking").foregroundStyle(.secondary)
+            }
+            if benchmarkBusy { ProgressView("Reading public scores…") }
+            if !benchmarkFailure.isEmpty { Text(benchmarkFailure).foregroundStyle(.red) }
+            Text("Only exact reviewed model IDs have scores. Evaluation dates are unknown.").font(.caption).foregroundStyle(.secondary)
+        }
+    }
+    private var benchmarkFresh: Bool {
+        guard let text = benchmarks["checkedAt"].string else { return false }
+        let formatter = ISO8601DateFormatter(); formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        guard let date = formatter.date(from: text) ?? ISO8601DateFormatter().date(from: text) else { return false }
+        let age = Date().timeIntervalSince(date); return age >= 0 && age <= 7 * 86400
+    }
+    @ViewBuilder private func benchmarkDetail(harness: String, model: String) -> some View {
+        if let row = (benchmarks["models"].array ?? []).first(where: { $0["harness"].string == harness && $0["model"].string == model }) {
+            DisclosureGroup("Benchmark reference") {
+                ForEach((row["scores"].objectValue ?? [:]).keys.sorted(), id: \.self) { metric in
+                    Text("\(metric): \(row["scores"][metric].number.map { String(format: "%.2f", $0) } ?? "Unknown")/100").font(.caption)
+                }
+                Text("Source row: \(row["sourceRow"].string ?? "Unknown") · Effort: \(benchmarks["measuredEffort"].string ?? "Unknown")").font(.caption)
+                Link("LiveBench source scores", destination: URL(string: "https://livebench.ai/table_2026_06_25.csv")!)
+            }
+        } else { Text("Benchmark: no exact model match").font(.caption).foregroundStyle(.secondary) }
+    }
+    private func loadBenchmarks(refresh: Bool) async {
+        guard client.connected, !benchmarkBusy else { return }
+        benchmarkBusy = true; benchmarkFailure = ""; defer { benchmarkBusy = false }
+        do { benchmarks = try await client.request(refresh ? "/benchmarks/refresh" : "/benchmarks", body: refresh ? [:] : nil) }
+        catch { benchmarkFailure = error.localizedDescription }
     }
     private func load(refresh: Bool) async {
         guard client.connected, !client.projectID.isEmpty, !working else { return }

@@ -48,6 +48,21 @@ final class FoundationTests: XCTestCase {
         XCTAssertEqual(client.onboarding["revision"].number, 3)
         XCTAssertEqual(client.onboarding["mainHarness"].string, "claude")
     }
+    @MainActor func testNativeRequestBudgetsAndMaintenanceGate() async {
+        XCTAssertEqual(AgentKlarClient.requestTimeout("/projects/id/skills/preview"), 135)
+        XCTAssertEqual(AgentKlarClient.requestTimeout("/projects/id/plugins/apply"), 120)
+        XCTAssertEqual(AgentKlarClient.requestTimeout("/projects/id/recommend"), 120)
+        XCTAssertEqual(AgentKlarClient.requestTimeout("/projects/id/native-settings/claude"), 60)
+        XCTAssertEqual(AgentKlarClient.requestTimeout("/snapshot"), 20)
+        let client = AgentKlarClient()
+        client.busy = true
+        XCTAssertFalse(client.maintenanceReady)
+        await client.updateService()
+        XCTAssertEqual(client.error, "Finish the current local change before updating.")
+        XCTAssertFalse(client.runtime.mutationRunning)
+        client.busy = false
+        XCTAssertTrue(client.maintenanceReady)
+    }
     func testCommandBoundsTimeoutAndRetainedDescendantPipes() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

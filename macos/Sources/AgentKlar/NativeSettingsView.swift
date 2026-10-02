@@ -16,6 +16,16 @@ struct NativeSettingsView: View {
     private var configured: Bool { status["status"].string == "configured" && status["change"]["state"].string != "interrupted" }
 
     var body: some View {
+        TabView {
+            connections.tabItem { Label("Connections", systemImage: "point.3.connected.trianglepath.dotted") }
+            Form { Section("Native defaults") { NativeDefaultsView(client: client) } }
+                .formStyle(.grouped).tabItem { Label("Defaults", systemImage: "slider.horizontal.3") }
+            NativeDevicesView(client: client).tabItem { Label("Devices", systemImage: "desktopcomputer") }
+            Form { Section("Updates") { NativeUpdateSettings(client: client) } }
+                .formStyle(.grouped).tabItem { Label("Updates", systemImage: "arrow.down.circle") }
+        }.padding().disabled(client.busy).navigationTitle("Settings")
+    }
+    private var connections: some View {
         Form {
             Section("Project") {
                 Picker("Project", selection: Binding(get: { client.projectID }, set: { id in Task { await client.selectProject(id) } })) {
@@ -52,7 +62,6 @@ struct NativeSettingsView: View {
                 ForEach(installations, id: \.self) { entry in installationRow(entry) }
                 Text("Version discovery does not prove protocol or tool support. Finish work before restarting the service.").font(.caption).foregroundStyle(.secondary)
             }
-            Section("Updates") { NativeUpdateSettings(client: client) }
             if !message.isEmpty { Section { Text(message).foregroundStyle(.secondary) } }
             if !failure.isEmpty { Section { Label(failure, systemImage: "exclamationmark.triangle").foregroundStyle(.red).textSelection(.enabled) } }
         }

@@ -4,10 +4,18 @@ struct ProjectDetailsView: View {
     @ObservedObject var client: AgentKlarClient
     let section: String
     var body: some View {
-        if client.projectID.isEmpty {
+        if section == "Instructions" {
+            TabView {
+                Group {
+                    if client.projectID.isEmpty {
+                        ContentUnavailableView("Choose a project", systemImage: "folder", description: Text("Instruction files belong to an existing project."))
+                    } else { NativeInstructionEditor(client: client) }
+                }.tabItem { Label("Files", systemImage: "doc.text") }
+                Form { Section("Skills and plugins") { NativeExtensionsView(client: client) } }
+                    .formStyle(.grouped).tabItem { Label("Skills and plugins", systemImage: "puzzlepiece.extension") }
+            }.padding()
+        } else if client.projectID.isEmpty {
             ContentUnavailableView("Choose a project", systemImage: "folder", description: Text("Project context and instruction files belong to an existing project."))
-        } else if section == "Instructions" {
-            NativeInstructionEditor(client: client)
         } else {
             NativeContextEditor(client: client)
         }
@@ -134,7 +142,6 @@ private struct NativeInstructionEditor: View {
                         }
                     }
                 }
-                Text("Workflow skills and plugin bundles are not yet managed in this native view.").font(.caption).foregroundStyle(.secondary)
             }
         }.formStyle(.grouped).disabled(busy || !client.connected)
         .task(id: "\(client.projectID):\(file)") {

@@ -32,13 +32,13 @@ final class NativeUpdates: NSObject, ObservableObject, SPUUpdaterDelegate {
     }
 
     func checkForUpdates() {
-        guard enabled, client?.busy == false else { return }
+        guard enabled, client?.maintenanceReady == true else { return }
         if pendingInstall != nil { finishInstallation(); return }
         controller?.checkForUpdates(nil)
     }
 
     func updater(_ updater: SPUUpdater, mayPerform updateCheck: SPUUpdateCheck) throws {
-        guard client?.busy == false, client?.runtime.mutationRunning == false else { throw NSError(domain: "AgentKlar", code: 1, userInfo: [NSLocalizedDescriptionKey: "Finish setup or the service update before checking app updates."]) }
+        guard client?.maintenanceReady == true else { throw NSError(domain: "AgentKlar", code: 1, userInfo: [NSLocalizedDescriptionKey: "Finish local changes, setup or the service update before checking app updates."]) }
     }
 
     func updater(_ updater: SPUUpdater, shouldPostponeRelaunchForUpdate item: SUAppcastItem, untilInvokingBlock installHandler: @escaping () -> Void) -> Bool {
@@ -50,11 +50,13 @@ final class NativeUpdates: NSObject, ObservableObject, SPUUpdaterDelegate {
 
     private func finishInstallation() {
         guard let client, pendingInstall != nil, !installing else { return }
+        guard client.maintenanceReady else { message = "Finish local changes, then choose Check for App Updates again to install."; return }
         installing = true
         Task {
             defer { installing = false }
             do {
                 try await client.runtime.performMutation {
+                    guard client.pendingWrites == 0 else { throw LocalError.message("A local change started. Finish it before restarting AgentKlar.") }
                     ownsBusy = true
                     client.busy = true
                     let status = try await client.runtime.runCLI(["service", "status"])
@@ -113,7 +115,7 @@ struct NativeUpdateSettings: View {
     var body: some View {
         LabeledContent("Mac app", value: Bundle.main.object(forInfoDictionaryKey: "AgentKlarReleaseVersion") as? String ?? "Development")
         Text(updates.message).foregroundStyle(.secondary)
-        if updates.enabled { Button("Check for app updates") { updates.checkForUpdates() }.disabled(!updates.canCheck || client.busy) }
+        if updates.enabled { Button("Check for app updates") { updates.checkForUpdates() }.disabled(!updates.canCheck || !client.maintenanceReady) }
         LabeledContent("Local service", value: status["current"].string ?? "Checking…")
         if let latest = status["latest"].string { LabeledContent("Latest service", value: latest) }
         if let error = status["error"].string { Text(error).foregroundStyle(.secondary) }
@@ -121,7 +123,7 @@ struct NativeUpdateSettings: View {
         HStack {
             Button("Check service updates") { Task { await check(refresh: true) } }.disabled(checking || client.busy)
             if status["installation"]["supported"].bool == true {
-                Button("Update local service") { confirm = true }.disabled(status["available"].bool != true || checking || client.busy)
+                Button("Update local service") { confirm = true }.disabled(status["available"].bool != true || checking || !client.maintenanceReady)
             }
         }
         .confirmationDialog("Update the local AgentKlar service? Save open drafts first.", isPresented: $confirm) {
