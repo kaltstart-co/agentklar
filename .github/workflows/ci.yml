@@ -30,6 +30,15 @@ jobs:
           test -d "$DEVELOPER_DIR"
           xcodebuild -version
           swift --version
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24.21.0
+          cache: npm
+      - name: Install and build bundled service sources
+        run: |
+          npm ci
+          npm run check
+          npm run build
       - name: Build native app
         run: swift build --package-path macos --build-system native -c release
       - name: Run native tests

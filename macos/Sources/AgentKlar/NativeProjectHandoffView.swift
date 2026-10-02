@@ -21,13 +21,12 @@ struct NativeProjectHandoffView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Switch main harness").font(.headline)
+            Text("Switch main harness").font(NativeStyle.heading)
             Text("Keep saved project context and work references when another native harness takes over. Existing workers stay on their computers. Native sessions and permissions stay with their harness.").foregroundStyle(.secondary)
-            Text("Prepare uses saved context. Save any context draft first.").font(.caption).foregroundStyle(.secondary)
-            HStack {
-                Button("Refresh handoff status", systemImage: "arrow.clockwise") { Task { await refreshStatus() } }
-                Button("Prepare handoff") { Task { await prepare() } }
-                Button("Saved handoffs") { Task { await loadHistory(0) } }
+            Text("Prepare uses saved context. Save any context draft first.").font(NativeStyle.caption).foregroundStyle(.secondary)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) { handoffActions }.fixedSize(horizontal: true, vertical: false)
+                VStack(alignment: .leading, spacing: 8) { handoffActions }
             }
             if history != .null { historySection }
             if packet["id"].string != nil { packetSection }
@@ -37,6 +36,7 @@ struct NativeProjectHandoffView: View {
             if !notice.isEmpty { Text(notice).foregroundStyle(.secondary) }
             if !failure.isEmpty { Label(failure + " Refresh before trying again.", systemImage: "exclamationmark.triangle").foregroundStyle(.red).textSelection(.enabled) }
         }
+        .font(NativeStyle.document).labelStyle(.titleAndIcon)
         .disabled(working || client.busy || !client.connected || client.projectID.isEmpty)
         .onChange(of: mode) { _, _ in review = ""; reviewedControl = .null }
         .task(id: scope) {
@@ -48,8 +48,16 @@ struct NativeProjectHandoffView: View {
         }
     }
 
+    @ViewBuilder private var handoffActions: some View {
+        Button("Refresh handoff status", systemImage: "arrow.clockwise") { Task { await refreshStatus() } }
+        Button("Prepare handoff", systemImage: "doc.badge.plus") { Task { await prepare() } }
+        Button("Saved handoffs", systemImage: "clock") { Task { await loadHistory(0) } }
+    }
+
     private var historySection: some View {
-        DisclosureGroup("Saved handoff history") {
+        VStack(alignment: .leading, spacing: 8) {
+            Divider()
+            Text("Saved handoff history").font(NativeStyle.heading)
             VStack(alignment: .leading, spacing: 8) {
                 ForEach(history["packets"].array ?? [], id: \.self) { row in
                     if let id = row["id"].string {
@@ -58,14 +66,14 @@ struct NativeProjectHandoffView: View {
                 }
                 if (history["packets"].array ?? []).isEmpty { Text("No saved handoffs.").foregroundStyle(.secondary) }
                 if let next = history["nextOffset"].number { Button("Older handoffs") { Task { await loadHistory(Int(next)) } } }
-                if offset > 0 { Text("Showing an older page.").font(.caption).foregroundStyle(.secondary) }
+                if offset > 0 { Text("Showing an older page.").font(NativeStyle.caption).foregroundStyle(.secondary) }
             }.padding(.top, 6)
         }
     }
 
     private var packetSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Saved handoff · \(packet["createdAt"].string ?? "Date unknown")").font(.headline)
+            Text("Saved handoff · \(packet["createdAt"].string ?? "Date unknown")").font(NativeStyle.heading)
             Label(packet["receipt"] == .null ? "Prepared snapshot" : "Accepted by receiving harness", systemImage: packet["receipt"] == .null ? "doc.text" : "checkmark.circle")
             if packet["receipt"] == .null {
                 if let saved = packet["control"]["revision"].number, let current = control["revision"].number, saved != current {
@@ -75,21 +83,21 @@ struct NativeProjectHandoffView: View {
                     Label("Saved context changed. Prepare a fresh handoff before acceptance.", systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
                 }
             } else {
-                Text("\(packet["receipt"]["lead"]["clientName"].string ?? "Unknown MCP client") accepted at \(packet["receipt"]["acceptedAt"].string ?? "an unknown time"). This is a saved receipt. Refresh status for the current lead.").font(.caption).foregroundStyle(.secondary)
+                Text("\(packet["receipt"]["lead"]["clientName"].string ?? "Unknown MCP client") accepted at \(packet["receipt"]["acceptedAt"].string ?? "an unknown time"). This is a saved receipt. Refresh status for the current lead.").font(NativeStyle.caption).foregroundStyle(.secondary)
             }
-            Text("Saved context revision \(revisionText(packet["context"]["revision"])). \(revisionText(packet["work"]["totalLocal"])) local and \(revisionText(packet["work"]["totalRemote"])) remote work references. States were observed when prepared.").font(.caption).foregroundStyle(.secondary)
-            DisclosureGroup("Saved project context") {
+            Text("Saved context revision \(revisionText(packet["context"]["revision"])). \(revisionText(packet["work"]["totalLocal"])) local and \(revisionText(packet["work"]["totalRemote"])) remote work references. States were observed when prepared.").font(NativeStyle.caption).foregroundStyle(.secondary)
+            NativeDetailButton("Saved project context") {
                 VStack(alignment: .leading, spacing: 6) {
                     contextText("Brief", key: "brief")
                     contextText("Memory", key: "memory")
                     contextText("Next steps", key: "handoff")
                 }.padding(.top, 6)
             }
-            DisclosureGroup("Work references") { workReferences }
-            DisclosureGroup("Receiving harness instructions") {
+            NativeDetailButton("Work references") { workReferences }.id("work:" + (packet["id"].string ?? ""))
+            NativeDetailButton("Receiving harness instructions") {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Open your normal native harness with AgentKlar MCP. Read this packet and projects_list for current roles and cost preference. Review the context and work, then explicitly accept using a stable UUID. A stale packet needs a new prepare.").foregroundStyle(.secondary)
-                    Text("Only the receiving harness accepts through its MCP bridge. This app does not claim its identity.").font(.caption).foregroundStyle(.secondary)
+                    Text("Only the receiving harness accepts through its MCP bridge. This app does not claim its identity.").font(NativeStyle.caption).foregroundStyle(.secondary)
                     if let instructions = receivingInstructions {
                         Text(instructions).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
                         Button("Copy receiving harness pointer", systemImage: "doc.on.doc") {
@@ -100,8 +108,8 @@ struct NativeProjectHandoffView: View {
                     } else { Text("Exact packet identifiers or revisions are unavailable. Read a complete packet before acceptance.").foregroundStyle(.orange) }
                 }.padding(.top, 6)
             }
-            DisclosureGroup("Exact digest, revisions and saved packet") { code(packet) }
-        }.padding(10).background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+            NativeDetailButton("Exact digest, revisions and saved packet") { code(packet) }.id("packet:" + (packet["id"].string ?? ""))
+        }.padding(.vertical, 8)
     }
 
     private var workReferences: some View {
@@ -109,37 +117,39 @@ struct NativeProjectHandoffView: View {
             ForEach(packet["work"]["local"].array ?? [], id: \.self) { row in
                 VStack(alignment: .leading, spacing: 4) {
                     Text("\(row["harness"].string ?? "Native") task · \(row["state"].string ?? "Unknown state")")
-                    Text(row["id"].string ?? "Task ID unavailable").font(.caption).textSelection(.enabled)
+                    Text(row["id"].string ?? "Task ID unavailable").font(NativeStyle.caption).textSelection(.enabled)
                     if let id = row["id"].string { Button("View task", systemImage: "arrow.up.forward.square") { client.requestedRunID = id } }
-                    Text("Observed: \(row["updatedAt"].string ?? "Unknown")").font(.caption).foregroundStyle(.secondary)
-                    if let path = row["workspace"]["path"].string { Text(path + (row["workspace"]["pathTruncated"].bool == true ? " (shortened; read task for full path)" : "")).font(.caption).textSelection(.enabled) }
+                    Text("Observed: \(row["updatedAt"].string ?? "Unknown")").font(NativeStyle.caption).foregroundStyle(.secondary)
+                    if let path = row["workspace"]["path"].string { Text(path + (row["workspace"]["pathTruncated"].bool == true ? " (shortened; read task for full path)" : "")).font(NativeStyle.caption).textSelection(.enabled) }
                     if row["followUp"] != .null { code(row["followUp"]) }
                 }
             }
             ForEach(packet["work"]["remote"].array ?? [], id: \.self) { row in
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Remote task · \(row["state"].string ?? "Owner state unknown") · \(row["connection"].string ?? "Connection unknown")")
-                    Text("Task \(row["id"].string ?? "unknown") · owner \(row["ownerDeviceId"].string ?? "unknown")").font(.caption).textSelection(.enabled)
+                    Text("Task \(row["id"].string ?? "unknown") · owner \(row["ownerDeviceId"].string ?? "unknown")").font(NativeStyle.caption).textSelection(.enabled)
                     if let id = row["id"].string { Button("View remote task", systemImage: "arrow.up.forward.square") { client.requestedRunID = id } }
-                    if let date = row["lastObservedAt"].string { Text("Observed: \(date)").font(.caption).foregroundStyle(.secondary) }
+                    if let date = row["lastObservedAt"].string { Text("Observed: \(date)").font(NativeStyle.caption).foregroundStyle(.secondary) }
                 }
             }
             if (packet["work"]["totalLocal"].number ?? 0) > Double((packet["work"]["local"].array ?? []).count) || (packet["work"]["totalRemote"].number ?? 0) > Double((packet["work"]["remote"].array ?? []).count) {
-                Text("Showing up to ten references of each kind. Read project history for the remaining work.").font(.caption).foregroundStyle(.secondary)
+                Text("Showing up to ten references of each kind. Read project history for the remaining work.").font(NativeStyle.caption).foregroundStyle(.secondary)
             }
-            Text("Read these references in Work or through the native MCP tools.").font(.caption).foregroundStyle(.secondary)
+            Text("Read these references in Work or through the native MCP tools.").font(NativeStyle.caption).foregroundStyle(.secondary)
             code(packet["work"]["pointers"])
         }.padding(.top, 6)
     }
 
     private var controlSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(control["mode"].string == "coordinated" ? "Coordinated control" : "Advisory lead").font(.headline)
+            Text(control["mode"].string == "coordinated" ? "Coordinated control" : "Advisory lead").font(NativeStyle.heading)
             Text(control["lead"] == .null ? "No lead connected." : "Current lead: \(control["lead"]["clientName"].string ?? "Unknown MCP client"). Client names are reported by the harness.").foregroundStyle(.secondary)
-            DisclosureGroup("Project control setting") {
+            VStack(alignment: .leading, spacing: 8) {
+                Divider()
+                Text("Project control setting").font(NativeStyle.heading)
                 VStack(alignment: .leading, spacing: 8) {
                     Picker("Control mode", selection: $mode) { Text("Advisory (default)").tag("advisory"); Text("Coordinated").tag("coordinated") }
-                    Text("Coordinated control limits MCP task starts, worker stops and shared context changes to the current lead. Trusted human actions remain available. It does not control direct file edits or native permissions.").font(.caption).foregroundStyle(.secondary)
+                    Text("Coordinated control limits MCP task starts, worker stops and shared context changes to the current lead. Trusted human actions remain available. It does not control direct file edits or native permissions.").font(NativeStyle.caption).foregroundStyle(.secondary)
                     Button("Review setting change") { reviewedControl = control; reviewedMode = mode; review = "mode" }.disabled(mode == control["mode"].string || control["revision"].number == nil)
                     if review == "mode" {
                         Text("Change this project to \(reviewedMode) control at revision \(revisionText(reviewedControl["revision"]))? Existing workers keep running.").foregroundStyle(.orange)
@@ -147,18 +157,21 @@ struct NativeProjectHandoffView: View {
                     }
                 }.padding(.top, 6)
             }
-            DisclosureGroup("Recover a lost lead") {
+            VStack(alignment: .leading, spacing: 8) {
+                Divider()
+                Text("Recover a lost lead").font(NativeStyle.heading)
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Release the observed lead so a native harness can claim coordination again. Existing workers continue. This does not approve native requests.").font(.caption).foregroundStyle(.secondary)
+                    Text("Release the observed lead so a native harness can claim coordination again. Existing workers continue. This does not approve native requests.").font(NativeStyle.caption).foregroundStyle(.secondary)
                     Button("Review recovery") { Task { await reviewRecovery() } }.disabled(control["lead"] == .null)
                     if review == "recover" {
                         Text("Release \(reviewedControl["lead"]["clientName"].string ?? "the observed lead") at revision \(revisionText(reviewedControl["revision"]))?").foregroundStyle(.orange)
-                        DisclosureGroup("Exact observed claim") { code(reviewedControl) }
+                        Text("Exact observed claim").font(NativeStyle.heading)
+                        code(reviewedControl)
                         HStack { Button("Release reviewed lead", role: .destructive) { Task { await recover() } }; Button("Cancel") { clearReview() } }
                     }
                 }.padding(.top, 6)
             }
-            DisclosureGroup("Current control metadata") { code(control) }
+            NativeDetailButton("Current control metadata") { code(control) }.id("control:" + revisionText(control["revision"]))
         }
     }
 
@@ -168,7 +181,7 @@ struct NativeProjectHandoffView: View {
               let control = packet["control"]["revision"].number else { return nil }
         return "Read projects_list for current roles and cost preference.\nproject_handoff({action:\"read\",projectId:\"\(project)\",packetId:\"\(id)\"})\nAfter reviewing saved context and work, the receiving native harness can explicitly accept:\nproject_handoff({action:\"accept\",projectId:\"\(project)\",packetId:\"\(id)\",requestId:\"YOUR_STABLE_UUID\",expectedDigest:\"\(digest)\",expectedContextRevision:\(Int(context)),expectedControlRevision:\(Int(control))})"
     }
-    private func contextText(_ title: String, key: String) -> some View { VStack(alignment: .leading) { Text(title).font(.headline); Text(packet["context"][key].string.flatMap { $0.isEmpty ? nil : $0 } ?? "No saved text.").textSelection(.enabled) } }
+    private func contextText(_ title: String, key: String) -> some View { VStack(alignment: .leading) { Text(title).font(NativeStyle.heading); Text(packet["context"][key].string.flatMap { $0.isEmpty ? nil : $0 } ?? "No saved text.").textSelection(.enabled) } }
     private func code(_ value: JSON) -> some View { Text(value.prettyText).font(.system(.caption, design: .monospaced)).textSelection(.enabled) }
     private func revisionText(_ value: JSON) -> String { value.number.map { String(Int($0)) } ?? "Unknown" }
     private func clearReview() { review = ""; reviewedControl = .null; reviewedMode = "" }

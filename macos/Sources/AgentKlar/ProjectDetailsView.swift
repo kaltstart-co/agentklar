@@ -4,17 +4,38 @@ import AppKit
 struct ProjectDetailsView: View {
     @ObservedObject var client: AgentKlarClient
     let section: String
+    @State private var instructionMode = "Files"
     var body: some View {
         if section == "Instructions" {
-            TabView {
-                Group {
-                    if client.projectID.isEmpty {
-                        ContentUnavailableView("Choose a project", systemImage: "folder", description: Text("Instruction files belong to an existing project."))
-                    } else { NativeInstructionEditor(client: client) }
-                }.tabItem { Label("Files", systemImage: "doc.text") }
-                Form { Section("Skills and plugins") { NativeExtensionsView(client: client) } }
-                    .formStyle(.grouped).font(.system(size: 13)).padding(20).tabItem { Label("Skills and plugins", systemImage: "puzzlepiece.extension") }
-            }.padding(20)
+            VStack(alignment: .leading, spacing: 0) {
+                NativePageHeader(title: "Instructions", subtitle: "Project files and extensions used by your native coding apps.") {}
+                    .padding(.horizontal, 24).padding(.top, 24)
+                HStack(spacing: 8) {
+                    ForEach(["Files", "Skills and plugins"], id: \.self) { name in
+                        Button { instructionMode = name } label: {
+                            Text(name).font(NativeStyle.body).foregroundStyle(instructionMode == name ? .primary : .secondary)
+                                .padding(.horizontal, 10).padding(.vertical, 6)
+                                .background(instructionMode == name ? Color.secondary.opacity(0.08) : Color.clear, in: RoundedRectangle(cornerRadius: 6))
+                        }.buttonStyle(.plain).accessibilityAddTraits(instructionMode == name ? .isSelected : [])
+                    }
+                }.padding(.horizontal, 24).padding(.top, 16)
+                GeometryReader { space in
+                    ZStack {
+                    Group {
+                        if client.projectID.isEmpty {
+                            ContentUnavailableView("Choose a project", systemImage: "folder", description: Text("Instruction files belong to an existing project."))
+                        } else { NativeInstructionEditor(client: client) }
+                    }.frame(width: space.size.width, height: space.size.height, alignment: .topLeading)
+                        .opacity(instructionMode == "Files" ? 1 : 0).disabled(instructionMode != "Files")
+                        .allowsHitTesting(instructionMode == "Files").accessibilityElement(children: .contain).accessibilityHidden(instructionMode != "Files")
+                    ScrollView { NativeExtensionsView(client: client).padding(NativeStyle.pagePadding) }
+                        .font(NativeStyle.body).frame(width: space.size.width, height: space.size.height, alignment: .topLeading)
+                        .opacity(instructionMode == "Skills and plugins" ? 1 : 0)
+                        .disabled(instructionMode != "Skills and plugins").allowsHitTesting(instructionMode == "Skills and plugins")
+                        .accessibilityElement(children: .contain).accessibilityHidden(instructionMode != "Skills and plugins")
+                    }.frame(width: space.size.width, height: space.size.height, alignment: .topLeading).clipped()
+                }
+            }
         } else if client.projectID.isEmpty {
             ContentUnavailableView("Choose a project", systemImage: "folder", description: Text("Project context and instruction files belong to an existing project."))
         } else {
@@ -34,38 +55,70 @@ private struct NativeContextEditor: View {
     @State private var message = ""
     @State private var failed = false
     @State private var reload = false
+    @State private var selectedDocument = "Brief"
+    @State private var showingHandoff = false
+    private var documentBinding: Binding<String> {
+        switch selectedDocument {
+        case "Memory": return $memory
+        case "Next steps": return $handoff
+        default: return $brief
+        }
+    }
     var body: some View {
-        Form {
-            Section {
-                Text("Shared context for your native harness and new workers.").foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                if let revision { Text("Revision \(revision)").font(.caption).foregroundStyle(.secondary) }
-            }
-            Section("Brief") { ProjectTextEditor(text: $brief, label: "Project brief", height: 120) }
-            Section("Memory") { ProjectTextEditor(text: $memory, label: "Decisions and memory", height: 150) }
-            Section("Next steps") { ProjectTextEditor(text: $handoff, label: "Next steps", height: 120) }
-            Section {
-                if !message.isEmpty { Text(message).foregroundStyle(failed ? .red : .secondary).fixedSize(horizontal: false, vertical: true).textSelection(.enabled) }
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: 12) { contextActions }.fixedSize(horizontal: true, vertical: false)
-                    VStack(alignment: .leading, spacing: 12) { contextActions }
+        VStack(alignment: .leading, spacing: 12) {
+            NativePageHeader(title: "Context", subtitle: "Shared notes that guide work in this project.") { contextActions }
+            if !message.isEmpty { Text(message).foregroundStyle(failed ? .red : .secondary).fixedSize(horizontal: false, vertical: true).textSelection(.enabled) }
+
+            HStack(spacing: 8) {
+                ForEach(["Brief", "Memory", "Next steps"], id: \.self) { name in
+                    Button { selectedDocument = name } label: {
+                        Text(name).font(.system(size: 14, weight: selectedDocument == name ? .semibold : .regular))
+                            .foregroundStyle(selectedDocument == name ? .primary : .secondary)
+                            .padding(.horizontal, 10).padding(.vertical, 6)
+                            .background(selectedDocument == name ? Color.secondary.opacity(0.08) : Color.clear, in: RoundedRectangle(cornerRadius: 6))
+                    }.buttonStyle(.plain).accessibilityAddTraits(selectedDocument == name ? .isSelected : [])
                 }
+                Spacer()
+                if let revision { Text("Revision \(revision)").font(NativeStyle.caption).foregroundStyle(.secondary) }
             }
-            Section {
-                DisclosureGroup("Switch main harness") { NativeProjectHandoffView(client: client).padding(.top, 12) }
-            }
-        }.formStyle(.grouped).font(.system(size: 13)).padding(20).disabled(busy || !client.connected)
+            TextEditor(text: documentBinding).font(NativeStyle.document).lineSpacing(4)
+                .scrollContentBackground(.hidden)
+                .frame(maxWidth: 900, maxHeight: .infinity, alignment: .leading)
+                .overlay(alignment: .topLeading) {
+                    if documentBinding.wrappedValue.isEmpty {
+                        Text(documentPlaceholder).font(NativeStyle.document).lineSpacing(4).foregroundStyle(.tertiary)
+                            .padding(.horizontal, 5).padding(.vertical, 8)
+                            .allowsHitTesting(false).accessibilityHidden(true)
+                    }
+                }
+                .accessibilityLabel(selectedDocument)
+                .disabled(revision == nil || loadedProject != client.projectID)
+            Button("Switch main harness…") { showingHandoff = true }
+        }.font(NativeStyle.body).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            .padding(24).frame(maxWidth: .infinity, maxHeight: .infinity).disabled(busy || !client.connected)
+        .sheet(isPresented: $showingHandoff) {
+            NativeDetailPage(title: "Switch main harness") { NativeProjectHandoffView(client: client) }
+        }
         .confirmationDialog("Replace this draft with the latest saved context?", isPresented: $reload, titleVisibility: .visible) {
             Button("Reload latest") { Task { await load() } }; Button("Cancel", role: .cancel) {}
         }
         .task(id: client.projectID) { await load() }
     }
+    private var documentPlaceholder: String {
+        switch selectedDocument {
+        case "Memory": return "Keep useful decisions, lessons and project facts here."
+        case "Next steps": return "Write what to do next, open questions and anything the next agent should know."
+        default: return "Describe this project, its goal and what good work looks like."
+        }
+    }
     @ViewBuilder private var contextActions: some View {
         Button("Reload latest…") { reload = true }
-        Button("Save context") { Task { await save() } }.disabled(revision == nil || loadedProject != client.projectID)
+        Button("Save context") { Task { await save() } }.buttonStyle(.borderedProminent).disabled(revision == nil || loadedProject != client.projectID)
     }
     private func load() async {
         let id = client.projectID; guard !id.isEmpty else { return }
         busy = true; message = ""; failed = false
+        if loadedProject != id { revision = nil }
         do {
             let value = try await client.request("/projects/\(id)/context")
             guard client.projectID == id else { busy = false; return }
@@ -103,62 +156,90 @@ private struct NativeInstructionEditor: View {
     private var changes: [JSON] { (inventory["changes"].array ?? []).filter { $0["file"].string == file } }
     private var latest: JSON? { changes.first { $0["state"].string == "applied" && $0["operation"].string == "apply" } }
     var body: some View {
-        Form {
-            Section {
-                Text("Project instruction files").foregroundStyle(.secondary)
-                DisclosureGroup("Details") {
-                    Text("Edit the root AGENTS.md or CLAUDE.md. Native trust, parent files and active sessions can affect which instructions load.").font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                }
-                Picker("File", selection: $file) { Text("AGENTS.md").tag("agents"); Text("CLAUDE.md").tag("claude") }.disabled(dirty || busy)
-                if let metadata = (inventory["files"].array ?? []).first(where: { $0["id"].string == file }) {
-                    Text(metadata["path"].string ?? "").font(.caption).lineLimit(3).truncationMode(.middle).textSelection(.enabled)
-                    Text(metadata["message"].string ?? metadata["status"].string ?? "Status unknown").font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                }
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: 12) { fileActions }.fixedSize(horizontal: true, vertical: false)
-                    VStack(alignment: .leading, spacing: 12) { fileActions }
-                }
+        VStack(alignment: .leading, spacing: 12) {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) { fileSelector; fileActions }.fixedSize(horizontal: true, vertical: false)
+                VStack(alignment: .leading, spacing: 8) { fileSelector; fileActions }
+            }
+            if document["text"].string != nil { Text("\(draft.utf8.count) / 32,768 bytes").font(NativeStyle.caption).foregroundStyle(.secondary) }
+            if let metadata = (inventory["files"].array ?? []).first(where: { $0["id"].string == file }) {
+                Text(metadata["path"].string ?? "").font(NativeStyle.caption).lineLimit(3).textSelection(.enabled)
+                Text(metadata["message"].string ?? metadata["status"].string ?? "Status unknown")
+                    .font(NativeStyle.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             if document["text"].string != nil {
-                Section(file == "agents" ? "AGENTS.md" : "CLAUDE.md") {
-                    ProjectTextEditor(text: $draft, label: file == "agents" ? "AGENTS.md source" : "CLAUDE.md source", height: 300, source: true)
-                    Text("\(draft.utf8.count) / 32,768 UTF-8 bytes").font(.caption).foregroundStyle(.secondary)
-                    Button("Preview changes") { Task { await propose() } }.disabled(conflict || draft.utf8.count > 32768)
-                }
+                TextEditor(text: $draft).font(NativeStyle.source).lineSpacing(4)
+                    .scrollContentBackground(.hidden)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .accessibilityLabel(file == "agents" ? "AGENTS.md source" : "CLAUDE.md source")
+            } else {
+                ContentUnavailableView("Load an instruction file", systemImage: "doc.text", description: Text("Choose AGENTS.md or CLAUDE.md, then Load file to read its current contents."))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            if let previewID = preview["id"].string {
-                Section("Review exact change") {
-                    Text(preview["path"].string ?? "").font(.system(size: 11)).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
-                    GroupBox("Before") { previewText(preview["before"].string ?? "File does not exist.") }
-                    GroupBox("After") { previewText(preview["after"].string ?? "") }
-                    Text("Start a new native session to check which instructions load.").font(.system(size: 11)).foregroundStyle(.secondary)
-                    Button("Apply this change") { Task { await change(previewID: previewID) } }.disabled(preview["before"].string == preview["after"].string)
-                }
+            if !message.isEmpty { Text(message).foregroundStyle(failed ? .red : .secondary).fixedSize(horizontal: false, vertical: true).textSelection(.enabled) }
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) { documentActions }.fixedSize(horizontal: true, vertical: false)
+                VStack(alignment: .leading, spacing: 8) { documentActions }
             }
-            if !message.isEmpty { Section { Text(message).foregroundStyle(failed ? .red : .secondary).fixedSize(horizontal: false, vertical: true).textSelection(.enabled) } }
-            Section("Recent changes") {
-                ForEach(changes, id: \.selfID) { change in
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("\(change["operation"].string ?? "Change") · \(change["state"].string ?? "Unknown")")
-                        if let message = change["message"].string { Text(message).font(.caption).foregroundStyle(.secondary) }
-                        if change["state"].string == "interrupted" {
-                            Button("Try undo unchanged file") { Task { await self.change(undo: change) } }.disabled(dirty || document["text"].string == nil)
-                        }
-                    }
-                }
-            }
-        }.formStyle(.grouped).font(.system(size: 13)).padding(20).disabled(busy || !client.connected)
+        }.font(NativeStyle.body).frame(maxWidth: 900, maxHeight: .infinity)
+            .padding(24).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).disabled(busy || !client.connected)
         .task(id: "\(client.projectID):\(file)") {
             document = .null; preview = .null; draft = ""; conflict = false; message = ""
             await refreshInventory()
+            if !Task.isCancelled { await load() }
         }
         .onChange(of: draft) { _, _ in preview = .null }
         .confirmationDialog("Replace this draft with the current native file?", isPresented: $reload, titleVisibility: .visible) {
             Button("Reload file") { Task { await load() } }; Button("Cancel", role: .cancel) {}
         }
     }
+    private var fileSelector: some View {
+        Picker("File", selection: $file) {
+            Text("AGENTS.md").tag("agents")
+            Text("CLAUDE.md").tag("claude")
+        }.disabled(dirty || busy).fixedSize(horizontal: true, vertical: false)
+    }
+    @ViewBuilder private var documentActions: some View {
+        if document["text"].string != nil {
+            Button("Preview changes", systemImage: "doc.text.magnifyingglass") { Task { await propose() } }
+                .disabled(conflict || draft.utf8.count > 32768)
+        }
+        if let previewID = preview["id"].string {
+            NativeDetailButton("Review exact change") {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(preview["path"].string ?? "").font(NativeStyle.caption).textSelection(.enabled)
+                    Text("Before").font(NativeStyle.heading)
+                    previewText(preview["before"].string ?? "File does not exist.")
+                    Divider()
+                    Text("After").font(NativeStyle.heading)
+                    previewText(preview["after"].string ?? "")
+                    Text("Start a new native session to check which instructions load.").font(NativeStyle.caption).foregroundStyle(.secondary)
+                    Button("Apply this change") { Task { await change(previewID: previewID) } }
+                        .disabled(preview["before"].string == preview["after"].string)
+                }.disabled(busy || !client.connected)
+            }.id(previewID)
+        }
+        NativeDetailButton("Recent changes") {
+            VStack(alignment: .leading, spacing: 12) {
+                if changes.isEmpty { Text("No recent changes for this file.").foregroundStyle(.secondary) }
+                ForEach(changes, id: \.selfID) { change in
+                    Text("\(change["operation"].string ?? "Change") · \(change["state"].string ?? "Unknown")").font(NativeStyle.heading)
+                    if let message = change["message"].string { Text(message).foregroundStyle(.secondary) }
+                    if change["state"].string == "interrupted" {
+                        Button("Try undo unchanged file") { Task { await self.change(undo: change) } }
+                            .disabled(dirty || document["text"].string == nil)
+                    }
+                    Divider()
+                }
+            }.disabled(busy || !client.connected)
+        }.id("history:" + file)
+        NativeDetailButton("About instruction files") {
+            Text("Edit the root AGENTS.md or CLAUDE.md. Native trust, parent files and active sessions can affect which instructions load.")
+                .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        }
+    }
     private func previewText(_ text: String) -> some View {
-        Text(text).font(.system(size: 13, design: .monospaced)).fixedSize(horizontal: false, vertical: true)
+        Text(text).font(NativeStyle.source).fixedSize(horizontal: false, vertical: true)
             .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading).padding(8)
     }
     @ViewBuilder private var fileActions: some View {
@@ -212,10 +293,41 @@ private struct ProjectTextEditor: View {
     let height: CGFloat
     var source = false
     var body: some View {
-        TextEditor(text: $text).font(source ? .system(size: 13, design: .monospaced) : .system(size: 13))
+        TextEditor(text: $text).font(source ? .system(size: 15, design: .monospaced) : .system(size: 15))
             .scrollContentBackground(.hidden).padding(8).frame(height: height)
             .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
             .overlay(RoundedRectangle(cornerRadius: 6).stroke(.quaternary))
             .accessibilityLabel(label)
+    }
+}
+
+
+/// Long supporting records open separately from the main editing surface.
+struct NativeDetailButton<Content: View>: View {
+    let title: String
+    let content: Content
+    @State private var showing = false
+    init(_ title: String, @ViewBuilder content: () -> Content) {
+        self.title = title; self.content = content()
+    }
+    var body: some View {
+        Button(title + "…") { showing = true }
+            .sheet(isPresented: $showing) { NativeDetailPage(title: title) { content } }
+    }
+}
+
+struct NativeDetailPage<Content: View>: View {
+    let title: String
+    let content: Content
+    @Environment(\.dismiss) private var dismiss
+    init(title: String, @ViewBuilder content: () -> Content) {
+        self.title = title; self.content = content()
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack { Text(title).font(NativeStyle.heading); Spacer(); Button("Done") { dismiss() }.keyboardShortcut(.cancelAction) }
+            Divider()
+            ScrollView { VStack(alignment: .leading, spacing: 12) { content }.frame(maxWidth: .infinity, alignment: .leading) }
+        }.font(NativeStyle.body).padding(NativeStyle.pagePadding).frame(minWidth: 480, idealWidth: 700, minHeight: 400, idealHeight: 600)
     }
 }

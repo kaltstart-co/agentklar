@@ -17,6 +17,7 @@ private final class LocalSessionDelegate: NSObject, URLSessionTaskDelegate, @unc
     @Published var projectID = ""
     @Published var requestedRunID: String?
     @Published var connected = false
+    @Published private(set) var hasLoadedWorkspace = false
     @Published var busy = false
     @Published private(set) var pendingWrites = 0
     @Published var error = ""
@@ -24,14 +25,34 @@ private final class LocalSessionDelegate: NSObject, URLSessionTaskDelegate, @unc
     private var session: URLSession?
     private var origin: URL?
     private var refreshing = false
+    private var reconnectNeeded = false
+    private var selectingProject = false
+    private var desiredProjectID: String?
+    private weak var parent: AgentKlarClient?
+    private var subscriptions = Set<AnyCancellable>()
     var projects: [JSON] { snapshot["projects"].array ?? [] }
     var project: JSON { projects.first { $0["id"].string == projectID } ?? .object([:]) }
     var runs: [JSON] { (snapshot["runs"].array ?? []).filter { projectID.isEmpty || $0["projectId"].string == projectID } }
     var harnesses: [JSON] { snapshot["harnesses"].array ?? [] }
-    var maintenanceReady: Bool { !busy && !runtime.mutationRunning && pendingWrites == 0 }
+    var maintenanceReady: Bool { parent?.maintenanceReady ?? (!busy && !runtime.mutationRunning && pendingWrites == 0) }
 
     init(runtime: LocalRuntime? = nil) { self.runtime = runtime ?? LocalRuntime() }
+    private init(projectID: String, parent: AgentKlarClient) {
+        self.runtime = parent.runtime; self.parent = parent; self.projectID = projectID
+        parent.$snapshot.sink { [weak self] in self?.snapshot = $0 }.store(in: &subscriptions)
+        parent.$onboarding.sink { [weak self] in self?.onboarding = $0 }.store(in: &subscriptions)
+        parent.$connected.sink { [weak self] in self?.connected = $0 }.store(in: &subscriptions)
+        parent.$hasLoadedWorkspace.sink { [weak self] in self?.hasLoadedWorkspace = $0 }.store(in: &subscriptions)
+        parent.$busy.sink { [weak self] in self?.busy = $0 }.store(in: &subscriptions)
+        parent.$pendingWrites.sink { [weak self] in self?.pendingWrites = $0 }.store(in: &subscriptions)
+        parent.$error.sink { [weak self] in self?.error = $0 }.store(in: &subscriptions)
+    }
+    func workspace(for projectID: String) -> AgentKlarClient { AgentKlarClient(projectID: projectID, parent: self) }
+    func reportError(_ message: String) {
+        if let parent { parent.reportError(message) } else { error = message }
+    }
     func connect() async {
+        if let parent { await parent.connect(); return }
         guard maintenanceReady else { error = "Finish the current local change before reconnecting."; return }
         do { try await runtime.performMutation { try await reconnectInsideMutation() } }
         catch { self.error = errorText(error) }
@@ -51,10 +72,11 @@ private final class LocalSessionDelegate: NSObject, URLSessionTaskDelegate, @unc
         }
         session?.invalidateAndCancel(); session = newSession; origin = base
         connected = true
-        do { try await loadSnapshot(); error = "" }
+        do { try await loadSnapshot(); hasLoadedWorkspace = true; reconnectNeeded = false; error = "" }
         catch { connected = false; throw error }
     }
     func request(_ path: String, body: [String: Any]? = nil, method: String? = nil) async throws -> JSON {
+        if let parent { return try await parent.request(path, body: body, method: method) }
         guard let session, let origin else { throw LocalError.message("Connect the local AgentKlar service first.") }
         let method = method ?? (body == nil ? "GET" : "POST")
         guard ["GET", "POST", "PUT", "PATCH", "DELETE"].contains(method) else { throw LocalError.message("Unsupported local API method.") }
@@ -75,12 +97,15 @@ private final class LocalSessionDelegate: NSObject, URLSessionTaskDelegate, @unc
         }
         let jsonResponse = response.value(forHTTPHeaderField: "Content-Type")?.lowercased().hasPrefix("application/json") == true
         if path == "/onboarding" && (response.statusCode == 404 || (response.statusCode == 200 && !jsonResponse)) {
-            throw LocalError.message("Your local service needs an update to support this native app. Choose Update local service.")
+            throw LocalError.message("AgentKlar needs an update to its background components. Choose Update Background Components from the app menu.")
         }
         guard jsonResponse else { throw LocalError.message("The local service returned an unsupported response. Reconnect or update the local service.") }
         let value = try JSONDecoder().decode(JSON.self, from: data)
         guard (200..<300).contains(response.statusCode) else {
-            if response.statusCode == 401 { connected = false }
+            if response.statusCode == 401 {
+                if self.session === session { connected = false; reconnectNeeded = true }
+                throw LocalError.message("AgentKlar is reconnecting. Your workspace stays open. Try the action again after it connects.")
+            }
             throw LocalError.message(value["error"].string.map { String($0.prefix(400)) } ?? "The local service refused this request.")
         }
         return value
@@ -106,22 +131,46 @@ private final class LocalSessionDelegate: NSObject, URLSessionTaskDelegate, @unc
         }
     }
     func adoptOnboarding(_ next: JSON) {
+        if let parent { parent.adoptOnboarding(next); return }
         if next != onboarding, (next["revision"].number ?? -1) >= (onboarding["revision"].number ?? -1) { onboarding = next }
     }
     func refresh() async {
-        guard connected, !busy, !refreshing else { return }
+        if let parent { await parent.refresh(); return }
+        guard !busy, !refreshing else { return }
         refreshing = true; defer { refreshing = false }
-        do { try await loadSnapshot(); error = "" } catch { self.error = errorText(error) }
+        if !connected {
+            if reconnectNeeded && maintenanceReady {
+                reconnectNeeded = false
+                await connect()
+            }
+            return
+        }
+        do { try await loadSnapshot(); error = "" }
+        catch {
+            self.error = errorText(error)
+            if let failure = error as? URLError, [.cannotConnectToHost, .networkConnectionLost, .timedOut].contains(failure.code) {
+                connected = false; reconnectNeeded = true
+            }
+            if !connected && reconnectNeeded && maintenanceReady { reconnectNeeded = false; await connect() }
+        }
     }
     func selectProject(_ id: String) async {
+        if let parent { await parent.selectProject(id); return }
         guard projects.contains(where: { $0["id"].string == id }) else { return }
-        do {
-            adoptOnboarding(try await request("/onboarding", body: ["projectId": id, "mainHarness": onboarding["mainHarness"].any,
-                "expectedRevision": onboarding["revision"].number ?? 0], method: "PUT"))
-            projectID = id; error = ""
-        } catch { self.error = errorText(error) }
+        desiredProjectID = id
+        guard !selectingProject else { return }
+        selectingProject = true; defer { selectingProject = false }
+        while let next = desiredProjectID {
+            desiredProjectID = nil
+            do {
+                adoptOnboarding(try await request("/onboarding", body: ["projectId": next, "mainHarness": onboarding["mainHarness"].any,
+                    "expectedRevision": onboarding["revision"].number ?? 0], method: "PUT"))
+                projectID = next; error = ""
+            } catch { self.error = errorText(error) }
+        }
     }
     func registerProject(name: String, path: String) async {
+        if let parent { await parent.registerProject(name: name, path: path); return }
         do {
             let result = try await request("/projects", body: ["name": name, "path": path])
             try await loadSnapshot()
@@ -129,6 +178,7 @@ private final class LocalSessionDelegate: NSObject, URLSessionTaskDelegate, @unc
         } catch { self.error = errorText(error) }
     }
     func installService() async {
+        if let parent { await parent.installService(); return }
         guard maintenanceReady else { error = "Finish the current local change before setup."; return }
         do { try await runtime.performMutation {
             let alert = NSAlert(); alert.messageText = "Set up AgentKlar locally?"
@@ -141,13 +191,16 @@ private final class LocalSessionDelegate: NSObject, URLSessionTaskDelegate, @unc
         } } catch { self.error = errorText(error) }
     }
     func updateService() async {
+        if let parent { await parent.updateService(); return }
         guard maintenanceReady else { error = "Finish the current local change before updating."; return }
         do { try await runtime.performMutation {
             busy = true; defer { busy = false }
-            guard LocalBoundary.idleService(try await runtime.runCLI(["service", "status"])) else {
-                throw LocalError.message("Finish active work and confirm the managed service is healthy before updating.")
+            if !runtime.isBundledRuntime {
+                guard LocalBoundary.idleService(try await runtime.runCLI(["service", "status"])) else {
+                    throw LocalError.message("Finish active work and confirm AgentKlar is healthy before updating.")
+                }
             }
-            _ = try await runtime.runCLI(["update"], timeout: 480)
+            _ = try await runtime.runCLI(runtime.isBundledRuntime ? ["service", "use-app-runtime"] : ["update"], timeout: 480)
             try await reconnectInsideMutation()
         } } catch { self.error = errorText(error) }
     }

@@ -8,7 +8,7 @@ import SwiftUI
 final class NativeUpdates: NSObject, ObservableObject, SPUUpdaterDelegate {
     @Published private(set) var enabled = false
     @Published private(set) var canCheck = false
-    @Published private(set) var message = "App updates need a signed public release. Service updates remain available."
+    @Published private(set) var message = "Automatic app updates are unavailable in this development preview. The background runtime ships with the app."
     private var controller: SPUStandardUpdaterController?
     private var observation: AnyCancellable?
     private weak var client: AgentKlarClient?
@@ -27,7 +27,7 @@ final class NativeUpdates: NSObject, ObservableObject, SPUUpdaterDelegate {
             self.canCheck = value || self.pendingInstall != nil
         }
         enabled = true
-        message = "Signed app updates are checked by Sparkle. Your background service keeps running."
+        message = "Sparkle checks signed app releases. Updating the app keeps the background service running; use the bundled runtime action to upgrade that component."
         controller.startUpdater()
     }
 
@@ -112,25 +112,51 @@ struct NativeUpdateSettings: View {
     @State private var confirm = false
     @State private var failure = ""
 
+    private var appVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "AgentKlarReleaseVersion") as? String ?? "Development"
+    }
+    private var bundled: Bool { client.runtime.isBundledRuntime }
+
     var body: some View {
-        LabeledContent("Mac app", value: Bundle.main.object(forInfoDictionaryKey: "AgentKlarReleaseVersion") as? String ?? "Development")
-        Text(updates.message).foregroundStyle(.secondary)
-        if updates.enabled { Button("Check for app updates") { updates.checkForUpdates() }.disabled(!updates.canCheck || !client.maintenanceReady) }
-        LabeledContent("Local service", value: status["current"].string ?? "Checking…")
-        if let latest = status["latest"].string { LabeledContent("Latest service", value: latest) }
+        LabeledContent("Mac app", value: appVersion)
+        Text(updates.message).font(NativeStyle.caption).foregroundStyle(.secondary)
+        if updates.enabled {
+            Button("Check for app updates") { updates.checkForUpdates() }
+                .disabled(!updates.canCheck || !client.maintenanceReady)
+        }
+        Divider()
+        LabeledContent("Running background service", value: status["current"].string ?? "Not checked")
+        if bundled { LabeledContent("Bundled runtime", value: appVersion) }
+        if let latest = status["latest"].string { LabeledContent("Last checked service release", value: latest) }
         if let error = status["error"].string { Text(error).foregroundStyle(.secondary) }
         if !failure.isEmpty { Text(failure).foregroundStyle(.secondary) }
-        HStack {
-            Button("Check service updates") { Task { await check(refresh: true) } }.disabled(checking || client.busy)
-            if status["installation"]["supported"].bool == true {
-                Button("Update local service") { confirm = true }.disabled(status["available"].bool != true || checking || !client.maintenanceReady)
-            }
+        if bundled {
+            Text("Use this app’s bundled runtime when work is idle. Existing projects and harness accounts stay in place. A newer service release may require a newer app.")
+                .font(NativeStyle.caption).foregroundStyle(.secondary)
         }
-        .confirmationDialog("Update the local AgentKlar service? Save open drafts first.", isPresented: $confirm) {
-            Button("Update service") { Task { await client.updateService(); await check(refresh: false) } }
+        ViewThatFits(in: .horizontal) {
+            HStack { updateActions }
+            VStack(alignment: .leading, spacing: 8) { updateActions }
+        }
+        .confirmationDialog(bundled ? "Use this app’s bundled background runtime? Save open drafts first." : "Update the local AgentKlar service? Save open drafts first.", isPresented: $confirm) {
+            Button(bundled ? "Use bundled runtime" : "Update service") {
+                Task { await client.updateService(); await check(refresh: false) }
+            }
             Button("Cancel", role: .cancel) {}
         }
         .task { await check(refresh: false) }
+    }
+
+    @ViewBuilder private var updateActions: some View {
+        Button("Check service releases") { Task { await check(refresh: true) } }
+            .disabled(checking || client.busy)
+        if bundled {
+            Button("Use bundled runtime") { confirm = true }
+                .disabled(checking || !client.maintenanceReady)
+        } else if status["installation"]["supported"].bool == true {
+            Button("Update local service") { confirm = true }
+                .disabled(status["available"].bool != true || checking || !client.maintenanceReady)
+        }
     }
 
     private func check(refresh: Bool) async {

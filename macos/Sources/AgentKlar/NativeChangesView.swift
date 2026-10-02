@@ -25,18 +25,19 @@ struct NativeChangesView: View {
     private var applied: Bool { receipt != .null }
 
     var body: some View {
-        DisclosureGroup("Copy Git changes to a new local worktree") {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Copy Git changes to a new local worktree").font(NativeStyle.heading)
             VStack(alignment: .leading, spacing: 12) {
-                Text("Prepare a saved patch from finished work. Review it, then apply to a separate local checkout. This does not merge, commit or mark the work reviewed.").font(.caption).foregroundStyle(.secondary)
+                Text("Prepare a saved patch from finished work. Review it, then apply to a separate local checkout. This does not merge, commit or mark the work reviewed.").font(NativeStyle.caption).foregroundStyle(.secondary)
                 Picker("Local destination project", selection: $destination) {
                     Text("Choose a project").tag("")
                     ForEach(client.projects, id: \.selfID) { project in Text(project["name"].string ?? "Project").tag(project["id"].string ?? "") }
                 }.disabled(working || applied || uncertain)
-                HStack {
-                    Button("Prepare and preview") { prepare() }.disabled(destination.isEmpty || sourceActive || applied || uncertain)
-                    Button("Find saved handoffs") { findSaved() }
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 8) { previewActions }.fixedSize(horizontal: true, vertical: false)
+                    VStack(alignment: .leading, spacing: 8) { previewActions }
                 }
-                if sourceActive { Text("Wait for the source worker to stop before preparing a new patch. The service also checks for possibly surviving workers.").font(.caption).foregroundStyle(.orange) }
+                if sourceActive { Text("Wait for the source worker to stop before preparing a new patch. The service also checks for possibly surviving workers.").font(NativeStyle.caption).foregroundStyle(.orange) }
                 if !message.isEmpty { Text(message).foregroundStyle(.orange).textSelection(.enabled) }
                 ForEach(saved, id: \.selfID) { item in
                     Button("Open \(item["applied"] == .null ? "prepared" : "applied") handoff · \(projectName(item["projectId"].string)) · \(item["createdAt"].string ?? "Unknown time")") {
@@ -49,15 +50,15 @@ struct NativeChangesView: View {
                         Button("Read full saved patch") { if let id = previewID { openSaved(id) } }
                     }
                     if let patch = packet["patch"].string {
-                        Text("Patch").font(.headline)
+                        Text("Patch").font(NativeStyle.heading)
                         ScrollView([.vertical, .horizontal]) { Text(patch).font(.system(.caption, design: .monospaced)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }.frame(minHeight: 100, maxHeight: 300)
                     }
-                    if !fullPatch { Text("The complete saved patch and file list must be loaded before applying.").font(.caption).foregroundStyle(.orange) }
+                    if !fullPatch { Text("The complete saved patch and file list must be loaded before applying.").font(NativeStyle.caption).foregroundStyle(.orange) }
                     if preview["application"] != .null && !applied {
                         LabeledContent("Saved application", value: preview["application"]["state"].string ?? "Unknown")
-                        if let path = preview["application"]["workspace"]["path"].string { Text("Owned destination: \(path)").font(.caption).textSelection(.enabled) }
+                        if let path = preview["application"]["workspace"]["path"].string { Text("Owned destination: \(path)").font(NativeStyle.caption).textSelection(.enabled) }
                         if let error = preview["application"]["error"].string { Text(error).foregroundStyle(.orange) }
-                        Text("Inspect any interrupted destination before retrying this same handoff. The service verifies its worktree, base and staged tree; changed files cause refusal.").font(.caption)
+                        Text("Inspect any interrupted destination before retrying this same handoff. The service verifies its worktree, base and staged tree; changed files cause refusal.").font(NativeStyle.caption)
                     }
                     if uncertain {
                         Text("The apply result is unconfirmed. Read this saved handoff to check its receipt or interrupted intent before deciding again.").foregroundStyle(.orange)
@@ -71,7 +72,7 @@ struct NativeChangesView: View {
                 }
                 if applied { receiptDetails }
             }.frame(maxWidth: .infinity, alignment: .leading).padding(.top, 8)
-        }.disabled(working || !client.connected || client.busy)
+        }.font(NativeStyle.document).labelStyle(.titleAndIcon).disabled(working || !client.connected || client.busy)
         .confirmationDialog("Apply the exact reviewed patch to a separate local worktree?", isPresented: $confirm) {
             Button("Apply reviewed patch") { applyReviewed() }
             Button("Cancel", role: .cancel) {}
@@ -80,38 +81,42 @@ struct NativeChangesView: View {
         .onChange(of: destination) { _, _ in if !working && !uncertain { preview = .null; receipt = .null; reviewed = false; message = "" } }
         .onDisappear { generation += 1 }
     }
+    @ViewBuilder private var previewActions: some View {
+        Button("Prepare and preview", systemImage: "doc.text.magnifyingglass") { prepare() }.disabled(destination.isEmpty || sourceActive || applied || uncertain)
+        Button("Find saved handoffs", systemImage: "clock") { findSaved() }
+    }
     private var previewDetails: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Destination: \(projectName(preview["projectId"].string))").font(.headline)
+            Text("Destination: \(projectName(preview["projectId"].string))").font(NativeStyle.heading)
             Text("Source: \(sourceName(packet["sourceDeviceId"].string))")
             LabeledContent("Source run", value: packet["sourceRunId"].string ?? "Unknown")
             LabeledContent("Base commit", value: packet["baseCommit"].string ?? "Unknown")
             LabeledContent("Source HEAD", value: packet["headCommit"].string ?? "Unknown")
             LabeledContent("Patch digest", value: packet["digest"].string ?? "Unknown")
-            Text("Prepared: \(preview["createdAt"].string ?? "Unknown")").font(.caption)
-            ForEach(packet["files"].array ?? [], id: \.self) { file in Text("\(file["path"].string ?? "Unknown path") · +\(Int(file["added"].number ?? 0)) / −\(Int(file["removed"].number ?? 0))").font(.caption) }
+            Text("Prepared: \(preview["createdAt"].string ?? "Unknown")").font(NativeStyle.caption)
+            ForEach(packet["files"].array ?? [], id: \.self) { file in Text("\(file["path"].string ?? "Unknown path") · +\(Int(file["added"].number ?? 0)) / −\(Int(file["removed"].number ?? 0))").font(NativeStyle.caption) }
             if packet["filesTruncated"].bool == true { Text("The file list is shortened. Read the full saved patch.").foregroundStyle(.orange) }
             if !(packet["ignoredPaths"].array ?? []).isEmpty || packet["ignoredTruncated"].bool == true {
                 Text("Ignored files are excluded from the patch.").foregroundStyle(.orange)
-                ForEach(packet["ignoredPaths"].array ?? [], id: \.self) { path in Text(path.string ?? "").font(.caption) }
-                if packet["ignoredTruncated"].bool == true { Text("More ignored paths exist. Check the source checkout.").font(.caption) }
+                ForEach(packet["ignoredPaths"].array ?? [], id: \.self) { path in Text(path.string ?? "").font(NativeStyle.caption) }
+                if packet["ignoredTruncated"].bool == true { Text("More ignored paths exist. Check the source checkout.").font(NativeStyle.caption) }
             }
-            Text("The destination needs this exact base commit. Unsupported or conflicting changes are refused by the service.").font(.caption).foregroundStyle(.secondary)
+            Text("The destination needs this exact base commit. Unsupported or conflicting changes are refused by the service.").font(NativeStyle.caption).foregroundStyle(.secondary)
         }.textSelection(.enabled)
     }
     private var receiptDetails: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Changes applied in a separate worktree").font(.headline)
+            Text("Changes applied in a separate worktree").font(NativeStyle.heading)
             LabeledContent("Folder", value: receipt["workspace"]["path"].string ?? "Unknown")
             LabeledContent("Branch", value: receipt["workspace"]["branch"].string ?? "Unknown")
             LabeledContent("Applied", value: receipt["appliedAt"].string ?? "Unknown")
             LabeledContent("Receipt digest", value: receipt["digest"].string ?? "Unknown")
-            Text(receipt["message"].string ?? "Changes are staged for review. Inspect git status and git diff --cached, then test before committing. Your original folder was preserved.").font(.caption)
+            Text(receipt["message"].string ?? "Changes are staged for review. Inspect git status and git diff --cached, then test before committing. Your original folder was preserved.").font(NativeStyle.caption)
             ForEach(receipt["continuations"].array ?? [], id: \.self) { command in
-                Text("Open a fresh \(command["harness"].string ?? "native") session").font(.headline)
+                Text("Open a fresh \(command["harness"].string ?? "native") session").font(NativeStyle.heading)
                 Text(command["display"].string ?? "").font(.system(.caption, design: .monospaced)).textSelection(.enabled)
             }
-            Text("These commands are guidance. The app does not execute them or resume an existing native conversation.").font(.caption).foregroundStyle(.secondary)
+            Text("These commands are guidance. The app does not execute them or resume an existing native conversation.").font(NativeStyle.caption).foregroundStyle(.secondary)
         }.textSelection(.enabled)
     }
     private func projectName(_ id: String?) -> String { client.projects.first { $0["id"].string == id }?["name"].string ?? id ?? "Unknown project" }

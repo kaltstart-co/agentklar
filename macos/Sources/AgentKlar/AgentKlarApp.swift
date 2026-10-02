@@ -11,18 +11,19 @@ import AppKit
     }
     var body: some Scene {
         WindowGroup { MainView(client: client).environmentObject(updates) }
-            .defaultSize(width: 1120, height: 760)
+            .defaultSize(width: 1280, height: 820)
+            .windowToolbarStyle(.unifiedCompact)
             .commands {
                 CommandGroup(after: .appInfo) { Button("Check for App Updates…") { updates.checkForUpdates() }.disabled(!updates.canCheck || !client.maintenanceReady) }
                 CommandGroup(after: .newItem) {
-                    Button("Reconnect Local Service") { Task { await client.connect() } }.disabled(!client.maintenanceReady)
-                    Button("Update Local Service…") { confirmServiceUpdate() }.disabled(!client.maintenanceReady)
+                    Button("Reconnect AgentKlar") { Task { await client.connect() } }.disabled(!client.maintenanceReady)
+                    Button("Update Background Components…") { confirmServiceUpdate() }.disabled(!client.maintenanceReady)
                 }
             }
     }
     private func confirmServiceUpdate() {
-        let alert = NSAlert(); alert.messageText = "Update the local service?"
-        alert.informativeText = "AgentKlar checks that the managed service is idle before updating. Your coding apps and accounts stay in place."
+        let alert = NSAlert(); alert.messageText = "Update AgentKlar’s background components?"
+        alert.informativeText = "AgentKlar checks that background work is idle before updating."
         alert.addButton(withTitle: "Update"); alert.addButton(withTitle: "Cancel")
         if alert.runModal() == .alertFirstButtonReturn { Task { await client.updateService() } }
     }

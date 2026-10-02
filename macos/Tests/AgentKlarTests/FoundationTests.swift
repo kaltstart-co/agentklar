@@ -66,6 +66,51 @@ final class FoundationTests: XCTestCase {
         client.busy = false
         XCTAssertTrue(client.maintenanceReady)
     }
+    @MainActor func testWorkspaceClientsKeepProjectDataAndTaskNavigationSeparate() {
+        let root = AgentKlarClient()
+        root.snapshot = JSON.any(["projects": [["id": "a", "name": "Alpha"], ["id": "b", "name": "Beta"]],
+                                  "runs": [["id": "run-a", "projectId": "a"], ["id": "run-b", "projectId": "b"]]])
+        root.projectID = "a"
+        let alpha = root.workspace(for: "a"), beta = root.workspace(for: "b")
+        XCTAssertTrue(alpha.runtime === root.runtime && beta.runtime === root.runtime)
+        root.projectID = "b"
+        XCTAssertEqual(alpha.projectID, "a"); XCTAssertEqual(beta.projectID, "b")
+        XCTAssertEqual(alpha.project["name"].string, "Alpha")
+        XCTAssertEqual(alpha.runs.compactMap { $0["id"].string }, ["run-a"])
+        XCTAssertEqual(beta.runs.compactMap { $0["id"].string }, ["run-b"])
+        root.snapshot = JSON.any(["projects": [["id": "a", "name": "Renamed Alpha"], ["id": "b", "name": "Beta"]],
+                                  "runs": [["id": "new-b", "projectId": "b"]]])
+        XCTAssertEqual(alpha.project["name"].string, "Renamed Alpha")
+        XCTAssertTrue(alpha.runs.isEmpty)
+        XCTAssertEqual(beta.runs.compactMap { $0["id"].string }, ["new-b"])
+        alpha.requestedRunID = "run-a"
+        XCTAssertNil(beta.requestedRunID); XCTAssertNil(root.requestedRunID)
+        beta.requestedRunID = "new-b"; alpha.requestedRunID = nil
+        XCTAssertEqual(beta.requestedRunID, "new-b")
+        alpha.reportError("Missing task")
+        XCTAssertEqual(root.error, "Missing task"); XCTAssertEqual(beta.error, "Missing task")
+        beta.reportError("")
+        XCTAssertTrue(root.error.isEmpty && alpha.error.isEmpty)
+    }
+    @MainActor func testWorkspaceClientsShareMaintenanceAndMonotonicPreferences() async throws {
+        let root = AgentKlarClient(), alpha = root.workspace(for: "a"), beta = root.workspace(for: "b")
+        alpha.adoptOnboarding(JSON.any(["revision": 4, "projectId": "a", "mainHarness": "claude"]))
+        beta.adoptOnboarding(JSON.any(["revision": 3, "projectId": "b", "mainHarness": "codex"]))
+        XCTAssertEqual(root.onboarding["revision"].number, 4)
+        XCTAssertEqual(alpha.onboarding, root.onboarding); XCTAssertEqual(beta.onboarding, root.onboarding)
+        root.busy = true
+        XCTAssertFalse(alpha.maintenanceReady); XCTAssertFalse(beta.maintenanceReady)
+        await beta.updateService()
+        XCTAssertEqual(root.error, "Finish the current local change before updating.")
+        XCTAssertFalse(root.runtime.mutationRunning)
+        root.busy = false
+        try await root.runtime.performMutation {
+            XCTAssertFalse(alpha.maintenanceReady); XCTAssertFalse(beta.maintenanceReady)
+            await alpha.updateService()
+            XCTAssertEqual(root.error, "Finish the current local change before updating.")
+        }
+        XCTAssertTrue(alpha.maintenanceReady); XCTAssertTrue(beta.maintenanceReady)
+    }
     @MainActor func testProjectPictureNormalizesAndPreservesSavedImageOnRejectedInput() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])

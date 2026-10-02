@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 @main struct FoundationChecks {
     static func expect(_ value: @autoclosure () -> Bool, _ message: String) throws {
@@ -32,9 +33,70 @@ import Foundation
         try expect(client.error == "Finish the current local change before updating." && !runtime.mutationRunning, "An update overlapped a local change")
         client.busy = false
         try expect(client.maintenanceReady, "Maintenance gate stayed closed after local change")
+        client.snapshot = JSON.any(["projects": [["id": "a", "name": "Alpha"], ["id": "b", "name": "Beta"]],
+                                    "runs": [["id": "run-a", "projectId": "a"], ["id": "run-b", "projectId": "b"]]])
+        let alpha = client.workspace(for: "a"), beta = client.workspace(for: "b")
+        client.projectID = "b"
+        try expect(alpha.projectID == "a" && beta.projectID == "b" && alpha.runtime === beta.runtime, "Workspace identity or shared runtime changed")
+        try expect(alpha.runs.compactMap { $0["id"].string } == ["run-a"] && beta.runs.compactMap { $0["id"].string } == ["run-b"], "Workspace run data mixed")
+        client.snapshot = JSON.any(["projects": [["id": "a", "name": "Renamed Alpha"], ["id": "b", "name": "Beta"]],
+                                    "runs": [["id": "new-b", "projectId": "b"]]])
+        try expect(alpha.project["name"].string == "Renamed Alpha" && alpha.runs.isEmpty && beta.runs.first?["id"].string == "new-b", "Workspace snapshots stopped following the parent")
+        alpha.requestedRunID = "run-a"
+        try expect(beta.requestedRunID == nil && client.requestedRunID == nil, "Task navigation crossed workspaces")
+        beta.requestedRunID = "new-b"; alpha.requestedRunID = nil
+        try expect(beta.requestedRunID == "new-b", "Clearing one workspace changed another task selection")
+        alpha.reportError("Missing task")
+        try expect(client.error == "Missing task" && beta.error == "Missing task", "Workspace errors were hidden from the shared banner")
+        beta.reportError("")
+        try expect(client.error.isEmpty && alpha.error.isEmpty, "Workspace error dismissal stayed local")
+        alpha.adoptOnboarding(JSON.any(["revision": 4, "mainHarness": "claude"]))
+        beta.adoptOnboarding(JSON.any(["revision": 3, "mainHarness": "codex"]))
+        try expect(client.onboarding["revision"].number == 4 && alpha.onboarding == client.onboarding && beta.onboarding == client.onboarding, "Scoped preference adoption regressed")
+        client.busy = true
+        try expect(!alpha.maintenanceReady && !beta.maintenanceReady, "Scoped busy gate was bypassed")
+        await beta.updateService()
+        try expect(client.error == "Finish the current local change before updating." && !runtime.mutationRunning, "Scoped update bypassed the shared gate")
+        client.busy = false
+        try await runtime.performMutation {
+            try expect(!alpha.maintenanceReady && !beta.maintenanceReady, "Scoped runtime gate was bypassed")
+            await alpha.updateService()
+            try expect(client.error == "Finish the current local change before updating.", "Scoped maintenance did not use the parent gate")
+        }
+        try expect(alpha.maintenanceReady && beta.maintenanceReady, "Scoped gate failed to reopen")
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
+        let resources = directory.appendingPathComponent("Resources"), cache = directory.appendingPathComponent("private-runtimes")
+        let bundle = resources.appendingPathComponent("runtime")
+        var hashes: [String: String] = [:]
+        func sha(_ data: Data) -> String { SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined() }
+        for path in ["bin/node", "agentklar/bin/agentklar.mjs", "agentklar/dist/server/server.js", "agentklar/empty"] {
+            let file = bundle.appendingPathComponent(path)
+            try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+            let bytes = Data((path == "agentklar/empty" ? "" : "fixture " + path).utf8)
+            try bytes.write(to: file); hashes[path] = sha(bytes)
+        }
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: bundle.appendingPathComponent("bin/node").path)
+        let manifest = try JSONSerialization.data(withJSONObject: ["version": "0.1.0-beta.33", "nodeVersion": "24.21.0", "dataCompatibility": 1, "files": hashes], options: [.sortedKeys])
+        try manifest.write(to: resources.appendingPathComponent("runtime-manifest.json"))
+        let copied = try BundledRuntime.prepare(resources: resources, cache: cache, expectedHash: sha(manifest))
+        try expect(copied.lastPathComponent == sha(manifest), "Runtime identity was not content-addressed")
+        let reused = try BundledRuntime.prepare(resources: resources, cache: cache, expectedHash: sha(manifest))
+        try expect(reused == copied, "Unchanged private runtime was not reused")
+        try Data("changed".utf8).write(to: copied.appendingPathComponent("agentklar/bin/agentklar.mjs"))
+        do {
+            _ = try BundledRuntime.prepare(resources: resources, cache: cache, expectedHash: sha(manifest))
+            throw LocalError.message("Changed private runtime admitted")
+        } catch LocalError.message(let text) { try expect(text != "Changed private runtime admitted", text) }
+        try FileManager.default.removeItem(at: copied)
+        let nodeFile = bundle.appendingPathComponent("bin/node")
+        try FileManager.default.removeItem(at: nodeFile)
+        try FileManager.default.createSymbolicLink(at: nodeFile, withDestinationURL: URL(fileURLWithPath: "/bin/sh"))
+        do {
+            _ = try BundledRuntime.prepare(resources: resources, cache: cache, expectedHash: sha(manifest))
+            throw LocalError.message("Linked runtime admitted")
+        } catch LocalError.message(let text) { try expect(text != "Linked runtime admitted", text) }
         let script = directory.appendingPathComponent("fixture.sh")
         try Data("sleep 30 &\necho $! > child.pid\nprintf done\nexit 0\n".utf8).write(to: script)
         let started = Date()
@@ -50,6 +112,6 @@ import Foundation
             _ = try await LocalRuntime.command(URL(fileURLWithPath: "/bin/sh"), args: ["-c", "yes x"], environment: ["PATH": "/usr/bin:/bin"], cwd: directory, timeout: 2)
             throw LocalError.message("Output overflow admitted")
         } catch LocalError.message(let text) { try expect(text != "Output overflow admitted", text) }
-        print("Foundation checks passed: JSON, origin/path, mutation gate, CAS freshness, descendant cleanup, timeout, output limit.")
+        print("Foundation checks passed: JSON, origin/path, mutation gate, CAS freshness, scoped projects/navigation/shared gates, bundled copy/tamper/symlink, descendant cleanup, timeout, output limit.")
     }
 }

@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { constants, closeSync, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from "node:fs";
+import { constants, closeSync, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { connect } from "node:net";
 import { basename, dirname, isAbsolute, join } from "node:path";
@@ -209,12 +209,13 @@ async function stop(p: ReturnType<typeof paths>, entry: Install, force: boolean)
 }
 export async function main(args = process.argv.slice(2)) {
   const [action, ...flags] = args;
-  if (!["install", "status", "open", "stop", "start", "uninstall"].includes(action || "") ||
+  if (!["install", "status", "open", "stop", "start", "uninstall", "use-app-runtime"].includes(action || "") ||
       flags.some((x) => x !== "--force" && x !== "--print") ||
       (flags.includes("--force") && !["stop", "uninstall"].includes(action!)) ||
       (flags.includes("--print") && action !== "open"))
     throw new Error("Use: agentklar service install|status|open [--print]|stop [--force]|start|uninstall [--force]");
   const p = paths();
+  if (action === "use-app-runtime") { if (flags.length) throw new Error("App runtime adoption takes no arguments."); return useAppRuntime(); }
   if (action === "install") return install(p);
   const entry = installed(p);
   if (!entry) return console.log("AgentKlar background startup is not installed.");
@@ -278,7 +279,7 @@ export function readUpdateMaintenance(home: string, serviceId?: string): UpdateM
 
 /** Only operates the existing owned launchd job at the unchanged package path. */
 export type UpdateService = { home: string; port: number; id: string; running: boolean; transaction: string };
-export async function managedUpdate(expectedServer: string, recovery: string, expectedVersion: string, saved?: UpdateService) {
+export async function managedUpdate(expectedServer: string, recovery: string, expectedVersion: string, saved?: UpdateService, startupNode = process.execPath) {
   const p = paths(saved?.home, saved?.port);
   const entry = installed(p);
   if (!entry) { if (saved) throw new Error("Saved managed service is missing."); return undefined; }
@@ -288,7 +289,7 @@ export async function managedUpdate(expectedServer: string, recovery: string, ex
   const converted = command("/usr/bin/plutil", ["-convert", "json", "-o", "-", p.plist]);
   if (converted.status !== 0) throw new Error("Could not inspect managed startup.");
   const plist = JSON.parse(converted.stdout);
-  if (plist.ProgramArguments?.length !== 2 || plist.ProgramArguments[0] !== process.execPath || plist.ProgramArguments[1] !== expectedServer || plist.WorkingDirectory !== dirname(dirname(dirname(expectedServer))))
+  if (plist.ProgramArguments?.length !== 2 || plist.ProgramArguments[0] !== startupNode || plist.ProgramArguments[1] !== expectedServer || plist.WorkingDirectory !== dirname(dirname(dirname(expectedServer))))
     throw new Error("Managed startup belongs to a different package. Inspect it before updating.");
   const running = saved?.running ?? launchctl(["print", p.target], false);
   if (running && !saved) {
@@ -305,6 +306,13 @@ export async function managedUpdate(expectedServer: string, recovery: string, ex
     running,
     info: { home: p.home, port: p.port, id: entry.id, running, transaction },
     paused: () => marked,
+    replaceStartup: (xml: string) => {
+      unchanged(); installed(p);
+      if (launchctl(["print", p.target], false)) throw new Error("Stop the owned service before replacing startup.");
+      atomicPrivate(p.plist, xml);
+      entry.plistHash = hash(xml);
+      atomicPrivate(p.journal, JSON.stringify(entry));
+    },
     stop: async () => {
       if (!launchctl(["print", p.target], false)) return;
       if (!marked) {
@@ -343,4 +351,106 @@ export async function managedUpdate(expectedServer: string, recovery: string, ex
       }
     },
   };
+}
+
+function atomicPrivate(path: string, text: string) {
+  const temporary = `${path}.app-runtime-${randomUUID()}`;
+  try { writeFileSync(temporary, text, { mode: 0o600, flag: "wx" }); renameSync(temporary, path); }
+  finally { if (existsSync(temporary)) unlinkSync(temporary); }
+}
+
+type AppAdoption = { version: 1; phase: "prepared" | "replaced" | "committed" | "restored"; root: string; oldXml: string; newXml: string; oldEntry: Install; oldVersion: string; newVersion: string; service: UpdateService; recovery: string };
+
+/** Only a validated private Mac app runtime can call this fixed operation. */
+export async function useAppRuntime() {
+  const p = paths();
+  const root = realpathSync(fileURLToPath(new URL("../../", import.meta.url)));
+  const parent = join(homedir(), "Library", "Application Support", "AgentKlar", "runtimes");
+  const runtime = dirname(root);
+  if (dirname(runtime) !== parent || !/^[0-9a-f]{64}$/.test(basename(runtime)) || basename(root) !== "agentklar" || process.execPath !== join(runtime, "bin", "node"))
+    throw new Error("Use the verified bundled Mac app runtime for this operation.");
+  for (const folder of [parent, runtime]) { const st = lstatSync(folder); if (!st.isDirectory() || st.isSymbolicLink() || st.uid !== process.getuid!() || (st.mode & 0o077)) throw new Error("Private app runtime ownership changed."); }
+  const candidate = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+  if (candidate.name !== "agentklar" || candidate.agentklarDataCompatibility !== 1 || !/^0\.1\.0-beta\.[0-9]+$/.test(candidate.version)) throw new Error("Bundled runtime has unsupported data compatibility.");
+  const recordPath = join(p.home, "app-runtime-adoption.json");
+  let saved: AppAdoption;
+  if (existsSync(recordPath)) {
+    saved = JSON.parse(privateText(recordPath));
+    if (saved.version !== 1 || !["prepared", "replaced", "committed", "restored"].includes(saved.phase) || saved.root !== root || saved.service.home !== p.home || saved.service.port !== p.port || saved.oldEntry.id !== saved.service.id || saved.oldEntry.home !== p.home || saved.oldEntry.port !== p.port || saved.oldEntry.label !== p.label || saved.oldEntry.plistHash !== hash(saved.oldXml) || typeof saved.service.running !== "boolean" || !/^[0-9a-f-]{36}$/.test(saved.service.transaction) || !/^0\.1\.0-beta\.[0-9]+$/.test(saved.oldVersion) || saved.newVersion !== candidate.version || (dirname(saved.recovery) !== p.home || !/^app-runtime-[0-9a-f-]{36}$/.test(basename(saved.recovery))))
+      throw new Error("Earlier app runtime adoption needs its original app runtime. Existing files were kept.");
+    const recoveryState = lstatSync(saved.recovery);
+    if (!recoveryState.isDirectory() || recoveryState.isSymbolicLink() || recoveryState.uid !== process.getuid!() || (recoveryState.mode & 0o077)) throw new Error("App runtime recovery ownership changed.");
+    // Repair only the two exact known startup states after a crash between their writes.
+    const xml = privateText(p.plist), journal = JSON.parse(privateText(p.journal)) as Install;
+    if (![saved.oldXml, saved.newXml].includes(xml) || journal.id !== saved.oldEntry.id || journal.home !== p.home || journal.port !== p.port || journal.label !== p.label || ![hash(saved.oldXml), hash(saved.newXml)].includes(journal.plistHash)) throw new Error("Saved startup ownership changed. Adoption recovery refused.");
+    const wanted = saved.phase === "committed" ? saved.newXml : saved.oldXml;
+    if (xml !== wanted || journal.plistHash !== hash(wanted)) {
+      const marker = readUpdateMaintenance(p.home, journal.id);
+      if (!marker || marker.transaction !== saved.service.transaction || marker.recovery !== saved.recovery) throw new Error("Adoption maintenance ownership changed. Recovery refused.");
+      if (launchctl(["print", p.target], false)) {
+        const state = await operatorRequest(p, journal, "status");
+        if (!state.quiesced || state.activeRuns !== 0) throw new Error("Adoption recovery refuses active or unpaused work.");
+        launchctl(["bootout", p.target]); await waitUnregistered(p.target);
+      }
+      atomicPrivate(p.plist, wanted); atomicPrivate(p.journal, JSON.stringify({ ...saved.oldEntry, plistHash: hash(wanted) }));
+    }
+    const entry = installed(p)!;
+    const converted = command("/usr/bin/plutil", ["-convert", "json", "-o", "-", p.plist]);
+    const startup = JSON.parse(converted.stdout);
+    const version = saved.phase === "committed" ? saved.newVersion : saved.oldVersion;
+    const lifecycle = await managedUpdate(startup.ProgramArguments[1], saved.recovery, version, saved.service, startup.ProgramArguments[0]);
+    if (!lifecycle) throw new Error("Saved app service disappeared.");
+    if (saved.phase !== "committed" && readUpdateMaintenance(p.home, entry.id)) await lifecycle.stop();
+    await lifecycle.start(version);
+    unlinkSync(recordPath);
+    console.log(saved.phase === "committed" ? "App runtime is active." : "Previous runtime restored. Choose Upgrade again when ready.");
+    return;
+  }
+  const entry = installed(p);
+  if (!entry) { await install(p); return; }
+  if (readUpdateMaintenance(p.home, entry.id)) throw new Error("An earlier update is paused. Finish its recovery before adopting the app runtime.");
+  const oldXml = privateText(p.plist);
+  const converted = command("/usr/bin/plutil", ["-convert", "json", "-o", "-", p.plist]);
+  if (converted.status !== 0) throw new Error("Owned startup could not be read.");
+  const startup = JSON.parse(converted.stdout);
+  if (startup.ProgramArguments?.length !== 2 || typeof startup.ProgramArguments[0] !== "string" || typeof startup.ProgramArguments[1] !== "string" || !startup.ProgramArguments[1].endsWith("/dist/server/server.js") || startup.WorkingDirectory !== dirname(dirname(dirname(startup.ProgramArguments[1])))) throw new Error("Existing startup is not a supported production service.");
+  const oldPackage = JSON.parse(readFileSync(join(startup.WorkingDirectory, "package.json"), "utf8"));
+  if (oldPackage.name !== "agentklar" || oldPackage.agentklarDataCompatibility !== candidate.agentklarDataCompatibility) throw new Error("Previous runtime has incompatible or unknown data compatibility. It was kept.");
+  if (startup.ProgramArguments[0] === process.execPath && startup.WorkingDirectory === root) { console.log("App runtime is already selected."); return; }
+  const recovery = join(p.home, `app-runtime-${randomUUID()}`);
+  mkdirSync(recovery, { mode: 0o700 });
+  const lifecycle = await managedUpdate(startup.ProgramArguments[1], recovery, oldPackage.version, undefined, startup.ProgramArguments[0]);
+  if (!lifecycle) throw new Error("Owned startup disappeared.");
+  if (!lifecycle.running) throw new Error("Start the existing owned service before upgrading its runtime.");
+  startup.ProgramArguments = [process.execPath, join(root, "dist/server/server.js")]; startup.WorkingDirectory = root;
+  startup.EnvironmentVariables.PATH = join(runtime, "bin") + ":" + (startup.EnvironmentVariables.PATH || "/usr/bin:/bin");
+  const replacement = command("/usr/bin/plutil", ["-convert", "xml1", "-o", "-", "--", "-"], JSON.stringify(startup));
+  if (replacement.status !== 0) throw new Error("App startup could not be prepared.");
+  saved = { version: 1, phase: "prepared", root, oldXml, newXml: replacement.stdout, oldEntry: entry, oldVersion: oldPackage.version, newVersion: candidate.version, service: lifecycle.info, recovery };
+  writeFileSync(recordPath, JSON.stringify(saved), { mode: 0o600, flag: "wx" });
+  await adoptAppStartup(lifecycle, saved.oldXml, saved.newXml, saved.oldVersion, saved.newVersion,
+    (phase) => { saved.phase = phase; atomicPrivate(recordPath, JSON.stringify(saved)); });
+  unlinkSync(recordPath);
+  console.log("App runtime is active. Saved work and native accounts were kept.");
+}
+
+/** Commit before resume: after acceptance, an unclear response must never restore an older runtime. */
+export async function adoptAppStartup(
+  lifecycle: { paused(): boolean; stop(): Promise<void>; replaceStartup(xml: string): void; start(version: string, commit?: () => void): Promise<void> },
+  oldXml: string, newXml: string, oldVersion: string, newVersion: string,
+  record: (phase: AppAdoption["phase"]) => void,
+) {
+  let committed = false;
+  try {
+    await lifecycle.stop();
+    lifecycle.replaceStartup(newXml); record("replaced");
+    await lifecycle.start(newVersion, () => { record("committed"); committed = true; });
+  } catch (error) {
+    if (committed) throw new Error("App runtime installed; resume is unclear. Choose Upgrade again to check it. No rollback was attempted.");
+    try {
+      if (lifecycle.paused()) { await lifecycle.stop(); lifecycle.replaceStartup(oldXml); await lifecycle.start(oldVersion); }
+      record("restored");
+    } catch { throw new Error("Runtime adoption paused. Keep the app and recovery files; choose Upgrade again to restore the previous runtime."); }
+    throw error;
+  }
 }

@@ -3,6 +3,7 @@ import AppKit
 
 struct TeamView: View {
     @ObservedObject var client: AgentKlarClient
+    @State private var selectedRoleID: String?
     @State private var roles: [NativeRoleDraft] = []
     @State private var preference = "balanced"
     @State private var loadedProject = ""
@@ -16,18 +17,74 @@ struct TeamView: View {
         if client.projectID.isEmpty {
             ContentUnavailableView("Choose a project", systemImage: "person.2", description: Text("Save roles and native model pins for this project."))
         } else {
-            Form {
-                Section("Cost and quality") {
-                    Picker("Cost preference", selection: $preference) {
-                        Text("Economical").tag("economical"); Text("Balanced").tag("balanced"); Text("Best capability").tag("best")
-                    }
-                    Text(preferenceSummary).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                    DisclosureGroup("Details") {
-                        Text("This preference guides automatic routing. Saved role and model pins stay fixed. Dollar cost is unknown; this setting does not enforce a budget.").font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                    }
+            VStack(alignment: .leading, spacing: 24) {
+                NativePageHeader(title: "Team", subtitle: "Saved roles, responsibilities and native model pins.") { teamActions }
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .top, spacing: 16) { preferenceControls }.fixedSize(horizontal: true, vertical: false)
+                    VStack(alignment: .leading, spacing: 8) { preferenceControls }
                 }
-                ForEach($roles) { $role in
-                    Section {
+                if !message.isEmpty { Text(message).foregroundStyle(failed ? .red : .secondary).fixedSize(horizontal: false, vertical: true).textSelection(.enabled) }
+                if roles.isEmpty {
+                    NativeEmptyState("Build your team", systemImage: "person.2", description: "Add roles for the work you delegate often.") {
+                        Button("Add role", systemImage: "plus") { addRole() }.disabled((workers.isEmpty && peers.isEmpty) || roles.count >= 30)
+                    }
+                } else {
+                    ViewThatFits(in: .horizontal) {
+                        HStack(alignment: .top, spacing: 24) {
+                            roster.frame(width: 220)
+                            selectedEditor.frame(minWidth: 320, maxWidth: .infinity)
+                        }
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 16) {
+                                roster.frame(height: 160)
+                                selectedEditor
+                            }
+                        }
+                    }.frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }.font(NativeStyle.body).padding(NativeStyle.pagePadding).disabled(saving || !client.connected)
+            .task(id: client.projectID) {
+                loadedProject = client.projectID
+                preference = client.project["preference"].string ?? "balanced"
+                roles = (client.project["roles"].array ?? []).map(NativeRoleDraft.init)
+                selectedRoleID = roles.first?.id
+                message = ""
+            }
+        }
+    }
+    @ViewBuilder private var preferenceControls: some View {
+        Picker("Routing preference", selection: $preference) {
+            Text("Economical").tag("economical"); Text("Balanced").tag("balanced"); Text("Best capability").tag("best")
+        }.fixedSize(horizontal: true, vertical: false)
+        Text(preferenceSummary).font(NativeStyle.caption).foregroundStyle(.secondary)
+        NativeDetailButton("About routing preference") {
+            Text("This preference guides automatic routing. Saved role and model pins stay fixed. Dollar cost is unknown; this setting does not enforce a budget.")
+        }
+    }
+    private var roster: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Roles").font(NativeStyle.heading)
+            List(selection: $selectedRoleID) {
+                ForEach(roles) { role in
+                    HStack(alignment: .top, spacing: 10) {
+                        NativeHarnessIcon(harness: role.harness, size: 24)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(role.name.isEmpty ? "New role" : role.name).fontWeight(.medium)
+                            Text(harnessName(role.harness) + (role.peerID == nil ? " · this Mac" : " · remote owner"))
+                                .font(NativeStyle.caption).foregroundStyle(.secondary)
+                        }
+                    }.padding(.vertical, 6).tag(role.id)
+                }
+            }.listStyle(.plain)
+        }
+    }
+    @ViewBuilder private var selectedEditor: some View {
+        if selectedRoleID == nil { Text("Select a role to edit its responsibility and native pins.").foregroundStyle(.secondary) }
+        ForEach($roles) { $role in
+            if role.id == selectedRoleID {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(role.name.isEmpty ? "New role" : role.name).font(NativeStyle.heading)
+                    Form {
                         TextField("Role name", text: $role.name)
                         Picker("Computer", selection: Binding(get: { role.peerID ?? "" }, set: { value in role.peerID = value.isEmpty ? nil : value })) {
                             Text("This computer").tag("")
@@ -48,40 +105,17 @@ struct TeamView: View {
                         TextField("Model pin (optional)", text: $role.model)
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Responsibility").foregroundStyle(.secondary)
-                            TextEditor(text: $role.responsibility).font(.system(size: 13))
-                                .scrollContentBackground(.hidden).padding(8).frame(height: 110)
-                                .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
-                                .overlay(RoundedRectangle(cornerRadius: 6).stroke(.quaternary))
+                            TextEditor(text: $role.responsibility).font(NativeStyle.body)
+                                .scrollContentBackground(.hidden).padding(16).frame(height: 160)
                                 .accessibilityLabel("Responsibility")
                         }
-                        DisclosureGroup("Role details") {
+                        NativeDetailButton("Role details") {
                             Text(role.peerID == nil ? "The selected native harness uses its own account and permissions. An empty model pin uses its native default." : "This role stays on its saved remote owner. The owner checks native model access and permissions at Start; saving does not verify availability.")
-                                .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                                .font(NativeStyle.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                         }
-                        Button("Remove role", role: .destructive) { roles.removeAll { $0.id == role.id } }
-                    } header: {
-                        HStack(spacing: 8) {
-                            NativeHarnessIcon(harness: role.harness, size: 18)
-                            Text(role.name.isEmpty ? "New role" : role.name)
-                            Spacer()
-                            Text(harnessName(role.harness)).font(.system(size: 11)).foregroundStyle(.secondary)
-                        }
-                    }
+                        Button("Remove role", role: .destructive) { roles.removeAll { $0.id == role.id }; selectedRoleID = roles.first?.id }
+                    }.formStyle(.columns)
                 }
-                Section {
-                    if roles.isEmpty { Text("No saved roles yet.").foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
-                    ViewThatFits(in: .horizontal) {
-                        HStack(spacing: 12) { teamActions }.fixedSize(horizontal: true, vertical: false)
-                        VStack(alignment: .leading, spacing: 12) { teamActions }
-                    }
-                    if !message.isEmpty { Text(message).foregroundStyle(failed ? .red : .secondary).fixedSize(horizontal: false, vertical: true).textSelection(.enabled) }
-                }
-            }.formStyle(.grouped).font(.system(size: 13)).padding(20).disabled(saving || !client.connected)
-            .task(id: client.projectID) {
-                loadedProject = client.projectID
-                preference = client.project["preference"].string ?? "balanced"
-                roles = (client.project["roles"].array ?? []).map(NativeRoleDraft.init)
-                message = ""
             }
         }
     }
@@ -97,10 +131,13 @@ struct TeamView: View {
             ["codex": "Codex", "claude": "Claude Code", "muse": "Muse", "opencode": "OpenCode", "gemini": "Gemini", "cursor-agent": "Cursor", "zcode": "ZCode"][id] ?? (id.isEmpty ? "Choose harness" : id)
     }
     @ViewBuilder private var teamActions: some View {
-        Button("Add role", systemImage: "plus") {
-            roles.append(NativeRoleDraft(id: UUID().uuidString, name: "", harness: workers.first?["id"].string ?? "", model: "", responsibility: "", peerID: nil))
-        }.disabled((workers.isEmpty && peers.isEmpty) || roles.count >= 30)
-        Button("Save team") { Task { await save() } }.disabled(loadedProject != client.projectID)
+        Button("Add role", systemImage: "plus") { addRole() }.disabled((workers.isEmpty && peers.isEmpty) || roles.count >= 30)
+        Button("Save team") { Task { await save() } }.buttonStyle(.borderedProminent).disabled(loadedProject != client.projectID)
+    }
+    private func addRole() {
+        let id = UUID().uuidString
+        roles.append(NativeRoleDraft(id: id, name: "", harness: workers.first?["id"].string ?? "", model: "", responsibility: "", peerID: nil))
+        selectedRoleID = id
     }
     private func save() async {
         guard !saving, loadedProject == client.projectID else { return }

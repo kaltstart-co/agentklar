@@ -94,14 +94,17 @@ Plan: [docs/ONBOARDING_PLAN.md](docs/ONBOARDING_PLAN.md).
 
 ## Native Mac preview
 
-Plan: [docs/DESKTOP_PLAN.md](docs/DESKTOP_PLAN.md).
+Plan: [docs/DESKTOP_PLAN.md](docs/DESKTOP_PLAN.md). Beta.34 is a local development preview; full GUI acceptance is pending. Evidence: [native Mac notes](docs/MACOS_APP.md#verification-limits).
 
 - [x] SwiftUI build
 - [x] Local boundary checks
 - [x] Native GUI smoke
-- [x] Native toolbar layout
-- [x] Compact model cards
+- [x] Project workspace tabs
+- [x] Large document editors
+- [x] Flat native pages
+- [x] Bundled runtime fixtures
 - [x] Project picture storage
+- [ ] Clean Mac setup
 - [ ] Native GUI acceptance
 - [ ] Full native parity
 - [ ] Signed distribution

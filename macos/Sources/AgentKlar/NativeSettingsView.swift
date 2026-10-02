@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 
 struct NativeSettingsView: View {
     @ObservedObject var client: AgentKlarClient
+    @State private var selectedTab = "Connections"
     @State private var harness = "codex"
     @State private var status: JSON = .null
     @State private var preview: JSON = .null
@@ -12,78 +13,104 @@ struct NativeSettingsView: View {
     @State private var working = false
     @State private var message = ""
     @State private var failure = ""
-    @State private var choosingProject = false
     private let supported = ["codex", "claude", "muse", "opencode", "antigravity"]
     private var scope: String { client.projectID + ":" + harness }
     private var configured: Bool { status["status"].string == "configured" && status["change"]["state"].string != "interrupted" }
 
     var body: some View {
-        TabView {
-            connections.tabItem { Label("Connections", systemImage: "point.3.connected.trianglepath.dotted") }
-            Form { Section("Native defaults") { NativeDefaultsView(client: client) } }
-                .formStyle(.grouped).tabItem { Label("Defaults", systemImage: "slider.horizontal.3") }
-            NativeDevicesView(client: client).tabItem { Label("Devices", systemImage: "desktopcomputer") }
-            Form { Section("Updates") { NativeUpdateSettings(client: client) } }
-                .formStyle(.grouped).tabItem { Label("Updates", systemImage: "arrow.down.circle") }
-        }.padding(20).font(.system(size: 13)).disabled(client.busy).navigationTitle("Settings")
+        VStack(alignment: .leading, spacing: 20) {
+            NativePageHeader(title: "Settings", subtitle: "Connections, defaults and this Mac.") { EmptyView() }
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 24) {
+                    ForEach(["Connections", "Defaults", "Devices", "Updates"], id: \.self) { tab in
+                        Button { selectedTab = tab } label: {
+                            VStack(spacing: 8) {
+                                Text(tab).font(.system(size: 14, weight: selectedTab == tab ? .semibold : .regular))
+                                    .foregroundStyle(selectedTab == tab ? Color.primary : Color.secondary)
+                                Rectangle().fill(selectedTab == tab ? Color.accentColor : .clear).frame(height: 2)
+                            }
+                        }.buttonStyle(.plain).fixedSize(horizontal: true, vertical: false)
+                            .accessibilityAddTraits(selectedTab == tab ? .isSelected : [])
+                    }
+                    Spacer(minLength: 0)
+                }
+            }.fixedSize(horizontal: false, vertical: true)
+            ZStack(alignment: .topLeading) {
+                ScrollView {
+                    NativeDefaultsView(client: client).frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .opacity(selectedTab == "Defaults" ? 1 : 0)
+                .disabled(selectedTab != "Defaults")
+                .allowsHitTesting(selectedTab == "Defaults")
+                .accessibilityElement(children: .contain)
+                .accessibilityHidden(selectedTab != "Defaults")
+                if selectedTab == "Devices" {
+                    NativeDevicesView(client: client)
+                } else if selectedTab != "Defaults" {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 24) {
+                            if selectedTab == "Connections" { connections }
+                            else { NativeUpdateSettings(client: client) }
+                        }.frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+            }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }.padding(NativeStyle.pagePadding).font(NativeStyle.body).disabled(client.busy)
     }
     private var connections: some View {
-        Form {
-            Section("Project") {
-                Picker("Project", selection: Binding(get: { client.projectID }, set: { id in Task { await client.selectProject(id) } })) {
-                    Text("Choose a project").tag("")
-                    ForEach(client.projects, id: \.self) { row in Text(row["name"].string ?? "Project").tag(row["id"].string ?? "") }
-                }.disabled(working)
-                if let path = client.project["path"].string { Text(path).foregroundStyle(.secondary).lineLimit(3).truncationMode(.middle).textSelection(.enabled) }
-                Button("Add project folder…", systemImage: "folder.badge.plus") { choosingProject = true }.disabled(working || !client.connected)
+        VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 8) {
+                LabeledContent("Project", value: client.project["name"].string ?? "Choose a project")
+                if let path = client.project["path"].string {
+                    Text(path).font(NativeStyle.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+                }
                 if client.onboarding["projectId"].string == client.projectID, let main = client.onboarding["mainHarness"].string {
-                    Label("Main: \(name(main))", systemImage: "checkmark.circle").font(.system(size: 11)).foregroundStyle(.secondary)
+                    Label("Main: \(name(main))", systemImage: "checkmark.circle").font(NativeStyle.caption).foregroundStyle(.secondary)
                 }
             }
-            Section("Native connection") {
-                Picker("Harness", selection: $harness) {
-                    ForEach(supported, id: \.self) { id in HStack { NativeHarnessIcon(harness: id); Text(name(id)) }.tag(id) }
-                }.disabled(working)
-                Label(connectionState, systemImage: configured ? "checkmark.circle" : status["status"].string == "conflict" ? "exclamationmark.triangle" : "circle.dotted")
-                    .foregroundStyle(configured ? .secondary : .primary)
-                if status["change"]["state"].string == "interrupted" { Label("Interrupted setup needs attention", systemImage: "exclamationmark.triangle").foregroundStyle(.orange) }
-                if status["status"].string == "conflict" || status["status"].string == "unavailable", let text = status["message"].string {
-                    Text(text).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
-                }
-                DisclosureGroup("Connection details") {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(harness == "claude" ? "Local project scope. Only this project's Claude Code sessions." : "User scope. Available to this harness's projects.")
-                        Text("Accounts, trust and permissions stay in your harness. A configured entry does not prove sign-in, tools or quota.")
-                        if let text = status["message"].string { Text(text).fixedSize(horizontal: false, vertical: true).textSelection(.enabled) }
-                    }.font(.system(size: 11)).foregroundStyle(.secondary)
-                }
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: 12) { connectionActions }.fixedSize(horizontal: true, vertical: false)
-                    VStack(alignment: .leading, spacing: 12) { connectionActions }
-                }.disabled(working || !client.connected || client.projectID.isEmpty)
-                if configured {
-                    Button("Use as main harness") { Task { await saveMain() } }.disabled(working || !client.connected)
-                }
-                if preview["id"].string != nil { previewSection }
+            Divider()
+            Text("Use AgentKlar in a harness").font(NativeStyle.heading)
+            Picker("Harness", selection: $harness) {
+                ForEach(supported, id: \.self) { id in HStack { NativeHarnessIcon(harness: id); Text(name(id)) }.tag(id) }
+            }.pickerStyle(.menu).disabled(working)
+            Label(connectionState, systemImage: configured ? "checkmark.circle" : status["status"].string == "conflict" ? "exclamationmark.triangle" : "circle.dotted")
+                .foregroundStyle(configured ? .secondary : .primary)
+            if status["change"]["state"].string == "interrupted" { Label("Interrupted setup needs attention", systemImage: "exclamationmark.triangle").foregroundStyle(.orange) }
+            if status["status"].string == "conflict" || status["status"].string == "unavailable", let text = status["message"].string {
+                Text(text).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
             }
-            Section("Installed harnesses") {
-                Button("Find native installations", systemImage: "arrow.clockwise") { Task { await loadInstallations() } }.disabled(working || !client.connected)
-                ForEach(installations, id: \.self) { entry in installationRow(entry) }
-                DisclosureGroup("Installation details") { Text("Saving a CLI choice takes effect after a service restart. Version discovery does not prove protocol or tool support. Finish work before restarting.").font(.system(size: 11)).foregroundStyle(.secondary) }
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) { connectionActions }.fixedSize(horizontal: true, vertical: false)
+                VStack(alignment: .leading, spacing: 12) { connectionActions }
+            }.controlSize(.regular).disabled(working || !client.connected || client.projectID.isEmpty)
+            if configured {
+                Button("Use as main harness") { Task { await saveMain() } }.controlSize(.regular).disabled(working || !client.connected)
             }
-            if !message.isEmpty { Section { Label(message, systemImage: "checkmark.circle").fixedSize(horizontal: false, vertical: true).foregroundStyle(.secondary) } }
-            if !failure.isEmpty { Section { Label(failure, systemImage: "exclamationmark.triangle").fixedSize(horizontal: false, vertical: true).foregroundStyle(.red).textSelection(.enabled) } }
+            NativeDetailButton("Connection details") {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(harness == "claude" ? "Local project scope. Only this project's Claude Code sessions." : "User scope. Available to this harness's projects.")
+                    Text("Accounts, trust and permissions stay in your harness. A configured entry does not prove sign-in, tools or quota.")
+                    if let text = status["message"].string { Text(text).fixedSize(horizontal: false, vertical: true).textSelection(.enabled) }
+                }.font(NativeStyle.caption).foregroundStyle(.secondary)
+            }
+            if preview["id"].string != nil { previewSection }
+            Divider()
+            HStack {
+                Text("Installed harnesses").font(NativeStyle.heading)
+                Spacer()
+                Button("Find installations", systemImage: "arrow.clockwise") { Task { await loadInstallations() } }
+                    .controlSize(.regular).disabled(working || !client.connected)
+            }
+            ForEach(installations, id: \.self) { entry in installationRow(entry) }
+            NativeDetailButton("Installation details") {
+                Text("Saving a CLI choice takes effect after a service restart. Version discovery does not prove protocol or tool support. Finish work before restarting.")
+                    .font(NativeStyle.caption).foregroundStyle(.secondary)
+            }
+            if !message.isEmpty { Label(message, systemImage: "checkmark.circle").fixedSize(horizontal: false, vertical: true).foregroundStyle(.secondary) }
+            if !failure.isEmpty { Label(failure, systemImage: "exclamationmark.triangle").fixedSize(horizontal: false, vertical: true).foregroundStyle(.red).textSelection(.enabled) }
         }
-        .formStyle(.grouped)
         .disabled(client.busy)
-        .navigationTitle("Settings")
-        .fileImporter(isPresented: $choosingProject, allowedContentTypes: [.folder], allowsMultipleSelection: false) { result in
-            switch result {
-            case .success(let folders):
-                if let folder = folders.first { Task { await client.registerProject(name: folder.lastPathComponent, path: folder.path) } }
-            case .failure: client.error = "The project folder could not be selected. Try Add project again."
-            }
-        }
         .task(id: scope + ":" + String(client.connected)) {
             status = .null; preview = .null; message = ""; failure = ""
             while working { do { try await Task.sleep(for: .milliseconds(50)) } catch { return } }
@@ -99,8 +126,8 @@ struct NativeSettingsView: View {
 
     private var connectionState: String {
         switch status["status"].string {
-        case "configured": return configured ? "Configured" : "Setup needs attention"
-        case "missing": return "Not connected"
+        case "configured": return configured ? "Connection installed" : "Setup needs attention"
+        case "missing": return "Setup needed"
         case "conflict": return "Conflicting entry"
         case "unavailable": return "Status unavailable"
         default: return "Status not checked"
@@ -108,15 +135,15 @@ struct NativeSettingsView: View {
     }
     private var previewSection: some View {
         GroupBox("Review connection") {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 16) {
                 Label("\(name(harness)) · \(preview["scope"].string ?? "Unknown") scope", systemImage: "doc.text.magnifyingglass")
                 Text(preview["configPath"].string ?? "Config path unavailable").fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
                 if let cwd = preview["cwd"].string { Text("Project: \(cwd)").fixedSize(horizontal: false, vertical: true).textSelection(.enabled) }
-                if let command = preview["command"].string { Text(command).font(.system(size: 11, design: .monospaced)).fixedSize(horizontal: false, vertical: true).textSelection(.enabled) }
-                Text(pretty(preview["entry"])).font(.system(size: 11, design: .monospaced)).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
-                Text("No account token is added.").font(.system(size: 11)).foregroundStyle(.secondary)
+                if let command = preview["command"].string { Text(command).font(.system(size: 12, design: .monospaced)).fixedSize(horizontal: false, vertical: true).textSelection(.enabled) }
+                Text(pretty(preview["entry"])).font(.system(size: 12, design: .monospaced)).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+                Text("No account token is added.").font(NativeStyle.caption).foregroundStyle(.secondary)
                 Button("Apply reviewed connection") { Task { await setup("apply") } }.disabled(working || !client.connected)
-            }.frame(maxWidth: .infinity, alignment: .leading).padding(8)
+            }.frame(maxWidth: .infinity, alignment: .leading).padding(16)
         }
     }
 
@@ -124,9 +151,9 @@ struct NativeSettingsView: View {
         let id = entry["harness"].string ?? "unknown"
         let found = entry["installations"].array ?? []
         let selected = choices[id] ?? entry["current"]["path"].string ?? entry["saved"].string ?? entry["selected"].string ?? ""
-        return GroupBox {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 8) { NativeHarnessIcon(harness: id); Text(name(id)).fontWeight(.semibold); Spacer(); Text(entry["current"]["version"].string ?? "Version unknown").font(.system(size: 11)).foregroundStyle(.secondary) }
+        return VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(spacing: 8) { NativeHarnessIcon(harness: id); Text(name(id)).fontWeight(.semibold); Spacer(); Text(entry["current"]["version"].string ?? "Version unknown").font(NativeStyle.caption).foregroundStyle(.secondary) }
                 if entry["changed"].bool == true || entry["restartRequired"].bool == true {
                     Label("Finish work, then restart the service.", systemImage: "arrow.triangle.2.circlepath").foregroundStyle(.orange)
                 }
@@ -135,16 +162,17 @@ struct NativeSettingsView: View {
                     ForEach(found, id: \.self) { item in Text("\(item["version"].string ?? "Version unknown") · \(item["path"].string ?? "")").tag(item["path"].string ?? "") }
                 }.disabled(working || found.isEmpty)
                 Button("Save for next restart") { Task { await saveInstallation(id, path: selected, found: found) } }.disabled(working || !client.connected || !found.contains { $0["path"].string == selected })
-                DisclosureGroup("Installation paths and status") {
+                NativeDetailButton("Installation paths and status") {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Service CLI: \(entry["selected"].string ?? "Not available")")
                         if !selected.isEmpty { Text("Choice: \(selected)") }
                         if let version = entry["baseline"]["version"].string { Text("Previously: \(version)") }
                         if let version = entry["current"]["version"].string { Text("Found: \(version)") }
                         if entry["changed"].bool == true || entry["restartRequired"].bool == true { Text("Harness installation changed. Finish work, then restart the service to refresh its connection.") }
-                    }.font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+                    }.font(NativeStyle.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
                 }
-            }.frame(maxWidth: .infinity, alignment: .leading).padding(8)
+            }.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 16)
+            Divider()
         }
     }
 

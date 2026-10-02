@@ -2,6 +2,7 @@ import SwiftUI
 
 struct WorkView: View {
     @ObservedObject var client: AgentKlarClient
+    var active = true
     @State private var selectedID: String?
     @State private var remoteSelectedID: String?
     @State private var showingRemote = false
@@ -22,23 +23,27 @@ struct WorkView: View {
     private var approvals: [JSON] {
         (client.snapshot["approvals"].array ?? []).filter { $0["runId"].string == selectedID }
     }
+    private var pollingID: String { active && !showingRemote ? selectedID ?? "" : "" }
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                Picker("Computer", selection: $showingRemote) {
-                    Text("This Mac").tag(false); Text("Connected Macs").tag(true)
-                }.labelsHidden().pickerStyle(.segmented).frame(width: 250)
-                    .help("Choose where to view work")
-                Spacer()
-            }.padding(.horizontal, 20).padding(.vertical, 12)
-            Divider()
+            NativePageHeader(title: "Work", subtitle: client.project["name"].string) {
+                Button("Refresh", systemImage: "arrow.clockwise") { Task { await client.refresh() } }.disabled(!client.connected)
+                    .help("Refresh work")
+                Button("New task", systemImage: "plus") { followUpSource = .null; newTask = true }
+                    .buttonStyle(.borderedProminent).disabled(!client.connected || client.projectID.isEmpty)
+                    .keyboardShortcut(active ? KeyboardShortcut("n", modifiers: .command) : nil).help("Create a task")
+            }.padding(.horizontal, NativeStyle.pagePadding).padding(.top, NativeStyle.pagePadding).padding(.bottom, 20)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 16) { workFilters }.fixedSize(horizontal: true, vertical: false)
+                VStack(alignment: .leading, spacing: 12) { workFilters }
+            }.frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 24).padding(.bottom, 16)
+            if !runs.isEmpty || showingRemote { Divider() }
             if showingRemote {
                 NativeRemoteWorkView(client: client, selected: $remoteSelectedID) { source in followUpSource = source; newTask = true }
             } else if runs.isEmpty && search.isEmpty {
                 emptyWork
             } else { NativeWorkLayout {
                 VStack {
-                    TextField("Search tasks", text: $search).textFieldStyle(.roundedBorder).padding([.horizontal, .top], 12)
                     List(selection: $selectedID) {
                         ForEach(runs, id: \.selfID) { run in
                             HStack(alignment: .top, spacing: 10) {
@@ -46,7 +51,7 @@ struct WorkView: View {
                                 VStack(alignment: .leading, spacing: 5) {
                                     Text(run["prompt"].string ?? "Task").lineLimit(2)
                                     Text("\(stateName(run["state"].string)) · \(run["harness"].string ?? "Native worker")")
-                                        .font(.caption).foregroundStyle(.secondary)
+                                        .font(NativeStyle.caption).foregroundStyle(.secondary)
                                 }
                             }.padding(.vertical, 6).tag(run["id"].string ?? "")
                         }
@@ -55,34 +60,37 @@ struct WorkView: View {
                 }
             } detail: {
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 18) {
+                    VStack(alignment: .leading, spacing: 16) {
                         if let id = selected["id"].string {
                             HStack {
-                                Label(stateName(selected["state"].string), systemImage: selected["state"].string == "completed" ? "checkmark.circle" : "circle.dotted").font(.caption).foregroundStyle(.secondary)
+                                Label(stateName(selected["state"].string), systemImage: selected["state"].string == "completed" ? "checkmark.circle" : "circle.dotted").font(NativeStyle.caption).foregroundStyle(.secondary)
                                 Spacer()
                                 if ["running", "needs_attention"].contains(selected["state"].string ?? "") {
                                     Button("Stop task", role: .destructive) { Task { await act { _ = try await client.request("/runs/\(id)/stop", body: [:]) } } }
                                         .disabled(changing || !client.connected)
                                 }
                             }
-                            Text(selected["prompt"].string ?? "Task").font(.title2).textSelection(.enabled)
-                            if selected["promptTruncated"].bool == true { Text("Task prompt preview shortened.").font(.caption).foregroundStyle(.secondary) }
+                            Text(NativeTaskTitle.text(selected["prompt"].string)).font(NativeStyle.title).lineLimit(2).textSelection(.enabled)
+                            if selected["promptTruncated"].bool == true { Text("Task prompt preview shortened.").font(NativeStyle.caption).foregroundStyle(.secondary) }
                             HStack(spacing: 8) {
                                 NativeHarnessIcon(harness: selected["harness"].string ?? "", size: 18)
                                 Text(selected["harness"].string ?? "Native worker")
                                 Text("·")
                                 Text(selected["tokens"].number.map { "\($0.formatted(.number.precision(.fractionLength(0)))) reported tokens" } ?? "Usage not reported")
-                            }.font(.caption).foregroundStyle(.secondary)
+                            }.font(NativeStyle.caption).foregroundStyle(.secondary)
                             if let model = selected["routing"]["selected"]["model"].string {
-                                Text(model).font(.caption).foregroundStyle(.secondary)
+                                Text(model).font(NativeStyle.caption).foregroundStyle(.secondary)
                             }
-                            if selected["state"].string == "completed" { Text("Worker finished. Ready for review.").font(.caption).foregroundStyle(.secondary) }
+                            if selected["state"].string == "completed" { Text("Worker finished. Ready for review.").font(NativeStyle.caption).foregroundStyle(.secondary) }
+                            NativeDetailButton("Task instructions") {
+                                Text(selected["prompt"].string ?? "Task").font(NativeStyle.document).lineSpacing(4).textSelection(.enabled)
+                            }.id("prompt:" + id)
                             if let error = selected["error"].string, !error.isEmpty { Text(error).foregroundStyle(.red).textSelection(.enabled) }
                             if !detailError.isEmpty { Text(detailError).foregroundStyle(.red) }
                             ForEach(approvals, id: \.selfID) { approval in
                                 GroupBox("Native permission request") {
                                     VStack(alignment: .leading, spacing: 10) {
-                                        Text(approval["title"].string ?? "Review this exact request").font(.headline)
+                                        Text(approval["title"].string ?? "Review this exact request").font(NativeStyle.heading)
                                         Text(approval["details"].prettyText).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
                                         HStack {
                                             if concrete(approval), (approval["decisions"].array ?? []).contains(where: { $0.string == "accept" }) {
@@ -92,56 +100,51 @@ struct WorkView: View {
                                                 Button(decision.capitalized) { Task { await answer(approval, decision: decision) } }
                                             }
                                         }.disabled(changing || !client.connected)
-                                        if !concrete(approval) { Text("This request cannot be approved safely in this native view. You can decline or cancel it.").font(.caption).foregroundStyle(.secondary) }
+                                        if !concrete(approval) { Text("This request cannot be approved safely in this native view. You can decline or cancel it.").font(NativeStyle.caption).foregroundStyle(.secondary) }
                                     }.frame(maxWidth: .infinity, alignment: .leading).padding(4)
                                 }
                             }
                             if !result.isEmpty {
-                                GroupBox("Result") {
+                                VStack(alignment: .leading, spacing: 12) {
+                                    Divider()
+                                    Text("Result").font(NativeStyle.heading)
                                     VStack(alignment: .leading, spacing: 12) {
-                                        Text(result).textSelection(.enabled)
-                                        if shortened { Text("Result is shortened. Read more through your native MCP host.").font(.caption).foregroundStyle(.secondary) }
+                                        Text(result).font(NativeStyle.document).lineSpacing(4).textSelection(.enabled)
+                                        if shortened { Text("Result is shortened. Read more through your native MCP host.").font(NativeStyle.caption).foregroundStyle(.secondary) }
                                     }.frame(maxWidth: .infinity, alignment: .leading).padding(8)
                                 }
                             }
                             if selected["routing"] != .null {
-                                DisclosureGroup("Model choice details") { Text(selected["routing"].prettyText).font(.system(.caption, design: .monospaced)).textSelection(.enabled) }
+                                NativeDetailButton("Model choice details") { Text(selected["routing"].prettyText).font(.system(size: 13, design: .monospaced)).textSelection(.enabled) }.id("routing:" + id)
                             }
-                            DisclosureGroup("Native events") {
+                            NativeDetailButton("Native events") {
+                                if events.isEmpty { Text("No native events reported yet.").foregroundStyle(.secondary) }
+                                if eventsShortened { Text("Event history is a bounded preview. Use your native MCP host for more.").font(NativeStyle.caption).foregroundStyle(.secondary) }
                                 ForEach(Array(events.enumerated()), id: \.offset) { _, event in
                                     VStack(alignment: .leading, spacing: 4) {
-                                        Text(event["kind"].string ?? "Event").font(.caption).foregroundStyle(.secondary)
+                                        Text(event["kind"].string ?? "Event").font(NativeStyle.caption).foregroundStyle(.secondary)
                                         Text(event["text"].string ?? "").font(.system(.caption, design: .monospaced)).textSelection(.enabled)
-                                        if event["textTruncated"].bool == true { Text("Event text shortened.").font(.caption).foregroundStyle(.secondary) }
+                                        if event["textTruncated"].bool == true { Text("Event text shortened.").font(NativeStyle.caption).foregroundStyle(.secondary) }
                                     }.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 6)
                                 }
-                            }
-                            if eventsShortened { Text("Event history is a bounded preview. Use your native MCP host for more.").font(.caption).foregroundStyle(.secondary) }
+                            }.id("events:" + id)
+                            if eventsShortened { Text("Event history is a bounded preview. Use your native MCP host for more.").font(NativeStyle.caption).foregroundStyle(.secondary) }
                             if selected["state"].string == "completed" {
                                 Button(selected["followUp"]["kind"].string == "review" ? "Fix findings" : "Review work", systemImage: "arrow.triangle.branch") {
                                     followUpSource = selected; newTask = true
                                 }.disabled(changing || !client.connected)
                             }
-                            DisclosureGroup("Move changes to another project") { NativeChangesView(client: client, sourceID: id).id(id) }
+                            NativeDetailButton("Move changes to another project") { NativeChangesView(client: client, sourceID: id).id(id) }.id("changes:" + id)
                         } else {
-                            ContentUnavailableView("Select a task", systemImage: "list.bullet.rectangle", description: Text("Read native results and review concrete permission requests."))
+                            NativeEmptyState("Select a task", systemImage: "list.bullet.rectangle", description: "Read its result, follow progress and review permission requests.") {}
+                                .frame(minHeight: 340)
                         }
                     }.frame(maxWidth: .infinity, alignment: .leading).padding(24)
                 }
             } }
         }
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button("Refresh", systemImage: "arrow.clockwise") { Task { await client.refresh() } }
-                    .disabled(!client.connected).help("Refresh work")
-            }
-            ToolbarItem(placement: .primaryAction) {
-                Button("New task", systemImage: "plus") { followUpSource = .null; newTask = true }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(!client.connected || client.projectID.isEmpty).keyboardShortcut("n")
-                    .help("Create a task")
-            }
-        }
+        .font(NativeStyle.body).controlSize(.regular)
+        .labelStyle(.titleAndIcon)
         .sheet(isPresented: $newTask) { NativeTaskSheet(client: client, selectedID: $selectedID, remoteSelectedID: $remoteSelectedID, showingRemote: $showingRemote, source: followUpSource) }
         .confirmationDialog("Allow this exact native request once?", isPresented: Binding(get: { reviewedApproval != nil }, set: { if !$0 { reviewedApproval = nil } }), titleVisibility: .visible) {
             if let approval = reviewedApproval {
@@ -159,18 +162,18 @@ struct WorkView: View {
                 selectedID = id; showingRemote = false
             } else if (client.snapshot["remoteDispatches"].array ?? []).contains(where: { $0["id"].string == id && $0["projectId"].string == client.projectID }) {
                 remoteSelectedID = id; showingRemote = true
-            } else { client.error = "This task is no longer available in the selected project. Refresh its saved handoff or choose another task." }
+            } else { client.reportError("This task is no longer available in the selected project. Refresh its saved handoff or choose another task.") }
             client.requestedRunID = nil
         }
-        .task(id: showingRemote ? nil : selectedID) {
+        .task(id: pollingID) {
+            guard active, !showingRemote, let id = selectedID else { return }
             events = []; result = ""; detailError = ""; eventsShortened = false
-            guard !showingRemote, let id = selectedID else { return }
             var after = 0
             while !Task.isCancelled {
                 do {
                     let tail = try await client.request("/runs/\(id)/tail?after=\(after)")
                     let full = try await client.request("/runs/\(id)/result")
-                    guard selectedID == id, !Task.isCancelled else { return }
+                    guard active, selectedID == id, !Task.isCancelled else { return }
                     let incoming = tail["events"].array ?? []
                     after = tail["nextAfter"].number.map(Int.init) ?? after
                     let combined = events + incoming
@@ -182,30 +185,27 @@ struct WorkView: View {
             }
         }
     }
-    @ViewBuilder private var emptyWork: some View {
-        if client.projectID.isEmpty {
-            ContentUnavailableView("Add your first project", systemImage: "folder.badge.plus", description: Text("Choose an existing project folder using the toolbar."))
-        } else {
-            VStack(spacing: 20) {
-                Image(systemName: "square.stack.3d.up").font(.system(size: 34, weight: .light)).foregroundStyle(Color.accentColor)
-                VStack(spacing: 8) {
-                    Text("Start work with your agents").font(.title2.weight(.semibold))
-                    Text("Delegate a task, follow progress, and review results in one place.")
-                        .foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 360)
+    @ViewBuilder private var workFilters: some View {
+        Picker("Computer", selection: $showingRemote) {
+            Text("This Mac").tag(false)
+            Text("Connected Macs").tag(true)
+        }.labelsHidden().pickerStyle(.segmented).frame(width: 250)
+            .accessibilityLabel("Computer for task list").help("Choose where to view work")
+        if !showingRemote {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                TextField("Search tasks", text: $search).textFieldStyle(.plain)
+                if !search.isEmpty {
+                    Button { search = "" } label: { Image(systemName: "xmark.circle.fill") }
+                        .buttonStyle(.plain).accessibilityLabel("Clear task search")
                 }
-                Button("New task", systemImage: "plus") { followUpSource = .null; newTask = true }
-                    .buttonStyle(.borderedProminent).controlSize(.large).disabled(!client.connected)
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: 16) { detectedTools }.fixedSize(horizontal: true, vertical: false)
-                    VStack(spacing: 10) { detectedTools }
-                }.padding(.top, 8)
-            }.padding(24).frame(maxWidth: .infinity, maxHeight: .infinity)
+            }.padding(8).frame(width: 220).background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
         }
     }
-    @ViewBuilder private var detectedTools: some View {
-        ForEach(client.harnesses.filter { $0["available"].bool == true && $0["workerSupported"].bool == true }, id: \.selfID) { worker in
-            HStack(spacing: 6) { NativeHarnessIcon(harness: worker["id"].string ?? "", size: 20); Text(worker["name"].string ?? "Harness").font(.caption).foregroundStyle(.secondary) }
-                .help("Detected on this Mac. Native access is checked when work starts.")
+    @ViewBuilder private var emptyWork: some View {
+        NativeEmptyState("Start work with your agents", systemImage: "square.stack.3d.up", description: "Delegate a task, follow its progress and review the result here.") {
+                Button("New task", systemImage: "plus") { followUpSource = .null; newTask = true }
+                    .buttonStyle(.borderedProminent).controlSize(.regular).disabled(!client.connected)
         }
     }
     private func stateName(_ value: String?) -> String {
@@ -231,6 +231,13 @@ struct WorkView: View {
         guard !changing else { return }; changing = true; detailError = ""
         do { try await work(); await client.refresh() } catch { detailError = error.localizedDescription }
         changing = false
+    }
+}
+
+enum NativeTaskTitle {
+    static func text(_ prompt: String?) -> String {
+        let firstLine = (prompt ?? "Task").split(whereSeparator: \.isNewline).first.map(String.init) ?? "Task"
+        return firstLine.count > 90 ? String(firstLine.prefix(90)) + "…" : firstLine
     }
 }
 
@@ -308,14 +315,27 @@ private struct NativeTaskSheet: View {
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text(source["id"].string == nil ? "New task" : followUpKind == "review" ? "Review linked work" : "Fix linked findings").font(.title2.weight(.semibold))
-            Form {
-                Section("Task") {
-                    Text(client.project["name"].string ?? "Choose a project").font(.caption).foregroundStyle(.secondary)
-                    TextEditor(text: $prompt).font(.body).scrollContentBackground(.hidden).padding(8).frame(height: 110)
-                        .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 8)).accessibilityLabel("Task prompt")
+            Text(source["id"].string == nil ? "New task" : followUpKind == "review" ? "Review linked work" : "Fix linked findings").font(NativeStyle.title)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                VStack(alignment: .leading, spacing: 12) {
+                    NativeSectionTitle(title: "Task")
+                    Text(client.project["name"].string ?? "Choose a project").font(NativeStyle.caption).foregroundStyle(.secondary)
+                    TextEditor(text: $prompt).font(NativeStyle.body).scrollContentBackground(.hidden).padding(12).frame(height: 160)
+                        .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+                        .overlay(alignment: .topLeading) {
+                            if prompt.isEmpty {
+                                Text("Describe the work you want this agent to do…")
+                                    .font(NativeStyle.body).foregroundStyle(.tertiary).padding(16)
+                                    .allowsHitTesting(false).accessibilityHidden(true)
+                            }
+                        }
+                        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.quaternary, lineWidth: 1))
+                        .accessibilityLabel("Task prompt")
                 }
-                Section("Assignment") {
+                Divider()
+                VStack(alignment: .leading, spacing: 12) {
+                    NativeSectionTitle(title: "Assignment")
                     Picker("Role", selection: $roleID) {
                         Text("No saved role").tag("")
                         ForEach(roles, id: \.selfID) { role in
@@ -327,11 +347,13 @@ private struct NativeTaskSheet: View {
                         ForEach(workers, id: \.selfID) { worker in Text(worker["name"].string ?? "Harness").tag(worker["id"].string ?? "") }
                     }.disabled(!roleID.isEmpty)
                     if let role = roles.first(where: { $0["id"].string == roleID }) {
-                        Text(role["model"].string.map { "Saved model pin: \($0)" } ?? "Saved role uses its native default unless explicitly pinned.").font(.caption)
+                        Text(role["model"].string.map { "Saved model pin: \($0)" } ?? "Saved role uses its native default unless explicitly pinned.").font(NativeStyle.caption)
                     }
                     TextField("Model (optional explicit pin)", text: $model)
                 }
-                Section("Routing") {
+                Divider()
+                VStack(alignment: .leading, spacing: 12) {
+                    NativeSectionTitle(title: "Routing")
                     Toggle("Use routing policy", isOn: $automaticRouting)
                     Picker("Computers for automatic choice", selection: $deviceScope) {
                         Text("This Mac").tag("local"); Text("This Mac and connected Macs").tag("connected")
@@ -340,29 +362,34 @@ private struct NativeTaskSheet: View {
                         Text("Coding").tag("coding"); Text("Reasoning").tag("reasoning"); Text("Data analysis").tag("data-analysis"); Text("Language").tag("language")
                     }
                     Picker("Complexity", selection: $complexity) { Text("Routine").tag("routine"); Text("Standard").tag("standard"); Text("Hard").tag("hard") }
-                    Text("Preference: \(client.project["preference"].string ?? "Unknown")").font(.caption).foregroundStyle(.secondary)
-                    DisclosureGroup("How routing works") {
+                    Text("Preference: \(client.project["preference"].string ?? "Unknown")").font(NativeStyle.caption).foregroundStyle(.secondary)
+                    NativeDetailButton("How routing works") {
                         Text("Remote roles keep their saved owner. Automatic remote work requires a separate worktree and a tested project mapping.")
                         Text(automaticRouting ? "Pins are preserved. Native model access, allowance and requirements are checked again on Start." : "Use your explicit pins or the native default. Required tools still need verified support.")
                         Text("Efficient workers are favored for routine work. Dollar cost is unknown.")
-                    }.font(.caption).foregroundStyle(.secondary)
+                    }.font(NativeStyle.caption).foregroundStyle(.secondary)
                 }
-                Section("Required capabilities") {
+                Divider()
+                VStack(alignment: .leading, spacing: 12) {
+                    NativeSectionTitle(title: "Required capabilities")
                     Toggle("Image input required", isOn: $requiresImages)
                     Toggle("Web search required", isOn: $webSearch)
                     Toggle("Image generation required", isOn: $imageGeneration)
-                    Text("Required tools need fresh effective worker evidence. Unknown support blocks Start. Model vision and installed plugins do not prove tool access.").font(.caption).foregroundStyle(.secondary)
+                    Text("Choose the tools this task needs. AgentKlar checks worker support before starting.").font(NativeStyle.caption).foregroundStyle(.secondary)
                 }
-                Section("Workspace") {
+                Divider()
+                VStack(alignment: .leading, spacing: 12) {
+                    NativeSectionTitle(title: "Workspace")
                     if source["id"].string == nil {
                         Picker("Workspace", selection: $workspace) { Text("Isolated worktree").tag("worktree"); Text("Project folder").tag("project") }
-                    } else { Text("The linked work's original workspace is preserved.").font(.caption) }
+                    } else { Text("The linked work's original workspace is preserved.").font(NativeStyle.caption) }
                     Toggle("Use saved project context", isOn: $includeContext)
                     Toggle("Read only", isOn: $readOnly).disabled(source["id"].string != nil && followUpKind == "review")
                     if readOnly && !supportedReview { Text("Choose Codex or Claude for enforced read-only work.").foregroundStyle(.secondary) }
                 }
                     adviceDetails
-            }.formStyle(.grouped).frame(maxHeight: .infinity)
+                }.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 4)
+            }.frame(maxHeight: .infinity)
             if !error.isEmpty { Text(error).foregroundStyle(.red).textSelection(.enabled) }
             HStack {
                 Button("Cancel", role: .cancel) { dismiss() }.disabled(starting)
@@ -370,9 +397,11 @@ private struct NativeTaskSheet: View {
                 if suggesting { ProgressView().controlSize(.small) }
                 Spacer()
                 Button("Start worker") { Task { await start() } }.keyboardShortcut(.defaultAction)
+                    .buttonStyle(.borderedProminent)
                     .disabled(starting || suggesting || !client.connected || client.projectID.isEmpty || prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || (readOnly && !supportedReview))
             }
-        }.padding(20).frame(minWidth: 460, idealWidth: 560, maxWidth: 640, minHeight: 440, idealHeight: 620, maxHeight: 720).disabled(starting)
+        }.font(NativeStyle.body).controlSize(.regular).buttonStyle(.bordered)
+            .padding(NativeStyle.pagePadding).frame(minWidth: 500, idealWidth: 620, maxWidth: 700, minHeight: 480, idealHeight: 700, maxHeight: 800).disabled(starting)
         .onChange(of: draft) { _, _ in key = UUID().uuidString; advice = .null }
         .onChange(of: workspace) { _, next in if next != "worktree" { deviceScope = "local" } }
         .onChange(of: roleID) { _, id in if let role = roles.first(where: { $0["id"].string == id }) { harness = role["harness"].string ?? "" } }
@@ -389,12 +418,12 @@ private struct NativeTaskSheet: View {
         if advice != .null {
             let choice = advice["choice"]
             if let model = choice["model"].string {
-                Text("\(choice["harness"].string ?? "Harness") · \(model)").font(.headline)
-            } else { Text("No suitable worker found").font(.headline) }
-            Text("Checked again on Start. Account allowance, model pins and required tools are checked by the service.").font(.caption)
-            ForEach(Array(adviceMessages.enumerated()), id: \.offset) { _, text in Text(text).font(.caption).foregroundStyle(.secondary) }
+                Text("\(choice["harness"].string ?? "Harness") · \(model)").font(NativeStyle.heading)
+            } else { Text("No suitable worker found").font(NativeStyle.heading) }
+            Text("Checked again on Start. Account allowance, model pins and required tools are checked by the service.").font(NativeStyle.caption)
+            ForEach(Array(adviceMessages.enumerated()), id: \.offset) { _, text in Text(text).font(NativeStyle.caption).foregroundStyle(.secondary) }
             if let score = choice["benchmark"]["score"].number {
-                Text("LiveBench \(choice["benchmark"]["metric"].string ?? "Reference"): \(score.formatted())/100 · max effort · \(advice["benchmarkMethod"].string ?? "reference only")").font(.caption)
+                Text("LiveBench \(choice["benchmark"]["metric"].string ?? "Reference"): \(score.formatted())/100 · max effort · \(advice["benchmarkMethod"].string ?? "reference only")").font(NativeStyle.caption)
             }
         }
     }
