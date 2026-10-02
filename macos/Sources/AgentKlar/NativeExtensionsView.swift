@@ -34,7 +34,7 @@ struct NativeExtensionsView: View {
             if !notice.isEmpty { Text(notice).foregroundStyle(.secondary) }
             if !failure.isEmpty { Label(failure, systemImage: "exclamationmark.triangle").foregroundStyle(.red).textSelection(.enabled) }
         }
-        .font(NativeStyle.body).controlSize(.regular).frame(maxWidth: 800, alignment: .leading).frame(maxWidth: .infinity, alignment: .leading)
+        .font(NativeStyle.body).controlSize(.regular).frame(maxWidth: .infinity, alignment: .leading)
         .disabled(working || client.busy || !client.connected)
         .onChange(of: source) { _, _ in skillPreview = .null }
         .onChange(of: skillName) { _, _ in skillPreview = .null }

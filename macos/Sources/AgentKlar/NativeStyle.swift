@@ -5,9 +5,11 @@ enum NativeStyle {
     static let document = Font.system(size: 15)
     static let source = Font.system(size: 15, design: .monospaced)
     static let heading = Font.system(size: 15, weight: .semibold)
-    static let title = Font.system(size: 20, weight: .semibold)
+    static let title = Font.system(size: 22, weight: .semibold)
     static let caption = Font.system(size: 12)
-    static let pagePadding: CGFloat = 24
+    static let pagePadding: CGFloat = 28
+    static let contentWidth: CGFloat = 960
+    static let cornerRadius: CGFloat = 8
 }
 
 /// One header and action area for every workspace page.
@@ -38,6 +40,46 @@ struct NativePageHeader<Actions: View>: View {
                 Text(subtitle).font(NativeStyle.caption).foregroundStyle(.secondary).lineLimit(2)
             }
         }.fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+/// Flat page tabs, shared by document, model and settings workspaces.
+struct NativePageTabs: View {
+    @Binding var selection: String
+    let items: [String]
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 22) {
+                ForEach(items, id: \.self) { item in
+                    Button { selection = item } label: {
+                        VStack(spacing: 10) {
+                            Text(item).font(.system(size: 14, weight: selection == item ? .medium : .regular))
+                                .foregroundStyle(selection == item ? .primary : .secondary)
+                            Rectangle().fill(selection == item ? Color.accentColor : .clear).frame(height: 2)
+                        }.padding(.top, 4).contentShape(Rectangle())
+                    }.buttonStyle(.plain).fixedSize(horizontal: true, vertical: false)
+                        .accessibilityAddTraits(selection == item ? .isSelected : [])
+                }
+            }
+        }.fixedSize(horizontal: false, vertical: true)
+            .overlay(alignment: .bottom) { Rectangle().fill(.quaternary).frame(height: 1) }
+    }
+}
+
+struct NativeSearchField: View {
+    let placeholder: String
+    @Binding var text: String
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+            TextField(placeholder, text: $text).textFieldStyle(.plain).accessibilityLabel(placeholder)
+            if !text.isEmpty {
+                Button { text = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
+                    .buttonStyle(.plain).accessibilityLabel("Clear " + placeholder.lowercased())
+            }
+        }.font(NativeStyle.body).padding(.horizontal, 10).frame(height: 34)
+            .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: NativeStyle.cornerRadius))
+            .overlay(RoundedRectangle(cornerRadius: NativeStyle.cornerRadius).strokeBorder(.quaternary))
     }
 }
 

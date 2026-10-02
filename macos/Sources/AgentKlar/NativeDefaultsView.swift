@@ -80,7 +80,7 @@ struct NativeDefaultsView: View {
             if working { ProgressView().controlSize(.small).accessibilityLabel("Reading or changing defaults") }
             if !notice.isEmpty { Label(notice, systemImage: "checkmark.circle").font(NativeStyle.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
             if !failure.isEmpty { Label(failure, systemImage: "exclamationmark.triangle").font(NativeStyle.caption).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true).textSelection(.enabled) }
-        }.font(NativeStyle.body).frame(maxWidth: 800, alignment: .leading)
+        }.font(NativeStyle.body).frame(maxWidth: .infinity, alignment: .leading)
         .disabled(working || client.busy || !client.connected || client.projectID.isEmpty)
         .onChange(of: model) { _, _ in preview = .null }
         .onChange(of: effort) { _, _ in preview = .null }

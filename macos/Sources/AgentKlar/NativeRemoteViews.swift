@@ -53,7 +53,7 @@ struct NativeDevicesView: View {
                     NativeDetailButton("Approval sharing") { approvalForm }
                 }.buttonStyle(.plain).foregroundStyle(.tint)
                 operationFeedback
-            }.frame(maxWidth: 800, alignment: .leading).frame(maxWidth: .infinity, alignment: .leading)
+            }.frame(maxWidth: .infinity, alignment: .leading)
         }.font(NativeStyle.body).controlSize(.regular).disabled(working || !client.connected)
         .sheet(isPresented: $connecting) {
             NativeDetailPage(title: "Connect a computer") { connectForm }
@@ -321,6 +321,9 @@ struct NativeRemoteWorkView: View {
                 }
             }
         } detail: {
+            if current["id"].string == nil {
+                NativeEmptyState("Select a remote task", systemImage: "desktopcomputer", description: "View work and results from your connected computers.") {}
+            } else {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     if let id = current["id"].string {
@@ -347,8 +350,9 @@ struct NativeRemoteWorkView: View {
                             }.disabled(working || !client.connected)
                         }
                         NativeDetailButton("Move changes to another project") { NativeChangesView(client: client, sourceID: id).id(id) }.id("remote-changes:" + id)
-                    } else { ContentUnavailableView("Select a remote task", systemImage: "desktopcomputer", description: Text("View work and results from your connected computers.")) }
-                }.padding(24).frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }.frame(maxWidth: 760, alignment: .leading).padding(NativeStyle.pagePadding).frame(maxWidth: .infinity)
+            }
             }
         }
     }

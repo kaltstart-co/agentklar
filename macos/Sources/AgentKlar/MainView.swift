@@ -26,28 +26,19 @@ struct MainView: View {
         NavigationSplitView {
             VStack(alignment: .leading, spacing: 0) {
                 Label("AgentKlar", systemImage: "square.stack.3d.up").font(.system(size: 14, weight: .semibold))
-                    .padding(.horizontal, 18).padding(.top, 20).padding(.bottom, 16)
+                    .padding(.horizontal, 20).padding(.top, 18).padding(.bottom, 20)
                 VStack(spacing: 4) {
-                    ForEach(sections, id: \.0) { item in
-                        Button { pages[activeProject] = item.0 } label: {
-                            HStack(spacing: 10) {
-                                Image(systemName: item.1).font(.system(size: 16)).frame(width: 20)
-                                Text(item.0).font(.system(size: 14, weight: page == item.0 ? .medium : .regular))
-                                Spacer(minLength: 0)
-                            }.foregroundStyle(page == item.0 ? .primary : .secondary)
-                                .padding(.horizontal, 10).frame(maxWidth: .infinity).frame(height: 34)
-                                .background(page == item.0 ? Color.primary.opacity(0.07) : .clear, in: RoundedRectangle(cornerRadius: 7))
-                                .contentShape(Rectangle())
-                        }.buttonStyle(.plain).disabled(activeProject.isEmpty)
-                            .accessibilityAddTraits(page == item.0 ? .isSelected : [])
+                    ForEach(sections.dropLast(), id: \.0) { item in
+                        sidebarLink(item)
                     }
                 }.padding(.horizontal, 10)
                 Spacer()
+                sidebarLink(("Settings", "gearshape")).padding(.horizontal, 10)
                 Label(client.connected ? "Connected" : client.busy ? "Connecting…" : "Connection needed",
                       systemImage: client.connected ? "checkmark.circle" : "circle.dotted")
                     .font(NativeStyle.caption).foregroundStyle(.secondary).padding(18)
             }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 240)
+                .navigationSplitViewColumnWidth(min: 190, ideal: 210, max: 240)
         } detail: {
             VStack(spacing: 0) {
                 if client.hasLoadedWorkspace { projectTabs }
@@ -117,6 +108,20 @@ struct MainView: View {
             }
         }
     }
+    private func sidebarLink(_ item: (String, String)) -> some View {
+        Button { pages[activeProject] = item.0 } label: {
+            HStack(spacing: 11) {
+                Image(systemName: item.1).font(.system(size: 15, weight: .regular)).frame(width: 20)
+                    .foregroundStyle(page == item.0 ? Color.accentColor : Color.secondary)
+                Text(item.0).font(.system(size: 14, weight: page == item.0 ? .medium : .regular))
+                    .foregroundStyle(page == item.0 ? .primary : .secondary)
+                Spacer(minLength: 0)
+            }.padding(.horizontal, 10).frame(maxWidth: .infinity).frame(height: 36)
+                .background(page == item.0 ? Color.accentColor.opacity(0.09) : .clear, in: RoundedRectangle(cornerRadius: 8))
+                .contentShape(Rectangle())
+        }.buttonStyle(.plain).disabled(activeProject.isEmpty)
+            .accessibilityAddTraits(page == item.0 ? .isSelected : [])
+    }
     private func initializeTabs() {
         guard client.hasLoadedWorkspace, !initializedTabs else { return }
         initializedTabs = true
@@ -126,7 +131,7 @@ struct MainView: View {
     }
     private var projectTabs: some View {
         ScrollView(.horizontal) {
-            HStack(spacing: 8) {
+            HStack(spacing: 4) {
                 ForEach(openProjectIDs, id: \.self) { id in
                     let project = client.projects.first { $0["id"].string == id } ?? .null
                     HStack(spacing: 8) {
@@ -143,7 +148,7 @@ struct MainView: View {
                         .accessibilityAddTraits(activeProject == id ? .isSelected : [])
                       Button { closeProject(id) } label: { Image(systemName: "xmark").font(.system(size: 10)).foregroundStyle(.secondary) }
                         .buttonStyle(.plain).accessibilityLabel("Close project: " + (project["name"].string ?? "Project"))
-                    }.padding(.horizontal, 10).frame(width: 210, height: 32)
+                    }.padding(.horizontal, 12).frame(width: 196, height: 34)
                         .background(activeProject == id ? Color.primary.opacity(0.06) : .clear, in: RoundedRectangle(cornerRadius: 7))
                         .overlay(RoundedRectangle(cornerRadius: 7).stroke(activeProject == id ? Color.primary.opacity(0.08) : .clear))
                         .contextMenu {
@@ -155,8 +160,8 @@ struct MainView: View {
                 Image(systemName: "plus").font(.system(size: 16)).frame(width: 28, height: 28)
             }.buttonStyle(.plain).help("Open project (⌘O)").accessibilityLabel("Open project").keyboardShortcut("o")
                 .disabled(!client.connected || client.busy)
-            }.padding(.vertical, 4)
-        }.scrollIndicators(.hidden).padding(.horizontal, 16).frame(height: 44).overlay(alignment: .bottom) { Divider() }
+            }.padding(.vertical, 6)
+        }.scrollIndicators(.hidden).padding(.horizontal, 20).frame(height: 48).overlay(alignment: .bottom) { Divider() }
     }
     private var matchingProjects: [JSON] {
         let query = projectSearch.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -170,8 +175,7 @@ struct MainView: View {
             NativePageHeader(title: "Open project") {
                 Button("Done") { showingProjects = false }.keyboardShortcut(.cancelAction)
             }
-            TextField("Find a project", text: $projectSearch)
-                .textFieldStyle(.roundedBorder).padding(4)
+            NativeSearchField(placeholder: "Find a project", text: $projectSearch)
             ScrollView {
                 VStack(alignment: .leading, spacing: 4) {
                     ForEach(matchingProjects, id: \.selfID) { project in

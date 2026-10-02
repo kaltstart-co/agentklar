@@ -185,7 +185,7 @@ struct NativeUpdateSettings: View {
                     Text(status.prettyText).font(NativeStyle.source).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                 }
             }.buttonStyle(.plain).foregroundStyle(.tint)
-        }.frame(maxWidth: 800, alignment: .leading)
+        }.frame(maxWidth: .infinity, alignment: .leading)
         .confirmationDialog(bundled ? "Use this app’s bundled background runtime? Save open drafts first." : "Update the local AgentKlar service? Save open drafts first.", isPresented: $confirm, titleVisibility: .visible) {
             Button(bundled ? "Use bundled runtime" : "Update service") {
                 Task { await client.updateService(); await check(refresh: false) }

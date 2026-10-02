@@ -92,3 +92,11 @@ Devices is a computer list with icons, project names and relative last-check tim
 Defaults uses matching Model and Effort rows. Review keeps exact before/after values, scope and an explicit Apply action. Receipts and technical paths open separately; interrupted changes still show warnings. Updates has separate app/runtime rows with versions and short status. Skills and plugins uses compact fields and record rows with quieter details; install reviews and removal confirmations remain available.
 
 The MacBook app is a local beta.36 development preview. The background service remains beta.35; this UI change did not require its replacement. The Mac mini was not updated in this pass. TypeScript, all 325 service tests, production build, Foundation checks, Swift release build and package smoke with 25 MCP tools passed. See [validation details](VALIDATION.md). Signed public distribution and complete native GUI acceptance remain pending.
+
+## Workspace redesign — beta.37
+
+The app now uses one shared font scale, page gutter, reading width, tab style and search field. Settings stays at the bottom of the flat sidebar. Project tabs have a bounded width. Work empty states fill their available pane. Instructions and Context have large document canvases. Team shows a roster and responsibility editor; routing and delegation open in a separate Configure panel, including named presets. Models uses compact selectable rows with separate details. Usage separates task totals from native allowance.
+
+The beta.37 development preview is installed on the MacBook. All 325 service tests, TypeScript checks, production and Swift builds, Foundation checks and package smoke passed. GUI review covered the seven main destinations, role/preset editing, long Context text, model refresh/filter/search and detail sheets. The screen-control connection failed during Connections review. Small-window checks, long project names, new task options and the remaining Settings tabs still need review. See [the design checklist](NATIVE_DESIGN.md) and [exact validation limits](VALIDATION.md).
+
+The existing background service remains beta.35, idle and outside maintenance. No worker, approval, team save or native connection apply was performed. The Mac mini and global CLI were not updated. This is a local preview; signed public distribution and full GUI acceptance remain pending.

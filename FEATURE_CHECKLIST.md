@@ -104,7 +104,7 @@ Plan: [docs/ONBOARDING_PLAN.md](docs/ONBOARDING_PLAN.md).
 
 ## Native Mac preview
 
-Plan: [docs/DESKTOP_PLAN.md](docs/DESKTOP_PLAN.md). Beta.36 is a local development preview; full GUI acceptance is pending. Evidence: [native Mac notes](docs/MACOS_APP.md#verification-limits).
+Plan: [docs/DESKTOP_PLAN.md](docs/DESKTOP_PLAN.md). Design: [docs/NATIVE_DESIGN.md](docs/NATIVE_DESIGN.md). Beta.37 is a local development preview; full GUI acceptance is pending. Evidence: [native Mac notes](docs/MACOS_APP.md#verification-limits).
 
 - [x] SwiftUI build
 - [x] Local boundary checks
@@ -112,6 +112,9 @@ Plan: [docs/DESKTOP_PLAN.md](docs/DESKTOP_PLAN.md). Beta.36 is a local developme
 - [x] Project workspace tabs
 - [x] Large document editors
 - [x] Flat native pages
+- [x] Shared visual styles
+- [x] Team workspace
+- [x] Separate routing panel
 - [x] Bundled runtime fixtures
 - [x] Project picture storage
 - [ ] Clean Mac setup

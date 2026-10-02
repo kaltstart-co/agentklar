@@ -5,6 +5,7 @@ struct TeamView: View {
     @ObservedObject var client: AgentKlarClient
     @State private var selectedRoleID: String?
     @State private var roles: [NativeRoleDraft] = []
+    @State private var savedRoleCount = 0
     @State private var preset = NativeRoutingPreset.builtIns[1]
     @State private var savedPreset = NativeRoutingPreset.builtIns[1]
     @State private var presets = NativeRoutingPreset.builtIns
@@ -16,44 +17,128 @@ struct TeamView: View {
     @State private var message = ""
     @State private var failed = false
     @State private var presetEditor: NativeRoutingEditorSession?
+    @State private var configuringPolicy = false
     private var workers: [JSON] { client.harnesses.filter { $0["available"].bool == true && $0["workerSupported"].bool == true } }
     private var peers: [JSON] { (client.snapshot["peers"].array ?? []).filter { $0["projectId"].string == client.projectID } }
     private let remoteHarnesses = ["codex", "claude", "muse", "opencode", "gemini", "cursor-agent", "zcode"]
     var body: some View {
         if client.projectID.isEmpty {
-            ContentUnavailableView("Choose a project", systemImage: "person.2", description: Text("Save roles and native model pins for this project."))
+            ContentUnavailableView("Choose a project", systemImage: "person.2", description: Text("Create roles for the work you delegate often."))
         } else {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
-                    NativePageHeader(title: "Team", subtitle: "Saved roles, responsibilities and native model pins.") { teamActions }
-                    preferenceControls
-                    if !message.isEmpty { Text(message).foregroundStyle(failed ? .red : .secondary).fixedSize(horizontal: false, vertical: true).textSelection(.enabled) }
-                    if roles.isEmpty {
-                        NativeEmptyState("Build your team", systemImage: "person.2", description: "Add roles for the work you delegate often.") {
-                            Button("Add role", systemImage: "plus") { addRole() }.disabled((workers.isEmpty && peers.isEmpty) || roles.count >= 30)
-                        }
-                    } else {
-                        HStack(alignment: .top, spacing: 24) {
-                            roster.frame(width: 200, height: 360)
-                            selectedEditor.frame(minWidth: 280, maxWidth: .infinity)
-                        }.frame(maxWidth: .infinity)
+            VStack(alignment: .leading, spacing: 22) {
+                NativePageHeader(title: "Team", subtitle: "Roles and responsibilities for this project.") { teamActions }
+                if !message.isEmpty {
+                    Text(message).font(NativeStyle.caption).foregroundStyle(failed ? .red : .secondary)
+                        .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+                }
+                if roles.isEmpty {
+                    NativeEmptyState("Build your team", systemImage: "person.2", description: "Add a role for work you delegate often.") {
+                        Button("Add role", systemImage: "plus") { addRole() }
+                            .buttonStyle(.borderedProminent).disabled((workers.isEmpty && peers.isEmpty) || roles.count >= 30)
                     }
-                }.font(NativeStyle.body).padding(NativeStyle.pagePadding).disabled(saving || !client.connected)
+                } else {
+                    HStack(alignment: .top, spacing: 24) {
+                        roster.frame(width: 200)
+                        Divider()
+                        selectedEditor.frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }.frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+                policySummary
             }
+            .font(NativeStyle.body).frame(maxWidth: NativeStyle.contentWidth, maxHeight: .infinity, alignment: .topLeading)
+            .padding(NativeStyle.pagePadding).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .disabled(saving || !client.connected)
             .task(id: client.projectID) {
                 loadedProject = client.projectID
                 projectGeneration = UUID()
-                presetEditor = nil
+                presetEditor = nil; configuringPolicy = false
                 preset = NativeRoutingPreset.projectPreset(client.project)
                 savedPreset = preset
                 delegationMode = client.project["delegationMode"].string ?? "manual"
                 savedDelegationMode = delegationMode
                 presets = NativeRoutingPreset.builtIns
                 roles = (client.project["roles"].array ?? []).map(NativeRoleDraft.init)
+                savedRoleCount = roles.count
                 selectedRoleID = roles.first?.id
                 message = ""
                 await loadPresets(projectID: loadedProject, generation: projectGeneration)
             }
+            .sheet(isPresented: $configuringPolicy) { policyConfiguration }
+        }
+    }
+    private var routingChanged: Bool { preset != savedPreset || delegationMode != savedDelegationMode }
+    private var presetChoices: [NativeRoutingPreset] {
+        var choices = presets.map { $0.id == preset.id ? preset : $0 }
+        if !choices.contains(where: { $0.id == preset.id }) { choices.append(preset) }
+        return choices
+    }
+    private var policySummary: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Divider()
+            HStack(spacing: 12) {
+                Image(systemName: "slider.horizontal.3").foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Routing and delegation").fontWeight(.medium)
+                    Text(preset.name + " · " + (delegationMode == "manual" ? "Only when asked" : "Use team when helpful") + (routingChanged ? " · Not applied" : ""))
+                        .font(NativeStyle.caption).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 16)
+                Button("Configure…") { message = ""; failed = false; configuringPolicy = true }
+                    .buttonStyle(.plain).foregroundStyle(.tint).disabled(loadedProject != client.projectID)
+            }
+        }.fixedSize(horizontal: false, vertical: true)
+    }
+    private var policyConfiguration: some View {
+        VStack(alignment: .leading, spacing: 22) {
+            HStack {
+                Text("Routing and delegation").font(NativeStyle.title)
+                Spacer()
+                Button("Done") { configuringPolicy = false }.keyboardShortcut(.cancelAction)
+            }
+            Grid(alignment: .leading, horizontalSpacing: 20, verticalSpacing: 20) {
+                GridRow(alignment: .top) {
+                    Text("Routing preset").foregroundStyle(.secondary).frame(width: 120, alignment: .leading)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Picker("Routing preset", selection: Binding(get: { preset.id }, set: { id in
+                            if let chosen = presets.first(where: { $0.id == id }) { preset = chosen }
+                        })) {
+                            ForEach(presetChoices) { choice in Text(choice.name).tag(choice.id) }
+                        }.labelsHidden().frame(maxWidth: .infinity, alignment: .leading)
+                        Text(preset.summary).font(NativeStyle.caption).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Button("Edit presets…") {
+                            presetEditor = NativeRoutingEditorSession(projectID: loadedProject, generation: projectGeneration, preset: preset, presets: presets)
+                        }.buttonStyle(.plain).foregroundStyle(.tint)
+                    }
+                }
+                GridRow(alignment: .top) {
+                    Text("Delegation").foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Picker("Delegation", selection: $delegationMode) {
+                            Text("Only when asked").tag("manual")
+                            Text("Use team when helpful").tag("automatic")
+                        }.labelsHidden().frame(maxWidth: .infinity, alignment: .leading)
+                        Text(delegationMode == "manual" ? "The lead delegates when you ask." : "The lead may use saved roles when helpful.")
+                            .font(NativeStyle.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+            Spacer(minLength: 0)
+            if !message.isEmpty {
+                Text(message).font(NativeStyle.caption).foregroundStyle(failed ? .red : .secondary)
+                    .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+            }
+            Divider()
+            HStack {
+                Text(routingChanged ? "Changes are not applied yet." : "Saved for this project.")
+                    .font(NativeStyle.caption).foregroundStyle(.secondary)
+                Spacer()
+                if routingChanged {
+                    Button("Apply policy") { Task { await applyRouting() } }.buttonStyle(.borderedProminent)
+                }
+            }
+        }.font(NativeStyle.body).padding(NativeStyle.pagePadding).frame(width: 560, height: 420)
+            .disabled(saving || !client.connected || loadedProject != client.projectID).interactiveDismissDisabled(saving)
             .sheet(item: $presetEditor) { session in
                 NativeRoutingPresetEditor(client: client, session: session,
                     isCurrent: { ownsProject(session.projectID, session.generation) },
@@ -63,108 +148,116 @@ struct TeamView: View {
                         message = "Routing preset applied."; failed = false
                     })
             }
-        }
-    }
-    private var routingChanged: Bool { preset != savedPreset || delegationMode != savedDelegationMode }
-    private var presetChoices: [NativeRoutingPreset] {
-        var choices = presets.map { $0.id == preset.id ? preset : $0 }
-        if !choices.contains(where: { $0.id == preset.id }) { choices.append(preset) }
-        return choices
-    }
-    private var preferenceControls: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 12) {
-                Picker("Routing preset", selection: Binding(get: { preset.id }, set: { id in
-                    if let chosen = presets.first(where: { $0.id == id }) { preset = chosen }
-                })) {
-                    ForEach(presetChoices) { choice in Text(choice.name).tag(choice.id) }
-                }.frame(width: 250)
-                Text(preset.summary).font(NativeStyle.caption).foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading).lineLimit(2)
-                Button("Edit presets…") {
-                    presetEditor = NativeRoutingEditorSession(projectID: loadedProject, generation: projectGeneration, preset: preset, presets: presets)
-                }.buttonStyle(.plain).foregroundStyle(Color.accentColor).disabled(loadedProject != client.projectID)
-            }
-            HStack(spacing: 12) {
-                Picker("Delegation", selection: $delegationMode) {
-                    Text("Only when asked").tag("manual")
-                    Text("Use team when helpful").tag("automatic")
-                }.frame(width: 250)
-                Text(delegationMode == "manual" ? "Delegate work when you ask." : "The lead may use saved roles when helpful.")
-                    .font(NativeStyle.caption).foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading).lineLimit(2)
-                if routingChanged {
-                    Button("Apply policy") { Task { await applyRouting() } }
-                        .buttonStyle(.borderedProminent).disabled(loadedProject != client.projectID)
-                }
-            }
-        }.buttonStyle(.bordered)
     }
     private var roster: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Roles").font(NativeStyle.heading)
+            HStack {
+                Text("Roles").font(NativeStyle.heading)
+                Spacer()
+                Text(String(roles.count)).font(NativeStyle.caption).foregroundStyle(.secondary)
+            }
             List(selection: $selectedRoleID) {
                 ForEach(roles) { role in
                     HStack(alignment: .top, spacing: 10) {
                         NativeHarnessIcon(harness: role.harness, size: 24)
                         VStack(alignment: .leading, spacing: 4) {
                             Text(role.name.isEmpty ? "New role" : role.name).fontWeight(.medium)
-                            Text(harnessName(role.harness) + (role.peerID == nil ? " · this Mac" : " · remote owner"))
+                            Text(harnessName(role.harness) + (role.peerID == nil ? " · this Mac" : " · remote"))
                                 .font(NativeStyle.caption).foregroundStyle(.secondary)
                         }
-                    }.padding(.vertical, 6).tag(role.id)
+                    }.padding(.vertical, 8).tag(role.id)
                 }
-            }.listStyle(.plain)
-        }
+            }.listStyle(.plain).frame(maxHeight: .infinity)
+            Button("Add role", systemImage: "plus") { addRole() }
+                .buttonStyle(.bordered).disabled((workers.isEmpty && peers.isEmpty) || roles.count >= 30)
+        }.frame(maxHeight: .infinity, alignment: .topLeading)
     }
     @ViewBuilder private var selectedEditor: some View {
-        if selectedRoleID == nil { Text("Select a role to edit its responsibility and native pins.").foregroundStyle(.secondary) }
+        if selectedRoleID == nil {
+            ContentUnavailableView("Select a role", systemImage: "person", description: Text("Edit its responsibility, harness and model."))
+        }
         ForEach($roles) { $role in
             if role.id == selectedRoleID {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text(role.name.isEmpty ? "New role" : role.name).font(NativeStyle.heading)
-                    Form {
-                        TextField("Role name", text: $role.name)
-                        Picker("Computer", selection: Binding(get: { role.peerID ?? "" }, set: { value in role.peerID = value.isEmpty ? nil : value })) {
-                            Text("This computer").tag("")
-                            ForEach(peers, id: \.selfID) { peer in Text(peer["label"].string ?? "Remote computer").tag(peer["id"].string ?? "") }
-                            if let saved = role.peerID, !peers.contains(where: { $0["id"].string == saved }) { Text("Saved mapping unavailable").tag(saved) }
-                        }
-
-                        Picker("Harness", selection: $role.harness) {
-                            if role.peerID != nil {
-                                ForEach(remoteHarnesses, id: \.self) { harness in HStack { NativeHarnessIcon(harness: harness, size: 18); Text(harnessName(harness)) }.tag(harness) }
-                                if !remoteHarnesses.contains(role.harness) { Text("\(harnessName(role.harness)) · saved pin").tag(role.harness) }
-                            } else {
-                                ForEach(workers, id: \.selfID) { worker in HStack { NativeHarnessIcon(harness: worker["id"].string ?? "", size: 18); Text(worker["name"].string ?? "Harness") }.tag(worker["id"].string ?? "") }
-                                if !workers.contains(where: { $0["id"].string == role.harness }) { Text("\(harnessName(role.harness)) · saved pin unavailable locally").tag(role.harness) }
-                            }
-                        }
-                        .onChange(of: role.harness) { _, _ in role.model = "" }
-                        TextField("Model pin (optional)", text: $role.model)
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Responsibility").foregroundStyle(.secondary)
-                            TextEditor(text: $role.responsibility).font(NativeStyle.body)
-                                .scrollContentBackground(.hidden).padding(16).frame(height: 160)
-                                .accessibilityLabel("Responsibility")
-                        }
-                        NativeDetailButton("Role details") {
-                            Text(role.peerID == nil ? "The selected native harness uses its own account and permissions. An empty model pin uses its native default." : "This role stays on its saved remote owner. The owner checks native model access and permissions at Start; saving does not verify availability.")
-                                .font(NativeStyle.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                        }
-                        Button("Remove role", role: .destructive) { roles.removeAll { $0.id == role.id }; selectedRoleID = roles.first?.id }
-                    }.formStyle(.columns)
+                GeometryReader { space in
+                    ScrollView {
+                        roleEditor($role, height: space.size.height)
+                            .frame(maxWidth: .infinity, minHeight: space.size.height, alignment: .topLeading)
+                    }
                 }
             }
         }
+    }
+    private func roleEditor(_ role: Binding<NativeRoleDraft>, height: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(spacing: 10) {
+                NativeHarnessIcon(harness: role.wrappedValue.harness, size: 28)
+                Text(role.wrappedValue.name.isEmpty ? "New role" : role.wrappedValue.name).font(NativeStyle.heading)
+            }
+            Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 14) {
+                GridRow {
+                    roleLabel("Role name")
+                    TextField("Role name", text: role.name, prompt: Text("e.g. Code reviewer"))
+                        .textFieldStyle(.roundedBorder)
+                }
+                GridRow {
+                    roleLabel("Computer")
+                    Picker("Computer", selection: Binding(get: { role.wrappedValue.peerID ?? "" }, set: { value in role.wrappedValue.peerID = value.isEmpty ? nil : value })) {
+                        Text("This computer").tag("")
+                        ForEach(peers, id: \.selfID) { peer in Text(peer["label"].string ?? "Remote computer").tag(peer["id"].string ?? "") }
+                        if let saved = role.wrappedValue.peerID, !peers.contains(where: { $0["id"].string == saved }) { Text("Saved computer unavailable").tag(saved) }
+                    }.labelsHidden().frame(maxWidth: .infinity, alignment: .leading)
+                }
+                GridRow {
+                    roleLabel("Harness")
+                    Picker("Harness", selection: role.harness) {
+                        if role.wrappedValue.peerID != nil {
+                            ForEach(remoteHarnesses, id: \.self) { harness in HStack { NativeHarnessIcon(harness: harness, size: 18); Text(harnessName(harness)) }.tag(harness) }
+                            if !remoteHarnesses.contains(role.wrappedValue.harness) { Text(harnessName(role.wrappedValue.harness) + " · saved choice").tag(role.wrappedValue.harness) }
+                        } else {
+                            ForEach(workers, id: \.selfID) { worker in HStack { NativeHarnessIcon(harness: worker["id"].string ?? "", size: 18); Text(worker["name"].string ?? "Harness") }.tag(worker["id"].string ?? "") }
+                            if !workers.contains(where: { $0["id"].string == role.wrappedValue.harness }) { Text(harnessName(role.wrappedValue.harness) + " · unavailable here").tag(role.wrappedValue.harness) }
+                        }
+                    }.labelsHidden().frame(maxWidth: .infinity, alignment: .leading)
+                        .onChange(of: role.wrappedValue.harness) { _, _ in role.wrappedValue.model = "" }
+                }
+                GridRow {
+                    roleLabel("Model (optional)")
+                    TextField("Model (optional)", text: role.model, prompt: Text("Native default"))
+                        .textFieldStyle(.roundedBorder)
+                }
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Responsibility").fontWeight(.medium)
+                TextEditor(text: role.responsibility).font(NativeStyle.document)
+                    .scrollContentBackground(.hidden).padding(12).frame(height: max(180, height - 320))
+                    .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(.quaternary))
+                    .accessibilityLabel("Responsibility")
+            }
+            HStack {
+                NativeDetailButton("Role details") {
+                    Text(role.wrappedValue.peerID == nil ? "The selected harness uses its own account and permissions. An empty model uses its native default." : "This role stays on its saved remote owner. The owner checks model access and permissions at Start; saving does not verify availability.")
+                        .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }.buttonStyle(.plain).foregroundStyle(.tint)
+                Spacer()
+                Button("Remove role", role: .destructive) {
+                    let removedID = role.wrappedValue.id
+                    roles.removeAll { $0.id == removedID }; selectedRoleID = roles.first?.id
+                }.buttonStyle(.plain).foregroundStyle(.red)
+            }
+        }.padding(.trailing, 4)
+    }
+    private func roleLabel(_ title: String) -> some View {
+        Text(title).foregroundStyle(.secondary).frame(width: 125, alignment: .leading)
     }
     private func harnessName(_ id: String) -> String {
         client.harnesses.first { $0["id"].string == id }?["name"].string ??
             ["codex": "Codex", "claude": "Claude Code", "muse": "Muse", "opencode": "OpenCode", "gemini": "Gemini", "cursor-agent": "Cursor", "zcode": "ZCode"][id] ?? (id.isEmpty ? "Choose harness" : id)
     }
     @ViewBuilder private var teamActions: some View {
-        Button("Add role", systemImage: "plus") { addRole() }.disabled((workers.isEmpty && peers.isEmpty) || roles.count >= 30)
-        Button("Save team") { Task { await saveTeam() } }.buttonStyle(.borderedProminent).disabled(loadedProject != client.projectID)
+        if !roles.isEmpty || savedRoleCount > 0 {
+            Button("Save team") { Task { await saveTeam() } }.buttonStyle(.borderedProminent).disabled(loadedProject != client.projectID)
+        }
     }
     private func addRole() {
         let id = UUID().uuidString
@@ -189,10 +282,14 @@ struct TeamView: View {
         guard !saving, loadedProject == client.projectID else { return }
         saving = true; failed = false; message = ""
         let id = loadedProject, generation = projectGeneration
+        let submittedRoleCount = roles.count
         do {
             _ = try await client.request("/projects/\(id)", body: ["roles": roles.map(\.body)], method: "PATCH")
             await client.refresh()
-            if ownsProject(id, generation) { message = "Team saved." }
+            if ownsProject(id, generation) {
+                savedRoleCount = submittedRoleCount
+                message = "Team saved."
+            }
         } catch {
             if ownsProject(id, generation) { failed = true; message = error.localizedDescription }
         }
@@ -339,38 +436,70 @@ private struct NativeRoutingPresetEditor: View {
             }
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-                    Form {
-                        Picker("Preset", selection: Binding(get: { choice }, set: { select($0) })) {
-                            ForEach(availablePresets) { preset in
-                                Text(preset.name + (preset.builtIn ? " · built-in" : "")).tag(preset.id)
-                            }
-                            Text("New preset").tag("new")
-                        }
-                        HStack {
-                            Text(editingBuiltIn ? "Built-in presets are read only." : "Save a named preset for future projects.")
-                                .font(NativeStyle.caption).foregroundStyle(.secondary)
-                            Spacer()
-                            if choice != "new" { Button("Make a copy") { makeCopy() } }
-                        }
-                        if let latest = latestPreset, latest != draft, choice == session.preset.id, draft == session.preset {
-                            Button("Load latest saved preset") { setDraft(latest) }
-                        }
-                        Group {
-                            TextField("Name", text: $draft.name, prompt: Text("My preset"))
-                            strengthPicker("Routine tasks", selection: $draft.rules.routine)
-                            strengthPicker("Standard tasks", selection: $draft.rules.standard)
-                            strengthPicker("Hard tasks", selection: $draft.rules.hard)
-                            Toggle("Adjust to remaining allowance", isOn: $draft.rules.adjustToAllowance)
-                            if draft.rules.adjustToAllowance {
+                    Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 16) {
+                        GridRow(alignment: .top) {
+                            presetLabel("Preset")
+                            VStack(alignment: .leading, spacing: 8) {
+                                Picker("Preset", selection: Binding(get: { choice }, set: { select($0) })) {
+                                    ForEach(availablePresets) { preset in
+                                        Text(preset.name + (preset.builtIn ? " · built-in" : "")).tag(preset.id)
+                                    }
+                                    Text("New preset").tag("new")
+                                }.labelsHidden().frame(maxWidth: .infinity, alignment: .leading)
                                 HStack {
-                                    TextField("Low (%)", text: $lowInput)
-                                        .onChange(of: lowInput) { _, value in draft.rules.lowAllowancePercent = Double(value.trimmingCharacters(in: .whitespaces)) ?? .nan }
-                                    TextField("High (%)", text: $highInput)
-                                        .onChange(of: highInput) { _, value in draft.rules.highAllowancePercent = Double(value.trimmingCharacters(in: .whitespaces)) ?? .nan }
+                                    Text(editingBuiltIn ? "Built-in presets are read only." : "Save a named preset for future projects.")
+                                        .font(NativeStyle.caption).foregroundStyle(.secondary)
+                                    Spacer()
+                                    if choice != "new" {
+                                        Button("Make a copy") { makeCopy() }.buttonStyle(.plain).foregroundStyle(.tint)
+                                    }
+                                }
+                                if let latest = latestPreset, latest != draft, choice == session.preset.id, draft == session.preset {
+                                    Button("Load latest saved preset") { setDraft(latest) }.buttonStyle(.plain).foregroundStyle(.tint)
                                 }
                             }
-                        }.disabled(editingBuiltIn)
-                    }.formStyle(.columns)
+                        }
+                        GridRow {
+                            presetLabel("Name")
+                            TextField("Name", text: $draft.name, prompt: Text("My preset"))
+                                .textFieldStyle(.roundedBorder).disabled(editingBuiltIn)
+                        }
+                        GridRow {
+                            presetLabel("Routine tasks")
+                            strengthPicker("Routine tasks", selection: $draft.rules.routine).labelsHidden()
+                                .frame(maxWidth: .infinity, alignment: .leading).disabled(editingBuiltIn)
+                        }
+                        GridRow {
+                            presetLabel("Standard tasks")
+                            strengthPicker("Standard tasks", selection: $draft.rules.standard).labelsHidden()
+                                .frame(maxWidth: .infinity, alignment: .leading).disabled(editingBuiltIn)
+                        }
+                        GridRow {
+                            presetLabel("Hard tasks")
+                            strengthPicker("Hard tasks", selection: $draft.rules.hard).labelsHidden()
+                                .frame(maxWidth: .infinity, alignment: .leading).disabled(editingBuiltIn)
+                        }
+                        GridRow {
+                            presetLabel("Allowance")
+                            Toggle("Adjust automatically", isOn: $draft.rules.adjustToAllowance)
+                                .toggleStyle(.switch).controlSize(.small).disabled(editingBuiltIn)
+                                .accessibilityLabel("Adjust to remaining allowance")
+                        }
+                        if draft.rules.adjustToAllowance {
+                            GridRow {
+                                presetLabel("Low (%)")
+                                TextField("Low (%)", text: $lowInput).textFieldStyle(.roundedBorder)
+                                    .frame(width: 100).disabled(editingBuiltIn)
+                                    .onChange(of: lowInput) { _, value in draft.rules.lowAllowancePercent = Double(value.trimmingCharacters(in: .whitespaces)) ?? .nan }
+                            }
+                            GridRow {
+                                presetLabel("High (%)")
+                                TextField("High (%)", text: $highInput).textFieldStyle(.roundedBorder)
+                                    .frame(width: 100).disabled(editingBuiltIn)
+                                    .onChange(of: highInput) { _, value in draft.rules.highAllowancePercent = Double(value.trimmingCharacters(in: .whitespaces)) ?? .nan }
+                            }
+                        }
+                    }
                     Text(allowanceSummary).font(NativeStyle.caption).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                     if !draft.rules.valid {
@@ -395,6 +524,9 @@ private struct NativeRoutingPresetEditor: View {
         }.font(NativeStyle.body).padding(24).frame(width: 580, height: 530)
             .disabled(busy).interactiveDismissDisabled(busy)
             .task { await reloadPresets() }
+    }
+    private func presetLabel(_ title: String) -> some View {
+        Text(title).foregroundStyle(.secondary).frame(width: 120, alignment: .leading)
     }
     private func strengthPicker(_ title: String, selection: Binding<String>) -> some View {
         Picker(title, selection: selection) {

@@ -13,12 +13,17 @@ struct ModelUsageView: View {
     @State private var search = ""
     @State private var harnessFilter = ""
     @State private var selectedModel: CatalogModel?
+    @State private var selectedAllowance: CatalogAllowance?
     @State private var showingBenchmarks = false
     private struct CatalogModel: Identifiable {
         let id: String
         let entry: JSON
         let model: JSON
         var harness: String { entry["harness"].string ?? "" }
+    }
+    private struct CatalogAllowance: Identifiable {
+        let id: String
+        let entry: JSON
     }
     private struct LoadScope: Hashable {
         let projectID: String
@@ -55,37 +60,43 @@ struct ModelUsageView: View {
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 20) {
-                NativePageHeader(title: section, subtitle: section == "Models" ? "Models offered by your native harnesses." : "Reported work usage and account allowance.") {
+                NativePageHeader(title: section, subtitle: section == "Models" ? "Explore models from your native harnesses." : "Task usage and native account allowance.") {
                     if active { refreshActions.controlSize(.regular).labelStyle(.titleAndIcon) }
                 }
                 computerPicker
                 if section == "Models" {
-                    VStack(alignment: .leading, spacing: 12) {
-                        catalogControls
-                        metadataStatus
-                    }
+                    catalogControls
+                    metadataStatus
                     modelList
+                    Divider()
                     nativeSources
                     benchmarkSummary
                 } else {
                     metadataStatus
                     if computerID.isEmpty { usageSection }
-                    else { Text("Task token totals are available for This Mac. The allowance below comes from \(computerName).").font(NativeStyle.caption).foregroundStyle(.secondary) }
-                    Text("Account allowance · \(computerName)").font(NativeStyle.heading)
+                    else { Text("Task totals are available for This Mac. Allowance below is from \(computerName).").font(NativeStyle.caption).foregroundStyle(.secondary) }
+                    NativeSectionTitle(title: "Account allowance", subtitle: computerName)
                     ForEach(harnessEntries, id: \.self) { entry in
+                        allowanceRow(entry)
                         Divider()
-                        harnessLabel(entry["harness"].string ?? "")
-                        quota(entry["quota"])
                     }
+                    if harnessEntries.isEmpty { Text("Refresh usage to read native allowance.").foregroundStyle(.secondary) }
                 }
-            }.font(NativeStyle.body).padding(NativeStyle.pagePadding).frame(maxWidth: .infinity, alignment: .leading)
+            }.font(NativeStyle.body).frame(maxWidth: NativeStyle.contentWidth, alignment: .leading)
+                .padding(NativeStyle.pagePadding).frame(maxWidth: .infinity, alignment: .top)
         }
         .sheet(item: $selectedModel) { row in modelInspector(row) }
         .sheet(isPresented: $showingBenchmarks) { benchmarkInspector }
+        .sheet(item: $selectedAllowance) { row in
+            NativeDetailPage(title: "\(providerName(row.id)) allowance") {
+                Text(computerName).font(NativeStyle.caption).foregroundStyle(.secondary)
+                quota(row.entry["quota"])
+            }
+        }
 
-        .onChange(of: computerID) { _, _ in selectedModel = nil; showingBenchmarks = false }
+        .onChange(of: computerID) { _, _ in selectedModel = nil; selectedAllowance = nil; showingBenchmarks = false }
         .task(id: scope) {
-            catalog = .null; catalogScope = nil; failure = ""; selectedModel = nil; showingBenchmarks = false
+            catalog = .null; catalogScope = nil; failure = ""; selectedModel = nil; selectedAllowance = nil; showingBenchmarks = false
             loadID = nil; working = false
             if !computerID.isEmpty, selectedPeer == .null { computerID = ""; return }
             if !Task.isCancelled { await load(refresh: false) }
@@ -94,15 +105,14 @@ struct ModelUsageView: View {
     }
 
     private var computerPicker: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        HStack(spacing: 12) {
             Picker("Computer", selection: $computerID) {
                 Text("This Mac").tag("")
                 ForEach(projectPeers, id: \.self) { peer in
                     Text(peer["label"].string ?? "Saved computer").tag(peer["id"].string ?? "")
                 }
             }.pickerStyle(.menu).accessibilityLabel("Computer for models and account allowance")
-            Text("Native models and account allowance from \(computerName).")
-                .font(NativeStyle.caption).foregroundStyle(.secondary)
+            Spacer()
         }
     }
 
@@ -110,8 +120,8 @@ struct ModelUsageView: View {
         if working { ProgressView("Reading native metadata from \(computerName)…") }
         if !failure.isEmpty { Label(failure, systemImage: "exclamationmark.triangle").foregroundStyle(.red).fixedSize(horizontal: false, vertical: true) }
         if let checked = visibleCatalog["checkedAt"].string {
-            Label("\(computerName) · metadata checked \(humanDate(checked))", systemImage: "clock").font(NativeStyle.caption).foregroundStyle(.secondary)
-        } else { Text("Native metadata has not been read for this project on \(computerName).").foregroundStyle(.secondary) }
+            Text("\(computerName) · Checked \(humanDate(checked))").font(NativeStyle.caption).foregroundStyle(.secondary)
+        } else { Text("Metadata has not been read on \(computerName).").font(NativeStyle.caption).foregroundStyle(.secondary) }
     }
 
     @ViewBuilder private var refreshActions: some View {
@@ -129,6 +139,9 @@ struct ModelUsageView: View {
         case "opencode": return "OpenCode"
         case "antigravity": return "Antigravity"
         case "muse": return "Muse"
+        case "gemini": return "Gemini CLI"
+        case "cursor-agent": return "Cursor"
+        case "zcode": return "ZCode"
         default: return id.isEmpty ? "Harness" : id.capitalized
         }
     }
@@ -140,36 +153,28 @@ struct ModelUsageView: View {
         }
     }
     private var catalogControls: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 12) { harnessPicker; modelSearch }
-            VStack(alignment: .leading, spacing: 12) { harnessPicker; modelSearch }
+        VStack(alignment: .leading, spacing: 16) {
+            modelSearch
+            harnessPicker
         }
     }
     private var harnessPicker: some View {
-        Picker("Harness", selection: $harnessFilter) {
-            Text("All harnesses").tag("")
-            ForEach(harnessEntries, id: \.self) { entry in
-                let id = entry["harness"].string ?? ""
-                Text(providerName(id)).tag(id)
-            }
-        }.pickerStyle(.menu).accessibilityLabel("Filter models by harness")
+        NativePageTabs(selection: Binding(
+            get: { harnessFilter.isEmpty ? "All" : providerName(harnessFilter) },
+            set: { name in harnessFilter = harnessEntries.first { providerName($0["harness"].string ?? "") == name }?["harness"].string ?? "" }
+        ), items: ["All"] + harnessEntries.map { providerName($0["harness"].string ?? "") })
+            .accessibilityLabel("Filter models by harness")
     }
     private var modelSearch: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-            TextField("Search models", text: $search).textFieldStyle(.plain).font(NativeStyle.body)
-            if !search.isEmpty {
-                Button { search = "" } label: { Image(systemName: "xmark.circle.fill") }
-                    .buttonStyle(.plain).foregroundStyle(.secondary).accessibilityLabel("Clear search")
-            }
-        }.padding(10).background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+        NativeSearchField(placeholder: "Search models", text: $search)
     }
     private var modelList: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 16) {
-                Text("Harness").frame(width: 120, alignment: .leading)
-                Text("Model and capabilities").frame(maxWidth: .infinity, alignment: .leading)
-            }.font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary).padding(.vertical, 12)
+            HStack {
+                Text("\(modelRows.count) models").font(NativeStyle.heading)
+                Spacer()
+                Text("Access and tools need native verification.").font(NativeStyle.caption).foregroundStyle(.secondary)
+            }.padding(.bottom, 12)
             Divider()
             if modelRows.isEmpty {
                 Text(search.isEmpty && harnessFilter.isEmpty ? "No models reported. Refresh models or check Sources." : "No matching models")
@@ -183,20 +188,16 @@ struct ModelUsageView: View {
         }
     }
     private func modelRow(_ row: CatalogModel) -> some View {
-        HStack(alignment: .top, spacing: 16) {
-            harnessLabel(row.harness).frame(width: 120, alignment: .leading)
-            VStack(alignment: .leading, spacing: 8) {
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: 8) { modelHeading(row.model) }.fixedSize(horizontal: true, vertical: false)
-                    VStack(alignment: .leading, spacing: 4) { modelHeading(row.model) }
-                }
-                Text("Vision \(visionStatus(row.model))").font(NativeStyle.caption).foregroundStyle(.secondary)
-                if let description = row.model["description"].string, !description.isEmpty {
-                    Text(description).font(NativeStyle.body).foregroundStyle(.secondary).lineLimit(2)
-                }
+        HStack(spacing: 14) {
+            NativeHarnessIcon(harness: row.harness).frame(width: 28)
+            VStack(alignment: .leading, spacing: 5) {
+                Text(row.model["name"].string ?? row.model["id"].string ?? "Model").font(NativeStyle.heading)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("\(providerName(row.harness)) · Images \(visionStatus(row.model))\(row.model["isDefault"].bool == true ? " · Native default" : "")")
+                    .font(NativeStyle.caption).foregroundStyle(.secondary)
             }.frame(maxWidth: .infinity, alignment: .leading)
-            Image(systemName: "chevron.right").font(NativeStyle.caption).foregroundStyle(.secondary).padding(.top, 4)
-        }.padding(.vertical, 16).contentShape(Rectangle())
+            Text("Details").font(NativeStyle.caption).foregroundStyle(.tint)
+        }.padding(.vertical, 12).contentShape(Rectangle())
     }
     private var nativeSources: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -204,30 +205,20 @@ struct ModelUsageView: View {
             VStack(alignment: .leading, spacing: 12) {
                 ForEach(harnessEntries.filter { harnessFilter.isEmpty || $0["harness"].string == harnessFilter }, id: \.self) { entry in
                     let harness = entry["harness"].string ?? ""
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack {
-                            harnessLabel(harness)
-                            Spacer()
-                            Text("\((entry["models"].array ?? []).count) models").font(NativeStyle.caption).foregroundStyle(.secondary)
-                            if entry["modelsStatus"].string == "unavailable" { Text("List unavailable").font(NativeStyle.caption).foregroundStyle(.secondary) }
-                            if entry["modelsTruncated"].bool == true { Text("List shortened").font(NativeStyle.caption).foregroundStyle(.orange) }
-                            Button("Source details") { selectedModel = CatalogModel(id: "source:" + harness, entry: entry, model: .null) }
+                    HStack(spacing: 12) {
+                        harnessLabel(harness)
+                        Text("\((entry["models"].array ?? []).count) models").font(NativeStyle.caption).foregroundStyle(.secondary)
+                        if entry["modelsStatus"].string == "unavailable" { Text("List unavailable").font(NativeStyle.caption).foregroundStyle(.secondary) }
+                        if entry["modelsTruncated"].bool == true { Text("Shortened").font(NativeStyle.caption).foregroundStyle(.orange) }
+                        if entry["auth"]["status"].string == "sign_in_required" { Text("Sign-in needed").font(NativeStyle.caption).foregroundStyle(.orange) }
+                        if harness == "opencode", let providers = entry["connectedProviderIds"].array {
+                            Text(providers.isEmpty ? "No connected providers" : "\(providers.count) providers")
+                                .font(NativeStyle.caption).foregroundStyle(.secondary)
                         }
-                        if harness == "opencode" {
-                            if let providers = entry["connectedProviderIds"].array {
-                                let ids = providers.compactMap(\.string)
-                                Text(ids.isEmpty ? "No providers connected in OpenCode on \(computerName)." : "Connected providers on \(computerName): \(ids.joined(separator: ", ")).")
-                                    .font(NativeStyle.caption).foregroundStyle(.secondary)
-                                if ids.isEmpty {
-                                    Text("Choose another computer above to read its connected providers and models.")
-                                        .font(NativeStyle.caption).foregroundStyle(.secondary)
-                                }
-                            }
-                            if let message = entry["modelsMessage"].string, !message.isEmpty {
-                                Text(message).font(NativeStyle.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                            }
-                        }
-                    }
+                        Spacer()
+                        Button("Details") { selectedModel = CatalogModel(id: "source:" + harness, entry: entry, model: .null) }
+                            .buttonStyle(.plain).foregroundStyle(.tint)
+                    }.padding(.vertical, 4)
                 }
             }.padding(.top, 12)
         }
@@ -235,27 +226,29 @@ struct ModelUsageView: View {
 
     private var usageSection: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Reported task usage · This Mac").font(NativeStyle.heading)
+            NativeSectionTitle(title: "Task usage", subtitle: "This project · This Mac")
             VStack(alignment: .leading, spacing: 16) {
                 let tokens = projectRuns.compactMap { $0["tokens"].number }.reduce(0, +)
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: 12) { usageStatistics(tokens) }.fixedSize(horizontal: true, vertical: false)
-                    VStack(alignment: .leading, spacing: 12) { usageStatistics(tokens) }
+                HStack(spacing: 24) { usageStatistics(tokens) }.padding(.vertical, 8)
+                NativeDetailButton("Task usage details") {
+                    Text("Tokens come from native worker events. Zero means no tokens were reported; it does not mean the work was free. Account allowance is separate.")
+                        .foregroundStyle(.secondary)
+                    Text("Dollar cost is unknown.").foregroundStyle(.secondary)
+                    ForEach(projectRuns.filter { $0["museSubscriptionUsage"]["observedAtMs"].number != nil }.sorted { ($0["museSubscriptionUsage"]["observedAtMs"].number ?? 0) > ($1["museSubscriptionUsage"]["observedAtMs"].number ?? 0) }.prefix(1).map { $0 }, id: \.self) { run in
+                        Divider()
+                        Text("Muse · latest worker observation").font(NativeStyle.heading)
+                        percent("Weekly", run["museSubscriptionUsage"]["weekly"])
+                        percent("Session window", run["museSubscriptionUsage"]["window"])
+                    }
                 }
-                Text("Tokens come from native worker events. Zero means no tokens were reported; it does not mean the work was free. Account allowance is separate.").font(NativeStyle.caption).foregroundStyle(.secondary)
-                ForEach(projectRuns.filter { $0["museSubscriptionUsage"]["observedAtMs"].number != nil }.sorted { ($0["museSubscriptionUsage"]["observedAtMs"].number ?? 0) > ($1["museSubscriptionUsage"]["observedAtMs"].number ?? 0) }.prefix(1).map { $0 }, id: \.self) { run in
-                    Divider()
-                    Text("Muse · latest worker observation").font(NativeStyle.heading)
-                    percent("Weekly", run["museSubscriptionUsage"]["weekly"])
-                    percent("Session window", run["museSubscriptionUsage"]["window"])
-                }
+                    .buttonStyle(.plain).foregroundStyle(.tint)
             }.frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
     @ViewBuilder private func usageStatistics(_ tokens: Double) -> some View {
         statistic("Reported tokens", tokens.formatted(.number.precision(.fractionLength(0))), "number")
-        statistic("Unknown task usage", String(projectRuns.filter { $0["tokens"].number == nil }.count), "questionmark.circle")
+        statistic("Tasks with unknown usage", String(projectRuns.filter { $0["tokens"].number == nil }.count), "questionmark.circle")
         statistic("Dollar cost", "Unknown", "dollarsign.circle")
     }
     private func statistic(_ title: String, _ value: String, _ icon: String) -> some View {
@@ -266,45 +259,41 @@ struct ModelUsageView: View {
     }
 
     private func modelInspector(_ row: CatalogModel) -> some View {
-        VStack(spacing: 0) {
+        NativeDetailPage(title: row.model == .null ? "\(providerName(row.harness)) source" : row.model["name"].string ?? row.model["id"].string ?? "Model details") {
             HStack {
                 harnessLabel(row.harness)
                 Text(computerName).font(NativeStyle.caption).foregroundStyle(.secondary)
-                Spacer()
-                Button("Done") { selectedModel = nil }.keyboardShortcut(.cancelAction)
-            }.padding(NativeStyle.pagePadding)
-            Divider()
-            ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
-                    if row.model != .null {
-                        Text(row.model["name"].string ?? row.model["id"].string ?? "Model").font(NativeStyle.heading)
-                        Text("Model ID: \(row.model["id"].string ?? "Unknown")").textSelection(.enabled)
-                        if let resolved = row.model["resolvedModel"].string { Text("Resolves to: \(resolved)").textSelection(.enabled) }
-                        if let description = row.model["description"].string, !description.isEmpty { Text(description).foregroundStyle(.secondary) }
-                        Divider()
-                        Text("Capabilities").font(NativeStyle.heading)
-                        capabilityDetails(row.model)
-                    }
-                    Divider()
-                    Text("Native source and access").font(NativeStyle.heading)
-                    if let message = row.entry["auth"]["message"].string { Text(message) }
-                    if let message = row.entry["modelsMessage"].string { Text(message) }
-                    Text("Native descriptions are metadata. Effective tools and model access remain unknown until checked in a native session.")
-                    if let checked = visibleCatalog["checkedAt"].string { Text("Metadata checked: \(checked)").textSelection(.enabled) }
-                    if row.entry["modelsTruncated"].bool == true { Text("Native list was shortened").foregroundStyle(.orange) }
-                    if row.model != .null {
-                        Divider()
-                        Text("Benchmarks").font(NativeStyle.heading)
-                        benchmarkDetail(harness: row.harness, model: row.model["resolvedModel"].string ?? row.model["id"].string ?? "")
-                        benchmarkBasis
-                    }
-                }.font(NativeStyle.body).fixedSize(horizontal: false, vertical: true).padding(NativeStyle.pagePadding).frame(maxWidth: .infinity, alignment: .leading)
             }
-        }.frame(minWidth: 480, idealWidth: 600, minHeight: 400, idealHeight: 620)
-    }
-    @ViewBuilder private func modelHeading(_ model: JSON) -> some View {
-        Text(model["name"].string ?? model["id"].string ?? "Model").font(NativeStyle.heading).fixedSize(horizontal: false, vertical: true)
-        if model["isDefault"].bool == true { Label("Native default", systemImage: "checkmark.circle").font(NativeStyle.caption).foregroundStyle(.secondary) }
+            Divider()
+            VStack(alignment: .leading, spacing: 12) {
+                if row.model != .null {
+                    Text("Model ID: \(row.model["id"].string ?? "Unknown")").textSelection(.enabled)
+                    if let resolved = row.model["resolvedModel"].string { Text("Resolves to: \(resolved)").textSelection(.enabled) }
+                    if let description = row.model["description"].string, !description.isEmpty { Text(description).foregroundStyle(.secondary) }
+                    Divider()
+                    Text("Capabilities").font(NativeStyle.heading)
+                    capabilityDetails(row.model)
+                }
+                Divider()
+                Text("Native source and access").font(NativeStyle.heading)
+                if let message = row.entry["auth"]["message"].string { Text(message) }
+                if let message = row.entry["modelsMessage"].string { Text(message) }
+                if row.harness == "opencode", let providers = row.entry["connectedProviderIds"].array {
+                    let ids = providers.compactMap(\.string)
+                    Text(ids.isEmpty ? "No providers connected in OpenCode on \(computerName)." : "Connected providers on \(computerName): \(ids.joined(separator: ", ")).")
+                    if ids.isEmpty { Text("Choose another computer to read its connected providers and models.").foregroundStyle(.secondary) }
+                }
+                Text("Native descriptions are metadata. Effective tools and model access remain unknown until checked in a native session.")
+                if let checked = visibleCatalog["checkedAt"].string { Text("Metadata checked: \(checked)").textSelection(.enabled) }
+                if row.entry["modelsTruncated"].bool == true { Text("Native list was shortened").foregroundStyle(.orange) }
+                if row.model != .null {
+                    Divider()
+                    Text("Benchmarks").font(NativeStyle.heading)
+                    benchmarkDetail(harness: row.harness, model: row.model["resolvedModel"].string ?? row.model["id"].string ?? "")
+                    benchmarkBasis
+                }
+            }.font(NativeStyle.body).fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
     private func visionStatus(_ model: JSON) -> String {
         guard let modalities = model["inputModalities"].array else { return "unknown" }
@@ -322,6 +311,28 @@ struct ModelUsageView: View {
                 if let checked = evidence["checkedAt"]?.string { Text("Tool metadata checked: \(checked)").textSelection(.enabled) }
             } else { Text("Effective web search / image generation: unknown") }
         }.foregroundStyle(.secondary)
+    }
+
+    private func allowanceRow(_ entry: JSON) -> some View {
+        let harness = entry["harness"].string ?? ""
+        let value = entry["quota"]
+        let windows = (value["buckets"].array ?? []).flatMap { [$0["primary"], $0["secondary"]] }
+        let used = windows.compactMap { $0["usedPercent"].number }.filter { $0.isFinite && $0 >= 0 }.max()
+        let spendReached = (value["buckets"].array ?? []).contains { $0["spendControlReached"].bool == true }
+        return Button { selectedAllowance = CatalogAllowance(id: harness, entry: entry) } label: {
+            HStack(spacing: 20) {
+                harnessLabel(harness).frame(width: 160, alignment: .leading)
+                VStack(alignment: .leading, spacing: 5) {
+                    if let used { Text("\(used.formatted(.number.precision(.fractionLength(0...1))))% used · highest reported window").font(NativeStyle.body) }
+                    else { Text(value["status"].string == "available" ? "Window usage unknown" : "Allowance unavailable").font(NativeStyle.body).foregroundStyle(.secondary) }
+                    Text(value["ordinaryUsageAllowed"].bool.map { $0 ? "Included usage allowed" : "Included usage blocked" } ?? "Included usage permission unknown")
+                        .font(NativeStyle.caption).foregroundStyle(value["ordinaryUsageAllowed"].bool == false ? Color.orange : Color.secondary)
+                    if spendReached { Text("Spend limit reached").font(NativeStyle.caption).foregroundStyle(.orange) }
+                }.frame(maxWidth: .infinity, alignment: .leading)
+                if let used { ProgressView(value: min(used, 100), total: 100).frame(width: 120).accessibilityLabel("Highest reported allowance window").accessibilityValue("\(used.formatted()) percent used") }
+                Text("Details").font(NativeStyle.caption).foregroundStyle(.tint)
+            }.padding(.vertical, 12).contentShape(Rectangle())
+        }.buttonStyle(.plain).accessibilityHint("Open \(providerName(harness)) allowance details")
     }
 
     private func quota(_ value: JSON) -> some View {
@@ -370,17 +381,11 @@ struct ModelUsageView: View {
         Button("About scores") { showingBenchmarks = true }.controlSize(.regular)
     }
     private var benchmarkInspector: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("LiveBench reference").font(NativeStyle.heading)
-                Spacer()
-                Button("Done") { showingBenchmarks = false }.keyboardShortcut(.cancelAction)
-            }
-            Divider()
+        NativeDetailPage(title: "LiveBench reference") {
             benchmarkBasis
             if benchmarkBusy { ProgressView("Reading public scores…") }
             if !benchmarkFailure.isEmpty { Text(benchmarkFailure).foregroundStyle(.red) }
-        }.padding(NativeStyle.pagePadding).frame(minWidth: 480, idealWidth: 600).fixedSize(horizontal: false, vertical: true)
+        }
     }
     private var benchmarkBasis: some View {
         VStack(alignment: .leading, spacing: 6) {

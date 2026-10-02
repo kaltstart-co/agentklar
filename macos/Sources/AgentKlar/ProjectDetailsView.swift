@@ -8,17 +8,11 @@ struct ProjectDetailsView: View {
     var body: some View {
         if section == "Instructions" {
             VStack(alignment: .leading, spacing: 0) {
-                NativePageHeader(title: "Instructions", subtitle: "Project files and extensions used by your native coding apps.") {}
-                    .padding(.horizontal, 24).padding(.top, 24)
-                HStack(spacing: 8) {
-                    ForEach(["Files", "Skills and plugins"], id: \.self) { name in
-                        Button { instructionMode = name } label: {
-                            Text(name).font(NativeStyle.body).foregroundStyle(instructionMode == name ? .primary : .secondary)
-                                .padding(.horizontal, 10).padding(.vertical, 6)
-                                .background(instructionMode == name ? Color.secondary.opacity(0.08) : Color.clear, in: RoundedRectangle(cornerRadius: 6))
-                        }.buttonStyle(.plain).accessibilityAddTraits(instructionMode == name ? .isSelected : [])
-                    }
-                }.padding(.horizontal, 24).padding(.top, 16)
+                VStack(alignment: .leading, spacing: 20) {
+                    NativePageHeader(title: "Instructions", subtitle: "Files, skills and plugins for your coding apps.") {}
+                    NativePageTabs(selection: $instructionMode, items: ["Files", "Skills and plugins"])
+                }.frame(maxWidth: NativeStyle.contentWidth).padding(.horizontal, NativeStyle.pagePadding)
+                    .padding(.top, NativeStyle.pagePadding).frame(maxWidth: .infinity)
                 GeometryReader { space in
                     ZStack {
                     Group {
@@ -28,7 +22,10 @@ struct ProjectDetailsView: View {
                     }.frame(width: space.size.width, height: space.size.height, alignment: .topLeading)
                         .opacity(instructionMode == "Files" ? 1 : 0).disabled(instructionMode != "Files")
                         .allowsHitTesting(instructionMode == "Files").accessibilityElement(children: .contain).accessibilityHidden(instructionMode != "Files")
-                    ScrollView { NativeExtensionsView(client: client).padding(NativeStyle.pagePadding) }
+                    ScrollView {
+                        NativeExtensionsView(client: client).frame(maxWidth: NativeStyle.contentWidth, alignment: .leading)
+                            .padding(NativeStyle.pagePadding).frame(maxWidth: .infinity)
+                    }
                         .font(NativeStyle.body).frame(width: space.size.width, height: space.size.height, alignment: .topLeading)
                         .opacity(instructionMode == "Skills and plugins" ? 1 : 0)
                         .disabled(instructionMode != "Skills and plugins").allowsHitTesting(instructionMode == "Skills and plugins")
@@ -65,37 +62,31 @@ private struct NativeContextEditor: View {
         }
     }
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            NativePageHeader(title: "Context", subtitle: "Shared notes that guide work in this project.") { contextActions }
+        VStack(alignment: .leading, spacing: 20) {
+            NativePageHeader(title: "Context", subtitle: "Shared notes for this project and its agents.") { contextActions }
             if !message.isEmpty { Text(message).foregroundStyle(failed ? .red : .secondary).fixedSize(horizontal: false, vertical: true).textSelection(.enabled) }
-
-            HStack(spacing: 8) {
-                ForEach(["Brief", "Memory", "Next steps"], id: \.self) { name in
-                    Button { selectedDocument = name } label: {
-                        Text(name).font(.system(size: 14, weight: selectedDocument == name ? .semibold : .regular))
-                            .foregroundStyle(selectedDocument == name ? .primary : .secondary)
-                            .padding(.horizontal, 10).padding(.vertical, 6)
-                            .background(selectedDocument == name ? Color.secondary.opacity(0.08) : Color.clear, in: RoundedRectangle(cornerRadius: 6))
-                    }.buttonStyle(.plain).accessibilityAddTraits(selectedDocument == name ? .isSelected : [])
-                }
-                Spacer()
-                if let revision { Text("Revision \(revision)").font(NativeStyle.caption).foregroundStyle(.secondary) }
-            }
+            NativePageTabs(selection: $selectedDocument, items: ["Brief", "Memory", "Next steps"])
             TextEditor(text: documentBinding).font(NativeStyle.document).lineSpacing(4)
                 .scrollContentBackground(.hidden)
-                .frame(maxWidth: 900, maxHeight: .infinity, alignment: .leading)
+                .padding(20).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: NativeStyle.cornerRadius))
+                .overlay(RoundedRectangle(cornerRadius: NativeStyle.cornerRadius).strokeBorder(.quaternary))
                 .overlay(alignment: .topLeading) {
                     if documentBinding.wrappedValue.isEmpty {
                         Text(documentPlaceholder).font(NativeStyle.document).lineSpacing(4).foregroundStyle(.tertiary)
-                            .padding(.horizontal, 5).padding(.vertical, 8)
+                            .padding(.horizontal, 25).padding(.vertical, 28)
                             .allowsHitTesting(false).accessibilityHidden(true)
                     }
                 }
                 .accessibilityLabel(selectedDocument)
                 .disabled(revision == nil || loadedProject != client.projectID)
-            Button("Switch main harness…") { showingHandoff = true }
-        }.font(NativeStyle.body).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-            .padding(24).frame(maxWidth: .infinity, maxHeight: .infinity).disabled(busy || !client.connected)
+            HStack {
+                Text(revision.map { "Saved revision \($0)" } ?? "Loading context…")
+                Spacer()
+                Button("Switch main harness…") { showingHandoff = true }.buttonStyle(.plain).foregroundStyle(.tint)
+            }.font(NativeStyle.caption).foregroundStyle(.secondary)
+        }.font(NativeStyle.body).frame(maxWidth: NativeStyle.contentWidth, maxHeight: .infinity, alignment: .leading)
+            .padding(NativeStyle.pagePadding).frame(maxWidth: .infinity, maxHeight: .infinity).disabled(busy || !client.connected)
         .sheet(isPresented: $showingHandoff) {
             NativeDetailPage(title: "Switch main harness") { NativeProjectHandoffView(client: client) }
         }
@@ -112,7 +103,8 @@ private struct NativeContextEditor: View {
         }
     }
     @ViewBuilder private var contextActions: some View {
-        Button("Reload latest…") { reload = true }
+        Button { reload = true } label: { Image(systemName: "arrow.clockwise") }
+            .buttonStyle(.plain).foregroundStyle(.secondary).help("Reload saved context…").accessibilityLabel("Reload saved context")
         Button("Save context") { Task { await save() } }.buttonStyle(.borderedProminent).disabled(revision == nil || loadedProject != client.projectID)
     }
     private func load() async {
@@ -161,16 +153,18 @@ private struct NativeInstructionEditor: View {
                 HStack(spacing: 12) { fileSelector; fileActions }.fixedSize(horizontal: true, vertical: false)
                 VStack(alignment: .leading, spacing: 8) { fileSelector; fileActions }
             }
-            if document["text"].string != nil { Text("\(draft.utf8.count) / 32,768 bytes").font(NativeStyle.caption).foregroundStyle(.secondary) }
             if let metadata = (inventory["files"].array ?? []).first(where: { $0["id"].string == file }) {
-                Text(metadata["path"].string ?? "").font(NativeStyle.caption).lineLimit(3).textSelection(.enabled)
+                Text(metadata["path"].string ?? "").font(NativeStyle.caption).foregroundStyle(.secondary)
+                    .lineLimit(1).truncationMode(.middle).help(metadata["path"].string ?? "").textSelection(.enabled)
                 Text(metadata["message"].string ?? metadata["status"].string ?? "Status unknown")
                     .font(NativeStyle.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             if document["text"].string != nil {
                 TextEditor(text: $draft).font(NativeStyle.source).lineSpacing(4)
                     .scrollContentBackground(.hidden)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding(20).frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: NativeStyle.cornerRadius))
+                    .overlay(RoundedRectangle(cornerRadius: NativeStyle.cornerRadius).strokeBorder(.quaternary))
                     .accessibilityLabel(file == "agents" ? "AGENTS.md source" : "CLAUDE.md source")
             } else {
                 ContentUnavailableView("Load an instruction file", systemImage: "doc.text", description: Text("Choose AGENTS.md or CLAUDE.md, then Load file to read its current contents."))
@@ -178,11 +172,11 @@ private struct NativeInstructionEditor: View {
             }
             if !message.isEmpty { Text(message).foregroundStyle(failed ? .red : .secondary).fixedSize(horizontal: false, vertical: true).textSelection(.enabled) }
             ViewThatFits(in: .horizontal) {
-                HStack(spacing: 12) { documentActions }.fixedSize(horizontal: true, vertical: false)
-                VStack(alignment: .leading, spacing: 8) { documentActions }
+                HStack(spacing: 16) { documentActions; Spacer(); documentCount }
+                VStack(alignment: .leading, spacing: 12) { documentActions; documentCount }
             }
-        }.font(NativeStyle.body).frame(maxWidth: 900, maxHeight: .infinity)
-            .padding(24).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).disabled(busy || !client.connected)
+        }.font(NativeStyle.body).controlSize(.regular).frame(maxWidth: NativeStyle.contentWidth, maxHeight: .infinity)
+            .padding(NativeStyle.pagePadding).frame(maxWidth: .infinity, maxHeight: .infinity).disabled(busy || !client.connected)
         .task(id: "\(client.projectID):\(file)") {
             document = .null; preview = .null; draft = ""; conflict = false; message = ""
             await refreshInventory()
@@ -199,10 +193,15 @@ private struct NativeInstructionEditor: View {
             Text("CLAUDE.md").tag("claude")
         }.disabled(dirty || busy).fixedSize(horizontal: true, vertical: false)
     }
+    @ViewBuilder private var documentCount: some View {
+        if document["text"].string != nil {
+            Text("\(draft.utf8.count.formatted()) / 32,768 bytes").font(NativeStyle.caption).foregroundStyle(.secondary)
+        }
+    }
     @ViewBuilder private var documentActions: some View {
         if document["text"].string != nil {
             Button("Preview changes", systemImage: "doc.text.magnifyingglass") { Task { await propose() } }
-                .disabled(conflict || draft.utf8.count > 32768)
+                .buttonStyle(.borderedProminent).disabled(!dirty || conflict || draft.utf8.count > 32768)
         }
         if let previewID = preview["id"].string {
             NativeDetailButton("Review exact change") {
@@ -311,7 +310,7 @@ struct NativeDetailButton<Content: View>: View {
         self.title = title; self.content = content()
     }
     var body: some View {
-        Button(title + "…") { showing = true }
+        Button(title + "…") { showing = true }.buttonStyle(.plain).foregroundStyle(.tint)
             .sheet(isPresented: $showing) { NativeDetailPage(title: title) { content } }
     }
 }
@@ -328,6 +327,7 @@ struct NativeDetailPage<Content: View>: View {
             HStack { Text(title).font(NativeStyle.heading); Spacer(); Button("Done") { dismiss() }.keyboardShortcut(.cancelAction) }
             Divider()
             ScrollView { VStack(alignment: .leading, spacing: 12) { content }.frame(maxWidth: .infinity, alignment: .leading) }
-        }.font(NativeStyle.body).foregroundStyle(.primary).padding(NativeStyle.pagePadding).frame(minWidth: 480, idealWidth: 700, minHeight: 400, idealHeight: 600)
+        }.font(NativeStyle.body).foregroundStyle(.primary).controlSize(.regular)
+            .padding(NativeStyle.pagePadding).frame(width: 640, height: 560)
     }
 }

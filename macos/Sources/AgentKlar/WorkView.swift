@@ -26,17 +26,18 @@ struct WorkView: View {
     private var pollingID: String { active && !showingRemote ? selectedID ?? "" : "" }
     var body: some View {
         VStack(spacing: 0) {
-            NativePageHeader(title: "Work", subtitle: client.project["name"].string) {
-                Button("Refresh", systemImage: "arrow.clockwise") { Task { await client.refresh() } }.disabled(!client.connected)
-                    .help("Refresh work")
+            NativePageHeader(title: "Work") {
+                Button { Task { await client.refresh() } } label: { Image(systemName: "arrow.clockwise") }
+                    .buttonStyle(.plain).foregroundStyle(.secondary).disabled(!client.connected)
+                    .help("Refresh work").accessibilityLabel("Refresh work")
                 Button("New task", systemImage: "plus") { followUpSource = .null; newTask = true }
                     .buttonStyle(.borderedProminent).disabled(!client.connected || client.projectID.isEmpty)
                     .keyboardShortcut(active ? KeyboardShortcut("n", modifiers: .command) : nil).help("Create a task")
             }.padding(.horizontal, NativeStyle.pagePadding).padding(.top, NativeStyle.pagePadding).padding(.bottom, 20)
             ViewThatFits(in: .horizontal) {
-                HStack(spacing: 16) { workFilters }.fixedSize(horizontal: true, vertical: false)
+                HStack(spacing: 20) { workFilters }
                 VStack(alignment: .leading, spacing: 12) { workFilters }
-            }.frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 24).padding(.bottom, 16)
+            }.frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, NativeStyle.pagePadding).padding(.bottom, 16)
             if !runs.isEmpty || showingRemote { Divider() }
             if showingRemote {
                 NativeRemoteWorkView(client: client, selected: $remoteSelectedID) { source in followUpSource = source; newTask = true }
@@ -59,6 +60,9 @@ struct WorkView: View {
                     if runs.isEmpty { Text("No tasks in this project.").foregroundStyle(.secondary).padding() }
                 }
             } detail: {
+                if selected["id"].string == nil {
+                    NativeEmptyState("Select a task", systemImage: "list.bullet.rectangle", description: "Read its result, follow progress and review permission requests.") {}
+                } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
                         if let id = selected["id"].string {
@@ -135,11 +139,9 @@ struct WorkView: View {
                                 }.disabled(changing || !client.connected)
                             }
                             NativeDetailButton("Move changes to another project") { NativeChangesView(client: client, sourceID: id).id(id) }.id("changes:" + id)
-                        } else {
-                            NativeEmptyState("Select a task", systemImage: "list.bullet.rectangle", description: "Read its result, follow progress and review permission requests.") {}
-                                .frame(minHeight: 340)
                         }
-                    }.frame(maxWidth: .infinity, alignment: .leading).padding(24)
+                    }.frame(maxWidth: 760, alignment: .leading).padding(NativeStyle.pagePadding).frame(maxWidth: .infinity)
+                }
                 }
             } }
         }
@@ -186,20 +188,10 @@ struct WorkView: View {
         }
     }
     @ViewBuilder private var workFilters: some View {
-        Picker("Computer", selection: $showingRemote) {
-            Text("This Mac").tag(false)
-            Text("Connected Macs").tag(true)
-        }.labelsHidden().pickerStyle(.segmented).frame(width: 250)
-            .accessibilityLabel("Computer for task list").help("Choose where to view work")
+        NativePageTabs(selection: Binding(get: { showingRemote ? "Connected Macs" : "This Mac" }, set: { showingRemote = $0 == "Connected Macs" }), items: ["This Mac", "Connected Macs"])
+            .frame(width: 250).accessibilityLabel("Computer for task list")
         if !showingRemote {
-            HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField("Search tasks", text: $search).textFieldStyle(.plain)
-                if !search.isEmpty {
-                    Button { search = "" } label: { Image(systemName: "xmark.circle.fill") }
-                        .buttonStyle(.plain).accessibilityLabel("Clear task search")
-                }
-            }.padding(8).frame(width: 220).background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
+            NativeSearchField(placeholder: "Search tasks", text: $search).frame(minWidth: 140, maxWidth: 300)
         }
     }
     @ViewBuilder private var emptyWork: some View {
@@ -287,6 +279,7 @@ private struct NativeTaskSheet: View {
     @State private var requiresImages = false
     @State private var webSearch = false
     @State private var imageGeneration = false
+    @State private var optionsTab = "Assignment"
     @State private var key = UUID().uuidString
     @State private var starting = false
     @State private var suggesting = false
@@ -333,9 +326,9 @@ private struct NativeTaskSheet: View {
                         .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.quaternary, lineWidth: 1))
                         .accessibilityLabel("Task prompt")
                 }
-                Divider()
+                NativePageTabs(selection: $optionsTab, items: ["Assignment", "Routing", "Tools", "Workspace"])
+                if optionsTab == "Assignment" {
                 VStack(alignment: .leading, spacing: 12) {
-                    NativeSectionTitle(title: "Assignment")
                     Picker("Role", selection: $roleID) {
                         Text("No saved role").tag("")
                         ForEach(roles, id: \.selfID) { role in
@@ -349,11 +342,11 @@ private struct NativeTaskSheet: View {
                     if let role = roles.first(where: { $0["id"].string == roleID }) {
                         Text(role["model"].string.map { "Saved model pin: \($0)" } ?? "Saved role uses its native default unless explicitly pinned.").font(NativeStyle.caption)
                     }
-                    TextField("Model (optional explicit pin)", text: $model)
+                    TextField("Model (optional)", text: $model).textFieldStyle(.roundedBorder)
                 }
-                Divider()
+                }
+                if optionsTab == "Routing" {
                 VStack(alignment: .leading, spacing: 12) {
-                    NativeSectionTitle(title: "Routing")
                     Toggle("Use routing policy", isOn: $automaticRouting)
                     Picker("Computers for automatic choice", selection: $deviceScope) {
                         Text("This Mac").tag("local"); Text("This Mac and connected Macs").tag("connected")
@@ -369,17 +362,17 @@ private struct NativeTaskSheet: View {
                         Text("Efficient workers are favored for routine work. Dollar cost is unknown.")
                     }.font(NativeStyle.caption).foregroundStyle(.secondary)
                 }
-                Divider()
+                }
+                if optionsTab == "Tools" {
                 VStack(alignment: .leading, spacing: 12) {
-                    NativeSectionTitle(title: "Required capabilities")
                     Toggle("Image input required", isOn: $requiresImages)
                     Toggle("Web search required", isOn: $webSearch)
                     Toggle("Image generation required", isOn: $imageGeneration)
                     Text("Choose the tools this task needs. AgentKlar checks worker support before starting.").font(NativeStyle.caption).foregroundStyle(.secondary)
                 }
-                Divider()
+                }
+                if optionsTab == "Workspace" {
                 VStack(alignment: .leading, spacing: 12) {
-                    NativeSectionTitle(title: "Workspace")
                     if source["id"].string == nil {
                         Picker("Workspace", selection: $workspace) { Text("Isolated worktree").tag("worktree"); Text("Project folder").tag("project") }
                     } else { Text("The linked work's original workspace is preserved.").font(NativeStyle.caption) }
@@ -387,10 +380,13 @@ private struct NativeTaskSheet: View {
                     Toggle("Read only", isOn: $readOnly).disabled(source["id"].string != nil && followUpKind == "review")
                     if readOnly && !supportedReview { Text("Choose Codex or Claude for enforced read-only work.").foregroundStyle(.secondary) }
                 }
+                }
                     adviceDetails
                 }.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 4)
             }.frame(maxHeight: .infinity)
             if !error.isEmpty { Text(error).foregroundStyle(.red).textSelection(.enabled) }
+            Text((readOnly ? "Read only" : "Changes allowed") + " · " + (source["id"].string != nil ? "Linked workspace" : workspace == "worktree" ? "Isolated worktree" : "Project folder"))
+                .font(NativeStyle.caption).foregroundStyle(.secondary)
             HStack {
                 Button("Cancel", role: .cancel) { dismiss() }.disabled(starting)
                 Button("Suggest a model") { Task { await suggest() } }.disabled(starting || suggesting || !client.connected)

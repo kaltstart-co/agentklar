@@ -20,22 +20,8 @@ struct NativeSettingsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            NativePageHeader(title: "Settings", subtitle: "Connections, defaults and this Mac.") { EmptyView() }
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 24) {
-                    ForEach(["Connections", "Defaults", "Devices", "Updates"], id: \.self) { tab in
-                        Button { selectedTab = tab } label: {
-                            VStack(spacing: 8) {
-                                Text(tab).font(.system(size: 14, weight: selectedTab == tab ? .semibold : .regular))
-                                    .foregroundStyle(selectedTab == tab ? Color.primary : Color.secondary)
-                                Rectangle().fill(selectedTab == tab ? Color.accentColor : .clear).frame(height: 2)
-                            }.contentShape(Rectangle())
-                        }.buttonStyle(.plain).fixedSize(horizontal: true, vertical: false)
-                            .accessibilityAddTraits(selectedTab == tab ? .isSelected : [])
-                    }
-                    Spacer(minLength: 0)
-                }
-            }.fixedSize(horizontal: false, vertical: true)
+            NativePageHeader(title: "Settings", subtitle: "Your harnesses and computers.") { EmptyView() }
+            NativePageTabs(selection: $selectedTab, items: ["Connections", "Defaults", "Devices", "Updates"])
             ZStack(alignment: .topLeading) {
                 ScrollView {
                     NativeDefaultsView(client: client).frame(maxWidth: .infinity, alignment: .leading)
@@ -56,16 +42,14 @@ struct NativeSettingsView: View {
                     }
                 }
             }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        }.padding(NativeStyle.pagePadding).font(NativeStyle.body).disabled(client.busy)
+        }.frame(maxWidth: NativeStyle.contentWidth, alignment: .leading)
+            .padding(NativeStyle.pagePadding).frame(maxWidth: .infinity, alignment: .top)
+            .font(NativeStyle.body).disabled(client.busy)
     }
     private var connections: some View {
         VStack(alignment: .leading, spacing: 20) {
             VStack(alignment: .leading, spacing: 8) {
                 LabeledContent("Project", value: client.project["name"].string ?? "Choose a project")
-                if let path = client.project["path"].string {
-                    Text(path).font(NativeStyle.caption).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
-                }
                 if client.onboarding["projectId"].string == client.projectID, let main = client.onboarding["mainHarness"].string {
                     Label("Main: \(name(main))", systemImage: "checkmark.circle").font(NativeStyle.caption).foregroundStyle(.secondary)
                 }
@@ -88,6 +72,7 @@ struct NativeSettingsView: View {
             NativeDetailButton("Connection details") {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(harness == "claude" ? "Local project scope. Only this project's Claude Code sessions." : "User scope. Available to this harness's projects.")
+                    if let path = client.project["path"].string { Text("Project: \(path)").textSelection(.enabled) }
                     Text("Accounts, trust and permissions stay in your harness. A configured entry does not prove sign-in, tools or quota.")
                     if let text = status["message"].string { Text(text).fixedSize(horizontal: false, vertical: true).textSelection(.enabled) }
                 }.font(NativeStyle.caption).foregroundStyle(.secondary)
@@ -105,7 +90,7 @@ struct NativeSettingsView: View {
             if !message.isEmpty { Label(message, systemImage: "checkmark.circle").fixedSize(horizontal: false, vertical: true).foregroundStyle(.secondary) }
             if !failure.isEmpty { Label(failure, systemImage: "exclamationmark.triangle").fixedSize(horizontal: false, vertical: true).foregroundStyle(.red).textSelection(.enabled) }
         }
-        .frame(maxWidth: 800, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .disabled(client.busy)
         .sheet(isPresented: $showingInstallations) { installationManager }
         .task(id: scope + ":" + String(client.connected)) {
