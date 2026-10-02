@@ -3,19 +3,21 @@ import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join } from "node:path";
 import type { Project, Run, RunHandoff } from "./contracts.ts";
 import { verifyWorktree } from "./workspace.ts";
+import { openCodePathKeys, openCodeUnsetKeys, safeNativePath } from "./opencode-scope.ts";
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const openCodeSession = /^ses_[A-Za-z0-9]{8,80}$/;
 const safePath = (value: string) => isAbsolute(value) && value.length <= 4096 && !/[\x00-\x1f\x7f]/.test(value);
 const quote = (value: string) => `'${value.replaceAll("'", "'\"'\"'")}'`;
 
 export function runHandoff(run: Run, project: Project | undefined, busy: boolean, cli: string | null): RunHandoff {
   const harness = run.harness === "codex" || run.harness === "claude" || run.harness === "muse" || run.harness === "opencode" ? run.harness : null;
   const packet: RunHandoff = { runId: run.id, available: false, reason: null, harness,
-    nativeSessionId: typeof run.threadId === "string" && uuid.test(run.threadId) ? run.threadId : null,
+    nativeSessionId: typeof run.threadId === "string" &&
+      (harness === "opencode" ? openCodeSession : uuid).test(run.threadId) ? run.threadId : null,
     command: null, notes: [] };
   const unavailable = (reason: string) => ({ ...packet, reason });
   if (!harness) return unavailable("This run has no supported native harness.");
-  if (harness === "opencode") return unavailable("OpenCode native continuation has not been verified for this saved local server session. Open the workspace in OpenCode manually.");
   if (["running", "needs_attention"].includes(run.state)) return unavailable("The worker is still active.");
   if (!["completed", "failed", "cancelled", "interrupted"].includes(run.state))
     return unavailable("The run is not in a finished state.");
@@ -32,14 +34,48 @@ export function runHandoff(run: Run, project: Project | undefined, busy: boolean
       verifyWorktree(run.workspace, path) !== run.workspace.branch)
       return unavailable("The saved worktree branch changed.");
   } catch { return unavailable("The saved workspace folder is missing or changed."); }
-  if (!packet.nativeSessionId) return unavailable("No native session UUID was recorded for this run.");
+  if (!packet.nativeSessionId) return unavailable(harness === "opencode"
+    ? "No valid native session ID was recorded for this run."
+    : "No native session UUID was recorded for this run.");
   if (harness === "claude" && run.readOnly)
     return unavailable("Claude read-only runs use an AgentKlar SDK tool hook that native CLI resume cannot preserve. Open the session in Claude only if you accept its native permissions.");
-  if (!cli || !safePath(cli)) return unavailable(`${harness === "codex" ? "Codex" : "Claude Code"} native CLI is unavailable.`);
+  if (!cli || !safePath(cli)) return unavailable("The native CLI is unavailable.");
   try {
     accessSync(cli, constants.X_OK);
     if (!statSync(cli).isFile()) return unavailable("The native CLI is not an executable file.");
   } catch { return unavailable("The native CLI is not installed or executable."); }
+  if (harness === "opencode") {
+    if (run.readOnly) return unavailable("OpenCode cannot enforce read-only work in a native continuation.");
+    const scope = run.openCodeScope;
+    if (!scope || scope.unsupported || !safeNativePath(scope.home) || !safeNativePath(scope.dataDir) ||
+      !safeNativePath(scope.dbPath)) return unavailable("The OpenCode native data and config scope was not verified for this run.");
+    try {
+      if (realpathSync(homedir()) !== scope.home ||
+        realpathSync(join(scope.env.XDG_DATA_HOME ?? join(scope.home, ".local", "share"), "opencode")) !== scope.dataDir ||
+        realpathSync(scope.dbPath) !== scope.dbPath || !statSync(scope.dbPath).isFile())
+        return unavailable("The OpenCode native data or user home changed.");
+    } catch { return unavailable("The OpenCode native data or session database is missing."); }
+    if (!scope.env || !Array.isArray(scope.envUnset) ||
+      Object.keys(scope.env).some(key => !openCodePathKeys.includes(key as typeof openCodePathKeys[number]) || !safeNativePath(scope.env[key])) ||
+      scope.envUnset.some(key => !openCodePathKeys.includes(key as typeof openCodePathKeys[number]) || key in scope.env) ||
+      [...openCodePathKeys].some(key => !(key in scope.env) && !scope.envUnset.includes(key)))
+      return unavailable("The saved OpenCode environment scope is invalid.");
+    const model = run.effectiveModel || run.model;
+    if (model && !/^[a-zA-Z0-9][a-zA-Z0-9._:/\[\]-]{0,119}$/.test(model))
+      return unavailable("The saved model name is not safe for a native command.");
+    const env = { ...scope.env, OPENCODE_DB: scope.dbPath };
+    const envUnset = [...scope.envUnset, ...openCodeUnsetKeys];
+    const argv = [path, "--session", packet.nativeSessionId, ...(model ? ["--model", model] : [])];
+    const assignments = Object.entries(env).map(([key, value]) => `${key}=${quote(value)}`).join(" ");
+    const display = `([ "$(cd "$HOME" 2>/dev/null && pwd -P)" = ${quote(scope.home)} ] && ` +
+      `unset ${envUnset.join(" ")} && cd ${quote(path)} && ${assignments} ${[cli, ...argv].map(quote).join(" ")})`;
+    const ready: RunHandoff = { ...packet, available: true, reason: null,
+      command: { executable: cli, argv, cwd: path, env, envUnset, shell: "posix", display },
+      notes: [...(model ? [] : ["No model was saved. OpenCode will use its current native default."]),
+        "OpenCode will check the saved session and current native config when it opens.",
+        "AgentKlar does not monitor this manual session. Close native work before starting another worker in this checkout."] };
+    return JSON.stringify(ready).length <= 20000 ? ready : unavailable("The native command is too long to copy safely.");
+  }
   if (!run.nativeHome || !safePath(run.nativeHome))
     return unavailable("The native session home was not recorded as a safe absolute path for this run.");
   if (harness === "muse") {

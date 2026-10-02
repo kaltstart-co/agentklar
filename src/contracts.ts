@@ -76,6 +76,14 @@ export type MuseSubscriptionUsage = {
   weekly: { resetsAtMs: number; usedPercent: number };
   window: { resetsAtMs: number; usedPercent: number; windowDurationMins: number };
 };
+export type OpenCodeScope = {
+  home: string;
+  dataDir: string;
+  dbPath?: string;
+  env: Record<string, string>;
+  envUnset: string[];
+  unsupported?: boolean;
+};
 export type Run = {
   id: string;
   harness?: "codex" | "claude" | "muse" | "opencode";
@@ -101,6 +109,7 @@ export type Run = {
   turnId?: string;
   nativeHome?: string;
   nativeHomeEnv?: "set" | "unset";
+  openCodeScope?: OpenCodeScope;
   workerPid?: number;
   workspace?: RunWorkspace;
   launchSource?: LaunchSource;

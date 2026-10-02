@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { createService, processGroupAlive } from "../src/service.ts";
 import { runHandoff } from "../src/handoff.ts";
+import { captureOpenCodeScope, openCodeUnsetKeys, verifiedOpenCodeScope } from "../src/opencode-scope.ts";
 import type { Project, Run } from "../src/contracts.ts";
 
 const makeRun = (projectId: string, overrides: Partial<Run> = {}): Run => ({
@@ -107,6 +108,67 @@ test("Muse handoff pins its recorded XDG data home and safely quotes resume valu
       assert.equal(rejected.available, false);
       assert.match(rejected.reason!, reason);
     }
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("OpenCode handoff pins the saved native database, paths, workspace and model", () => {
+  const root = mkdtempSync(join(tmpdir(), "agentklar-opencode-handoff-"));
+  try {
+    const folder = join(root, "project '$(touch project-injected)'");
+    const dataHome = join(root, "data '$(touch data-injected)'");
+    const nativeData = join(dataHome, "opencode");
+    const db = join(nativeData, "sessions.db");
+    const configPath = join(root, "config '$(touch config-injected)'");
+    const cli = join(root, "opencode '$(touch cli-injected)'");
+    const output = join(root, "output");
+    mkdirSync(folder); mkdirSync(nativeData, { recursive: true });
+    writeFileSync(db, "fixture");
+    writeFileSync(cli, "#!/bin/sh\nprintf '%s\\n' \"$PWD\" \"$XDG_DATA_HOME\" \"$OPENCODE_DB\" \"$OPENCODE_CONFIG\" \"${OPENCODE_CONFIG_CONTENT+x}\" \"${OPENCODE_AUTO_SHARE+x}\" \"${OPENCODE_DISABLE_CLAUDE_CODE_PROMPT+x}\" \"${OPENCODE_DISABLE_EXTERNAL_SKILLS+x}\" \"$@\" > \"$TEST_OUTPUT\"\n");
+    chmodSync(cli, 0o700);
+    const project: Project = { id: randomUUID(), name: "test", path: realpathSync(folder),
+      preference: "balanced", roles: [], createdAt: "2026-10-01T00:00:00Z" };
+    const scope = verifiedOpenCodeScope(captureOpenCodeScope({ HOME: homedir(), XDG_DATA_HOME: dataHome,
+      OPENCODE_DB: "sessions.db", OPENCODE_CONFIG: configPath }), db);
+    const run = makeRun(project.id, { harness: "opencode", threadId: "ses_f0604686affeyj9XQ36ejbnQTb",
+      effectiveModel: "opencode/mimo-v2.6-flash-free", openCodeScope: scope });
+    const packet = runHandoff(run, project, false, cli);
+    assert.equal(packet.available, true, packet.reason || "");
+    assert.deepEqual(packet.command?.argv, [project.path, "--session", run.threadId, "--model", run.effectiveModel]);
+    assert.equal(packet.command?.env.OPENCODE_DB, realpathSync(db));
+    assert.ok(packet.command?.envUnset.includes("OPENCODE_CONFIG_CONTENT"));
+    assert.equal(new Set(openCodeUnsetKeys).size, openCodeUnsetKeys.length);
+    for (const key of ["OPENCODE_AUTO_SHARE", "OPENCODE_DISABLE_CLAUDE_CODE_PROMPT", "OPENCODE_DISABLE_EXTERNAL_SKILLS"])
+      assert.ok(packet.command?.envUnset.includes(key));
+    const shell = spawnSync("sh", ["-c", packet.command!.display], { cwd: root,
+      env: { ...process.env, TEST_OUTPUT: output, OPENCODE_CONFIG_CONTENT: "secret", OPENCODE_AUTO_SHARE: "true",
+        OPENCODE_DISABLE_CLAUDE_CODE_PROMPT: "true", OPENCODE_DISABLE_EXTERNAL_SKILLS: "true" }, encoding: "utf8" });
+    assert.equal(shell.status, 0, shell.stderr);
+    assert.deepEqual(readFileSync(output, "utf8").trimEnd().split("\n"),
+      [project.path, dataHome, realpathSync(db), configPath, "", "", "", "", ...packet.command!.argv]);
+    for (const name of ["project-injected", "data-injected", "config-injected", "cli-injected"])
+      assert.equal(existsSync(join(root, name)), false);
+    for (const [patch, reason] of [
+      [{ openCodeScope: undefined }, /scope/],
+      [{ openCodeScope: { ...scope, dbPath: join(root, "missing") } }, /missing/],
+      [{ openCodeScope: { ...scope, dataDir: join(root, "other") } }, /changed/],
+      [{ openCodeScope: { ...scope, env: { ...scope.env, UNSAFE: "/tmp/value" } } }, /invalid/],
+      [{ openCodeScope: { ...scope, unsupported: true } }, /scope/],
+      [{ threadId: randomUUID() }, /session ID/],
+      [{ readOnly: true }, /read-only/],
+      [{ model: "--unsafe", effectiveModel: undefined }, /model name/],
+      [{ state: "running" }, /active/],
+    ] as const) {
+      const rejected = runHandoff({ ...run, ...patch }, project, false, cli);
+      assert.equal(rejected.available, false);
+      assert.match(rejected.reason!, reason);
+    }
+    assert.match(runHandoff(run, project, true, cli).reason!, /active worker/);
+    assert.match(runHandoff({ ...run, workspace: { kind: "worktree", repoRoot: root,
+      commonDir: root, repoStamp: "x", commonStamp: "x", baseCommit: "x", rootRunId: run.id } }, project, false, cli).reason!, /not verified/);
+    const transient = captureOpenCodeScope({ HOME: homedir(), XDG_DATA_HOME: dataHome,
+      OPENCODE_CONFIG_CONTENT: "PRIVATE", OPENCODE_PERMISSION: "PRIVATE" });
+    assert.equal(transient.unsupported, true);
+    assert.equal(JSON.stringify(transient).includes("PRIVATE"), false);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -248,6 +310,45 @@ test("authenticated handoff is compact and survives restart; another active run 
     await service.close();
     if (originalPath === undefined) delete process.env.PATH;
     else process.env.PATH = originalPath;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("OpenCode handoff uses durable scope after service restart without exposing it in run reads", async () => {
+  const root = mkdtempSync(join(tmpdir(), "agentklar-opencode-handoff-api-"));
+  const projectPath = join(root, "project");
+  const dataHome = join(root, "data");
+  const db = join(dataHome, "opencode", "opencode.db");
+  const bin = join(root, "bin");
+  mkdirSync(projectPath); mkdirSync(join(dataHome, "opencode"), { recursive: true }); mkdirSync(bin);
+  writeFileSync(db, "fixture");
+  const cli = join(bin, "opencode"); writeFileSync(cli, "#!/bin/sh\nexit 0\n"); chmodSync(cli, 0o700);
+  const previousPath = process.env.PATH;
+  process.env.PATH = `${bin}:${previousPath || ""}`;
+  let service = createService(join(root, "state"), 4317);
+  try {
+    const project: Project = { id: randomUUID(), name: "test", path: realpathSync(projectPath),
+      preference: "balanced", roles: [], createdAt: "2026-10-01T00:00:00Z" };
+    service.store.saveProject(project);
+    const scope = verifiedOpenCodeScope(captureOpenCodeScope({ HOME: homedir(), XDG_DATA_HOME: dataHome }), db);
+    const run = makeRun(project.id, { harness: "opencode", threadId: "ses_f0604686affeyj9XQ36ejbnQTb", openCodeScope: scope });
+    service.store.insertRun(run, "once");
+    const read = (route: string) => service.app.request(`http://127.0.0.1:4317${route}`, {
+      headers: { Authorization: `Bearer ${service.bearer}` },
+    });
+    assert.equal((await service.app.request(`http://127.0.0.1:4317/api/runs/${run.id}/handoff`)).status, 401);
+    assert.equal((await (await read(`/api/runs/${run.id}/handoff`)).json()).available, true);
+    assert.equal(JSON.stringify(await (await read(`/api/runs/${run.id}`)).json()).includes("openCodeScope"), false);
+    await service.close();
+    service = createService(join(root, "state"), 4317);
+    const restored = await (await read(`/api/runs/${run.id}/handoff`)).json();
+    assert.equal(restored.available, true);
+    assert.equal(restored.command.env.OPENCODE_DB, realpathSync(db));
+    assert.deepEqual(service.store.run(run.id)?.openCodeScope, scope);
+  } finally {
+    await service.close();
+    if (previousPath === undefined) delete process.env.PATH;
+    else process.env.PATH = previousPath;
     rmSync(root, { recursive: true, force: true });
   }
 });

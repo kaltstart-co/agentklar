@@ -2,11 +2,12 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
-import { chmodSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { OpenCodeWorker, openCodeApproval, openCodeModels, readOpenCodeCatalog, type OpenCodeConnect } from "../src/opencode.ts";
+import { OpenCodeWorker, openCodeApproval, openCodeDbPath, openCodeModels, readOpenCodeCatalog, type OpenCodeConnect } from "../src/opencode.ts";
 import { createService, processGroupAlive } from "../src/service.ts";
 import type { Approval, Run } from "../src/contracts.ts";
+import { captureOpenCodeScope } from "../src/opencode-scope.ts";
 
 const pause = () => new Promise<void>(resolve => setTimeout(resolve, 5));
 async function until(check: () => boolean) { for (let n = 0; n < 200; n++) { if (check()) return; await pause(); } assert.fail("timed out"); }
@@ -64,7 +65,10 @@ function fake(readOnly = false) {
     spawned(undefined, async () => { closed++; operations.push("close"); });
     return { client: client as any, close: async () => { closed++; operations.push("close"); }, exited };
   };
-  const worker = () => new OpenCodeWorker("fixture", run, path, callbacks, connect);
+  const worker = (scope?: Run["openCodeScope"], dbPath?: ConstructorParameters<typeof OpenCodeWorker>[6]) => {
+    if (scope) run = { ...run, openCodeScope: scope };
+    return new OpenCodeWorker("fixture", run, path, callbacks, connect, {}, dbPath);
+  };
   const final = (finish: string, tokens = 10) => ({ info: { id: "msg_fixture", sessionID, role: "assistant", time: { completed: Date.now() }, finish,
     providerID: "opencode", modelID: "mimo-free", tokens: { total: tokens } }, parts: [{ type: "text", text: "Done" }] });
   return { worker, emit, setPrompt: (fn: typeof prompt) => { prompt = fn; }, setMessages: (items: unknown[]) => { messages = items; },
@@ -85,6 +89,44 @@ test("OpenCode catalog keeps only connected text-and-tool models and no provider
   assert.equal(catalog.modelsStatus, "available");
   assert.equal(catalog.models[0].isDefault, false);
   assert.equal(JSON.stringify(catalog).includes("PRIVATE"), false);
+});
+
+test("OpenCode database metadata read is bounded and keeps raw native output out of records", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "agentklar-opencode-db-path-"));
+  try {
+    const cli = join(dir, "opencode");
+    const db = join(dir, "database with trailing space ");
+    writeFileSync(cli, "#!/bin/sh\nprintf '%s\\n' \"$FIXTURE_DB\"\n"); chmodSync(cli, 0o700);
+    const env = { ...process.env, FIXTURE_DB: db };
+    assert.equal(await openCodeDbPath(cli, dir, env, new AbortController().signal), db);
+    writeFileSync(cli, "#!/bin/sh\nprintf '\\377'\n");
+    assert.equal(await openCodeDbPath(cli, dir, env, new AbortController().signal), null);
+    writeFileSync(cli, "#!/bin/sh\nprintf '%05000d' 1\n");
+    assert.equal(await openCodeDbPath(cli, dir, env, new AbortController().signal), null);
+    const cancelled = new AbortController(); cancelled.abort();
+    assert.equal(await openCodeDbPath(cli, dir, env, cancelled.signal), null);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("OpenCode worker saves verified database scope before prompting, but a failed probe does not block work", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "agentklar-opencode-worker-db-"));
+  const dataHome = join(dir, "data");
+  const db = join(dataHome, "opencode", "sessions.db");
+  mkdirSync(join(dataHome, "opencode"), { recursive: true }); writeFileSync(db, "fixture");
+  try {
+    for (const available of [true, false]) {
+      const f = fake(); f.setMessages([f.final("stop")]);
+      const scope = captureOpenCodeScope({ HOME: process.env.HOME, XDG_DATA_HOME: dataHome });
+      f.setPrompt(async () => {
+        assert.equal(f.run().openCodeScope?.dbPath, available ? realpathSync(db) : undefined);
+        f.emit({ type: "session.idle", properties: { sessionID: f.sessionID } });
+        return { data: { info: { finish: "stop" } } };
+      });
+      await f.worker(scope, async () => available ? db : null).closed;
+      assert.equal(f.run().state, "completed");
+      assert.equal(f.run().openCodeScope?.dataDir, available ? realpathSync(join(dataHome, "opencode")) : scope.dataDir);
+    }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
 test("OpenCode approvals require exact bounded native action evidence", () => {
@@ -203,12 +245,29 @@ test("OpenCode cancellation asks the native session to stop before closing its s
   assert.deepEqual(f.operations, ["abort", "close"]);
 });
 
+test("OpenCode cancellation during database metadata does not start a prompt", async () => {
+  const f = fake();
+  let prompts = 0;
+  f.setPrompt(async () => { prompts++; return { data: f.final("stop") }; });
+  const scope = captureOpenCodeScope({ HOME: process.env.HOME });
+  const worker = f.worker(scope, async () => new Promise<string | null>(() => {}));
+  await until(() => f.run().threadId === f.sessionID);
+  worker.stop();
+  await worker.closed;
+  assert.equal(f.run().state, "cancelled");
+  assert.equal(prompts, 0);
+});
+
 test("OpenCode API rejects read-only and accepts a manual worker without changing setup adapters", async () => {
   const dir = mkdtempSync(join(tmpdir(), "agentklar-opencode-api-"));
   const projectPath = join(dir, "project"); mkdirSync(projectPath);
   const starts: Run[] = [];
+  const childEnvs: (NodeJS.ProcessEnv | undefined)[] = [];
+  const previousDataHome = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = join(dir, "native-data");
   const service = createService(join(dir, "state"), 4317,
-    (_command, run, _path, callbacks) => { starts.push(run); queueMicrotask(() => { callbacks.update({ state: "completed" }); callbacks.done(); }); return { stop: () => {} }; },
+    (_command, run, _path, callbacks, nativeEnv) => { starts.push(run); childEnvs.push(nativeEnv);
+      queueMicrotask(() => { callbacks.update({ state: "completed" }); callbacks.done(); }); return { stop: () => {} }; },
     null, null, undefined, {}, undefined, {}, {}, null, {}, "/bin/true");
   const headers = { authorization: `Bearer ${service.bearer}`, "content-type": "application/json" };
   const call = (path: string, body: unknown) => service.app.request("http://127.0.0.1:4317" + path, { method: "POST", headers, body: JSON.stringify(body) });
@@ -221,7 +280,14 @@ test("OpenCode API rejects read-only and accepts a manual worker without changin
     assert.equal(started.status, 202);
     await until(() => starts.length === 1);
     assert.equal(starts[0].harness, "opencode");
-  } finally { await service.close(); rmSync(dir, { recursive: true, force: true }); }
+    assert.equal(starts[0].openCodeScope?.env.XDG_DATA_HOME, join(dir, "native-data"));
+    assert.equal(childEnvs[0]?.XDG_DATA_HOME, starts[0].openCodeScope?.env.XDG_DATA_HOME);
+  } finally {
+    await service.close();
+    if (previousDataHome === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = previousDataHome;
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("OpenCode cancellation during native startup closes the owned process group", async () => {

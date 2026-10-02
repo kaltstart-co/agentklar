@@ -460,7 +460,7 @@ export function App() {
           : "This hosted page is a setup guide. Run the local app to see projects, workers and permission requests."}
       </p>
       <p className="hint">Requires Node 24 on macOS or Linux. Install the pinned beta package:</p>
-      <pre>npm install -g https://github.com/kaltstart-co/agentklar/releases/download/v0.1.0-beta.17/agentklar-0.1.0-beta.17.tgz{"\n"}agentklar start</pre>
+      <pre>npm install -g https://github.com/kaltstart-co/agentklar/releases/download/v0.1.0-beta.18/agentklar-0.1.0-beta.18.tgz{"\n"}agentklar start</pre>
       <p>
         Open the setup link from the terminal, then use{" "}
         <code>http://127.0.0.1:4317</code>.
@@ -1971,10 +1971,10 @@ function NativeHandoff({ runId, connected, projectBusy }: { runId: string; conne
       {canShow && packet?.command && (
         <div>
           <p className="hint">Copy into your terminal (macOS or Linux):</p>
-          <pre className="result native-command">{packet.command.display}</pre>
           <Button size="xs" variant="light" disabled={loading} onClick={() => void copy()}>
             {copied ? "Copied" : "Copy command"}
           </Button>
+          <pre className="result native-command" tabIndex={0} aria-label="Native continuation command">{packet.command.display}</pre>
           {packet.notes.map((note) => <p className="hint" key={note}>{note}</p>)}
         </div>
       )}

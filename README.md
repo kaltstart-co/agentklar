@@ -9,7 +9,7 @@ This is a fresh TypeScript rewrite. The old Go application is preserved in Git a
 Requires Node 24 and npm on macOS or Linux. Install this pinned GitHub beta package, then start the local service:
 
 ```sh
-npm install -g https://github.com/kaltstart-co/agentklar/releases/download/v0.1.0-beta.17/agentklar-0.1.0-beta.17.tgz
+npm install -g https://github.com/kaltstart-co/agentklar/releases/download/v0.1.0-beta.18/agentklar-0.1.0-beta.18.tgz
 agentklar start
 ```
 
@@ -72,7 +72,7 @@ Your native harness can classify the task with its existing model and call `task
 
 Muse can be selected directly or through a saved Muse role. Automatic advice keeps Muse out of unpinned choices because no reviewed Muse cost or quality tier is available. A specific Muse model pin can receive advice with unknown tier and allowance. A manual Muse task with no model pin uses the native default.
 
-OpenCode can also run a task when you select it directly or through a saved role. Its catalog includes connected text-and-tool models; it does not prove model access, billing or account limits. Automatic advice keeps OpenCode out of unpinned choices because it has no reviewed cost or quality tier. Leave Model blank for OpenCode's native default, or choose an exact `provider/model` ID. OpenCode runs through its own local server with its native provider settings and permissions. Only the trusted local UI can approve one concrete native action. OpenCode read-only work and native session handoff are not available yet.
+OpenCode can also run a task when you select it directly or through a saved role. Its catalog includes connected text-and-tool models; it does not prove model access, billing or account limits. Automatic advice keeps OpenCode out of unpinned choices because it has no reviewed cost or quality tier. Leave Model blank for OpenCode's native default, or choose an exact `provider/model` ID. OpenCode runs through its own local server with its native provider settings and permissions. Only the trusted local UI can approve one concrete native action. OpenCode read-only work is unavailable.
 
 Each routed run keeps a small record of the selected model, task needs and policy reasons. The task detail shows the requested model and the model reported by the native harness separately. A worker failure does not trigger another model automatically. The task detail also shows any selected benchmark reference and whether it broke a tie.
 
@@ -145,7 +145,7 @@ Private records live in `~/.agentklar/local-v1/`: SQLite state, a private MCP be
 
 On a service restart, unfinished runs become interrupted. Native sessions are recorded, but AgentKlar does not claim to recover a live worker. A possibly surviving owned process group keeps its checkout blocked until it exits; the service never kills an unverified or reused process ID. Cancellation interrupts the owned turn and terminates its owned subprocess group. Keep the service running for active work.
 
-For a finished run, open **Continue in native harness** in its task detail, or call `run_handoff({runId})` through MCP. AgentKlar shows a POSIX terminal command only when it has the saved native session UUID, session home, verified checkout folder, and installed CLI, with no active worker in that checkout. The command keeps the saved model when known and Codex read-only sandbox when selected. For Claude, it also keeps whether `CLAUDE_CONFIG_DIR` was set or unset when the worker started; setting that variable changes where Claude reads its config. For Muse, it pins `XDG_DATA_HOME` to the parent of the native data home recorded by Muse before resuming. Claude read-only runs have no ready command because their SDK tool restriction cannot be carried into native CLI resume. Older runs without saved session scope have no ready command. The command is a snapshot; AgentKlar does not launch or monitor the manual session. Close native work before starting another worker in the same checkout.
+For a finished run, open **Continue in native harness** in its task detail, or call `run_handoff({runId})` through MCP. AgentKlar shows a POSIX terminal command only when it has the saved native session and data scope, verified checkout folder, and installed CLI, with no active worker in that checkout. The command keeps the saved model when known and Codex read-only sandbox when selected. For Claude, it keeps whether `CLAUDE_CONFIG_DIR` was set or unset. For Muse, it pins its recorded native data home. For OpenCode, it pins the exact database path reported by `opencode db path` and the saved native path settings. OpenCode handoff needs a new run with verified data scope; old runs and runs launched with transient inline config or permission settings remain unavailable. Claude read-only runs have no ready command because their SDK tool restriction cannot be carried into native CLI resume. The command is a snapshot; AgentKlar does not launch or monitor the manual session. Close native work before starting another worker in the same checkout.
 
 Results and event tails have character limits and explicit truncation flags. Native token counts are shown when available. Dollar cost and native task quality remain unknown. Account allowance is shown only when the native harness provides it.
 

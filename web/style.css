@@ -604,6 +604,8 @@ code {
 .native-command {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+  max-height: 12rem;
+  overflow: auto;
 }
 .catalog-model {
   padding: 10px 0;

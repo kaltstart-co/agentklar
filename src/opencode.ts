@@ -5,6 +5,7 @@ import { createOpencodeClient } from "@opencode-ai/sdk/v2/client";
 import type { Approval, CatalogModel, HarnessCatalog, Run } from "./contracts.ts";
 import type { NativeCallbacks } from "./native.ts";
 import { composeWorkerPrompt } from "./prompt.ts";
+import { verifiedOpenCodeScope } from "./opencode-scope.ts";
 
 const object = (v: unknown): Record<string, any> | null => v && typeof v === "object" && !Array.isArray(v) ? v as Record<string, any> : null;
 const clean = (v: unknown, max: number) => typeof v === "string" && v.length <= max &&
@@ -16,14 +17,56 @@ const alive = (pid: number) => { try { process.kill(process.platform === "win32"
 const data = (reply: any) => { if (reply?.error || !reply || reply.data === undefined) throw new Error("OpenCode native request failed"); return reply.data; };
 
 export type OpenCodeHost = { client: ReturnType<typeof createOpencodeClient>; close: () => Promise<void>; pid?: number; exited: Promise<void> };
-export type OpenCodeConnect = (command: string, cwd: string, spawned: (pid: number | undefined, close: () => Promise<void>) => void) => Promise<OpenCodeHost>;
+export type OpenCodeConnect = (command: string, cwd: string, spawned: (pid: number | undefined, close: () => Promise<void>) => void,
+  nativeEnv?: NodeJS.ProcessEnv) => Promise<OpenCodeHost>;
+
+/** Native metadata only. Output and errors are discarded unless they are one safe path. */
+export async function openCodeDbPath(command: string, cwd: string, nativeEnv: NodeJS.ProcessEnv, signal: AbortSignal): Promise<string | null> {
+  if (signal.aborted) return null;
+  return new Promise(resolve => {
+    const child = spawn(command, ["db", "path"], { cwd, env: nativeEnv, stdio: ["ignore", "pipe", "pipe"],
+      detached: process.platform !== "win32" });
+    const chunks: Buffer[] = [];
+    let outputBytes = 0;
+    let stderrBytes = 0;
+    let settled = false;
+    let interrupted = false;
+    const stop = () => { interrupted = true; try { if (child.pid && process.platform !== "win32") process.kill(-child.pid, "SIGKILL"); else child.kill("SIGKILL"); } catch {} };
+    const finish = (value: string | null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      clearTimeout(fallback);
+      signal.removeEventListener("abort", stop);
+      stop(); // A wrapper can exit while a child in its process group stays alive.
+      resolve(value);
+    };
+    const timer = setTimeout(stop, 5000);
+    const fallback = setTimeout(() => finish(null), 6500);
+    signal.addEventListener("abort", stop, { once: true });
+    child.stdout.on("data", (chunk: Buffer) => {
+      outputBytes += chunk.length;
+      if (outputBytes > 4096) stop();
+      else chunks.push(chunk);
+    });
+    child.stderr.on("data", (chunk: Buffer) => { stderrBytes += chunk.length; if (stderrBytes > 4096) stop(); });
+    child.once("error", () => {});
+    child.once("close", code => {
+      const bytes = Buffer.concat(chunks);
+      const decoded = bytes.toString("utf8");
+      const valid = Buffer.from(decoded, "utf8").equals(bytes);
+      const output = decoded.replace(/\r?\n$/, "");
+      finish(code === 0 && valid && !interrupted && !signal.aborted && outputBytes <= 4096 ? output : null);
+    });
+  });
+}
 
 /** The native CLI owns config, credentials, session state and permission rules. */
-export const connectOpenCode: OpenCodeConnect = async (command, cwd, spawned) => {
+export const connectOpenCode: OpenCodeConnect = async (command, cwd, spawned, nativeEnv = process.env) => {
   const password = randomBytes(32).toString("hex");
   const child = spawn(command, ["serve", "--hostname", "127.0.0.1", "--port", "0"], {
     cwd, stdio: "pipe", detached: process.platform !== "win32",
-    env: { ...process.env, OPENCODE_SERVER_USERNAME: "opencode", OPENCODE_SERVER_PASSWORD: password },
+    env: { ...nativeEnv, OPENCODE_SERVER_USERNAME: "opencode", OPENCODE_SERVER_PASSWORD: password },
   });
   child.stderr.on("data", () => {});
   child.on("error", () => {});
@@ -150,7 +193,8 @@ export class OpenCodeWorker {
   private stopped = new Promise<void>(resolve => { this.resolveStop = resolve; });
   private pid?: number;
   constructor(private command: string, private run: Run, private path: string, private callbacks: NativeCallbacks,
-    connect: OpenCodeConnect = connectOpenCode) { this.closed = this.start(connect); }
+    connect: OpenCodeConnect = connectOpenCode, private nativeEnv: NodeJS.ProcessEnv = { ...process.env },
+    private dbPath: typeof openCodeDbPath = openCodeDbPath) { this.closed = this.start(connect); }
   private async race<T>(promise: Promise<T>): Promise<T> { return Promise.race([promise, this.stopped.then(() => { throw new Error("Worker stopped"); })]); }
   private async read<T>(promise: Promise<T>, ms = 8000): Promise<T> {
     return this.race(Promise.race([promise, timeout(ms, "OpenCode metadata request timed out")]));
@@ -194,7 +238,7 @@ export class OpenCodeWorker {
         this.pid = pid; this.closeOpening = close;
         if (pid) this.callbacks.update({ workerPid: pid });
         if (this.finished) void close();
-      });
+      }, this.nativeEnv);
       void opening.then(host => { if (this.finished) void host.close(); }).catch(() => {});
       this.host = await this.race(opening);
       void this.host.exited.then(() => { if (!this.finished) this.finish("failed", "OpenCode local server exited before the root task finished."); });
@@ -207,6 +251,13 @@ export class OpenCodeWorker {
       if (!id(session?.id) || session.directory !== this.path) throw new Error("OpenCode session path was not confirmed");
       this.sessionId = session.id;
       this.callbacks.update({ threadId: session.id });
+      if (this.run.openCodeScope && !this.run.openCodeScope.unsupported) {
+        try {
+          const dbPath = await this.race(this.dbPath(this.command, this.path, this.nativeEnv, this.abort.signal));
+          if (dbPath) this.callbacks.update({ openCodeScope: verifiedOpenCodeScope(this.run.openCodeScope, dbPath) });
+        } catch { /* Native task can continue without a handoff command. */ }
+      }
+      if (this.finished) return;
       let idle!: () => void;
       const idled = new Promise<void>(resolve => { idle = resolve; });
       const events = (async () => {

@@ -36,6 +36,7 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 - [x] Muse delegation
 - [x] Muse quota snapshots
 - [x] OpenCode delegation
+- [x] OpenCode continuation
 - [x] Model advice
 - [x] Quality benchmarks (LiveBench reference)
 - [x] Automatic model choice

@@ -25,6 +25,7 @@ import { NativeWorker, type NativeCallbacks } from "./native.ts";
 import { ClaudeWorker } from "./claude.ts";
 import { MuseWorker } from "./muse.ts";
 import { OpenCodeWorker } from "./opencode.ts";
+import { captureOpenCodeScope } from "./opencode-scope.ts";
 import { CatalogCache, readCatalog, type CatalogReader } from "./catalog.ts";
 import { BenchmarkCache } from "./benchmarks.ts";
 import type { Run, Project, ProjectRun, ProjectLead, RoutingDecision, FollowUpContext } from "./contracts.ts";
@@ -46,7 +47,7 @@ const role = z
   })
   .strict();
 function compactRun(r: Run): Run {
-  const { contextSnapshot, followUpContext, nativeHome, nativeHomeEnv, ...metadata } = r;
+  const { contextSnapshot, followUpContext, nativeHome, nativeHomeEnv, openCodeScope, ...metadata } = r;
   return {
     ...metadata,
     contextRevision: contextSnapshot?.revision ?? null,
@@ -142,18 +143,19 @@ export type WorkerFactory = (
   run: Run,
   path: string,
   callbacks: NativeCallbacks,
+  nativeEnv?: NodeJS.ProcessEnv,
 ) => { stop: () => void; closed?: Promise<void> };
 export type Operator = { id: string; key: string };
 export function createService(
   home: string,
   port = 4317,
-  factory: WorkerFactory = (command, run, path, callbacks) =>
+  factory: WorkerFactory = (command, run, path, callbacks, nativeEnv) =>
     run.harness === "claude"
       ? new ClaudeWorker(command, run, path, callbacks)
       : run.harness === "muse"
       ? new MuseWorker(command, run, path, callbacks)
       : run.harness === "opencode"
-      ? new OpenCodeWorker(command, run, path, callbacks)
+      ? new OpenCodeWorker(command, run, path, callbacks, undefined, nativeEnv)
       : new NativeWorker(command, run, path, callbacks),
   nativeCommand: string | null = executable("codex"),
   claudeCommand: string | null = executable("claude"),
@@ -913,6 +915,8 @@ export function createService(
     const nativeHome = !homeVariable ? undefined : configuredHome === undefined
       ? join(homedir(), harness === "codex" ? ".codex" : ".claude")
       : isAbsolute(configuredHome) ? configuredHome : undefined;
+    const openCodeEnv = harness === "opencode" ? { ...process.env } : undefined;
+    const openCodeScope = openCodeEnv ? captureOpenCodeScope(openCodeEnv) : undefined;
     const runId = randomUUID();
     let workspace: Run["workspace"];
     if (source) {
@@ -958,6 +962,7 @@ export function createService(
       readOnly: data.readOnly,
       nativeHome,
       nativeHomeEnv: configuredHome === undefined ? "unset" : "set",
+      ...(openCodeScope ? { openCodeScope } : {}),
       workspace,
       ...(c.req.header("authorization") === `Bearer ${bearer}`
         ? { launchSource: sourceFromHeader(c.req.header("x-agentklar-mcp-client")) }
@@ -995,7 +1000,7 @@ export function createService(
         },
       };
       const launch = (ready: Run) => {
-        const worker = factory(command, ready, ready.workspace?.path || p.path, callbacks);
+        const worker = factory(command, ready, ready.workspace?.path || p.path, callbacks, openCodeEnv);
         workers.set(r.id, worker);
         return worker;
       };
