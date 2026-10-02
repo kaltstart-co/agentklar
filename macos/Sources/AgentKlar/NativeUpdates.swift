@@ -8,7 +8,7 @@ import SwiftUI
 final class NativeUpdates: NSObject, ObservableObject, SPUUpdaterDelegate {
     @Published private(set) var enabled = false
     @Published private(set) var canCheck = false
-    @Published private(set) var message = "Automatic app updates are unavailable in this development preview. The background runtime ships with the app."
+    @Published private(set) var message = "Automatic app updates are unavailable in this development preview."
     private var controller: SPUStandardUpdaterController?
     private var observation: AnyCancellable?
     private weak var client: AgentKlarClient?
@@ -27,7 +27,7 @@ final class NativeUpdates: NSObject, ObservableObject, SPUUpdaterDelegate {
             self.canCheck = value || self.pendingInstall != nil
         }
         enabled = true
-        message = "Sparkle checks signed app releases. Updating the app keeps the background service running; use the bundled runtime action to upgrade that component."
+        message = "Signed app updates are enabled."
         controller.startUpdater()
     }
 
@@ -118,45 +118,91 @@ struct NativeUpdateSettings: View {
     private var bundled: Bool { client.runtime.isBundledRuntime }
 
     var body: some View {
-        LabeledContent("Mac app", value: appVersion)
-        Text(updates.message).font(NativeStyle.caption).foregroundStyle(.secondary)
-        if updates.enabled {
-            Button("Check for app updates") { updates.checkForUpdates() }
-                .disabled(!updates.canCheck || !client.maintenanceReady)
-        }
-        Divider()
-        LabeledContent("Running background service", value: status["current"].string ?? "Not checked")
-        if bundled { LabeledContent("Bundled runtime", value: appVersion) }
-        if let latest = status["latest"].string { LabeledContent("Last checked service release", value: latest) }
-        if let error = status["error"].string { Text(error).foregroundStyle(.secondary) }
-        if !failure.isEmpty { Text(failure).foregroundStyle(.secondary) }
-        if bundled {
-            Text("Use this app’s bundled runtime when work is idle. Existing projects and harness accounts stay in place. A newer service release may require a newer app.")
-                .font(NativeStyle.caption).foregroundStyle(.secondary)
-        }
-        ViewThatFits(in: .horizontal) {
-            HStack { updateActions }
-            VStack(alignment: .leading, spacing: 8) { updateActions }
-        }
-        .confirmationDialog(bundled ? "Use this app’s bundled background runtime? Save open drafts first." : "Update the local AgentKlar service? Save open drafts first.", isPresented: $confirm) {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "app").font(.system(size: 24)).foregroundStyle(.secondary).frame(width: 32)
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Mac app").font(NativeStyle.heading)
+                    Text(appVersion).font(NativeStyle.caption).foregroundStyle(.secondary)
+                    Text(updates.message).font(NativeStyle.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 12)
+                if updates.enabled {
+                    Button("Check for updates") { updates.checkForUpdates() }
+                        .buttonStyle(.bordered).disabled(!updates.canCheck || !client.maintenanceReady)
+                }
+            }
+            Divider()
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "gearshape.2").font(.system(size: 24)).foregroundStyle(.secondary).frame(width: 32)
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Background service").font(NativeStyle.heading)
+                    Text(serviceSummary).font(NativeStyle.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 12)
+                if checking { ProgressView().controlSize(.small).accessibilityLabel("Checking service releases") }
+                else {
+                    Button { Task { await check(refresh: true) } } label: {
+                        Image(systemName: "arrow.clockwise").frame(width: 28, height: 28).contentShape(Rectangle())
+                    }.buttonStyle(.plain).foregroundStyle(.secondary).disabled(client.busy)
+                        .accessibilityLabel("Check service releases").help("Check service releases")
+                }
+                if bundled {
+                    Button("Use bundled runtime") { confirm = true }
+                        .buttonStyle(.borderedProminent).disabled(checking || !client.maintenanceReady)
+                } else if status["installation"]["supported"].bool == true {
+                    Button("Update service") { confirm = true }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(status["available"].bool != true || checking || !client.maintenanceReady)
+                }
+            }
+            if let error = status["error"].string {
+                Label(error, systemImage: "exclamationmark.triangle").font(NativeStyle.caption)
+                    .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+            }
+            if !failure.isEmpty {
+                Label(failure, systemImage: "exclamationmark.triangle").font(NativeStyle.caption)
+                    .foregroundStyle(.red).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+            }
+            NativeDetailButton("Update and runtime details") {
+                VStack(alignment: .leading, spacing: 12) {
+                    LabeledContent("Mac app", value: appVersion)
+                    Text(updates.message).fixedSize(horizontal: false, vertical: true)
+                    Text(updates.enabled
+                         ? "Signed app releases use Sparkle. Updating the app keeps the background service running. Use the runtime action to upgrade that component."
+                         : "This development preview has no automatic app updates. The background runtime ships with the app.")
+                        .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    Divider()
+                    LabeledContent("Running service", value: status["current"].string ?? "Not checked")
+                    if bundled {
+                        LabeledContent("Bundled runtime", value: appVersion)
+                        Text("Use this app's bundled runtime when work is idle. Existing projects and harness accounts stay in place. A newer service release may require a newer app.")
+                            .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    }
+                    if let latest = status["latest"].string { LabeledContent("Last checked service release", value: latest) }
+                    Text(status.prettyText).font(NativeStyle.source).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                }
+            }.buttonStyle(.plain).foregroundStyle(.tint)
+        }.frame(maxWidth: 800, alignment: .leading)
+        .confirmationDialog(bundled ? "Use this app’s bundled background runtime? Save open drafts first." : "Update the local AgentKlar service? Save open drafts first.", isPresented: $confirm, titleVisibility: .visible) {
             Button(bundled ? "Use bundled runtime" : "Update service") {
                 Task { await client.updateService(); await check(refresh: false) }
             }
             Button("Cancel", role: .cancel) {}
+        } message: {
+            if bundled { Text("Uses the runtime bundled with app version \(appVersion). Finish active work first.") }
         }
         .task { await check(refresh: false) }
     }
 
-    @ViewBuilder private var updateActions: some View {
-        Button("Check service releases") { Task { await check(refresh: true) } }
-            .disabled(checking || client.busy)
-        if bundled {
-            Button("Use bundled runtime") { confirm = true }
-                .disabled(checking || !client.maintenanceReady)
-        } else if status["installation"]["supported"].bool == true {
-            Button("Update local service") { confirm = true }
-                .disabled(status["available"].bool != true || checking || !client.maintenanceReady)
+    private var serviceSummary: String {
+        let current = status["current"].string ?? "Not checked"
+        if status["available"].bool == true, let latest = status["latest"].string {
+            return "\(current) · \(latest) available"
         }
+        return current + (bundled ? " · app includes runtime \(appVersion)" : " · local installation")
     }
 
     private func check(refresh: Bool) async {

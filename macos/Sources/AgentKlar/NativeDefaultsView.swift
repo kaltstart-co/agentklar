@@ -19,77 +19,68 @@ struct NativeDefaultsView: View {
     private var base: String { "/projects/\(client.projectID)/native-settings" }
     private var efforts: [String] { harness == "claude" ? ["low", "medium", "high", "xhigh"] : ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"] }
 
+    private var scopeLabel: String { harness == "claude" ? "This project's Claude Code sessions" : "All your Codex projects" }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 16) { harnessPicker; Spacer(); refreshButton }
-                VStack(alignment: .leading, spacing: 12) { harnessPicker; refreshButton }
-            }
-            VStack(alignment: .leading, spacing: 8) {
-                Label(settings == .null ? "Defaults not loaded" : "Native defaults loaded", systemImage: settings == .null ? "circle.dotted" : "checkmark.circle")
-                    .foregroundStyle(.secondary)
-                Text(harness == "claude" ? "This project's Claude Code sessions." : "All your Codex projects.").font(NativeStyle.caption).foregroundStyle(.secondary)
-                if client.projectID.isEmpty { Text("Choose a project to manage native defaults.") }
-            }
-            Divider()
-            VStack(alignment: .leading, spacing: 12) {
-                LabeledContent("Model") {
-                    TextField("Default model", text: $model, prompt: Text("Native fallback"))
-                        .textFieldStyle(.roundedBorder).frame(maxWidth: 400)
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 5) {
+                    harnessPicker
+                    Text(client.projectID.isEmpty ? "Choose a project to manage defaults." : scopeLabel)
+                        .font(NativeStyle.caption).foregroundStyle(.secondary)
                 }
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: 12) { modelActions }.fixedSize(horizontal: true, vertical: false)
-                    VStack(alignment: .leading, spacing: 12) { modelActions }
-                }.controlSize(.regular)
-            }.disabled(settings == .null)
+                Spacer(minLength: 12)
+                refreshButton
+            }
+            if settings == .null && !client.projectID.isEmpty {
+                Label(working ? "Reading defaults…" : "Defaults not loaded", systemImage: "circle.dotted")
+                    .font(NativeStyle.caption).foregroundStyle(.secondary)
+            }
             Divider()
-            VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 12) {
+                Label("Model", systemImage: "cpu").frame(width: 90, alignment: .leading)
+                TextField("Default model", text: $model, prompt: Text("Native fallback"))
+                    .textFieldStyle(.roundedBorder).frame(minWidth: 120, maxWidth: .infinity)
+                Button { model = "" } label: { Image(systemName: "xmark.circle") }
+                    .buttonStyle(.plain).foregroundStyle(.secondary).disabled(model.isEmpty)
+                    .accessibilityLabel("Clear model draft").help("Clear the draft to use the native fallback")
+                Button("Review") { Task { await change("preview", field: "model") } }
+                    .buttonStyle(.bordered).accessibilityLabel("Review model change")
+            }.disabled(settings == .null)
+            HStack(spacing: 12) {
+                Label("Effort", systemImage: "gauge.with.dots.needle.50percent").frame(width: 90, alignment: .leading)
                 Picker("Effort", selection: $effort) {
                     Text("Native fallback").tag("")
                     ForEach(efforts, id: \.self) { Text($0).tag($0) }
                     if !effort.isEmpty && !efforts.contains(effort) { Text("Current: \(effort) · support unknown").tag(effort) }
-                }.pickerStyle(.menu)
-                Button("Preview effort") { Task { await change("preview", field: "effort") } }.controlSize(.regular)
+                }.pickerStyle(.menu).labelsHidden().frame(maxWidth: .infinity, alignment: .leading)
+                Button("Review") { Task { await change("preview", field: "effort") } }
+                    .buttonStyle(.bordered).accessibilityLabel("Review effort change")
             }.disabled(settings == .null)
-            NativeDetailButton("Default details") {
-                VStack(alignment: .leading, spacing: 8) {
-                    if let path = settings["path"].string { Text(path).textSelection(.enabled) }
-                    Text("Model access and supported effort depend on your native CLI and account. An empty draft removes the managed field and uses the native fallback.")
-                }.font(NativeStyle.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Text("Changes apply to new native sessions.").font(NativeStyle.caption).foregroundStyle(.secondary)
+                Spacer(minLength: 8)
+                NativeDetailButton("Default details") {
+                    Text(scopeLabel).font(NativeStyle.heading)
+                    if let path = settings["path"].string { LabeledContent("Config file", value: path).textSelection(.enabled) }
+                    Text("Model access and supported effort depend on your native CLI and account. An empty model draft or Native fallback removes the managed field and uses the native fallback.")
+                        .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    if let message = settings["message"].string { Text(message).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
+                }.buttonStyle(.plain).foregroundStyle(.tint)
             }
-            if preview["id"].string != nil {
-                GroupBox("Review default change") {
-                    VStack(alignment: .leading, spacing: 16) {
-                        Label("\(preview["key"].string ?? "Default") · \(preview["scope"].string ?? "Unknown scope")", systemImage: "doc.text.magnifyingglass").fontWeight(.semibold)
-                        Text("Before: \(preview["before"].string ?? "Native fallback")")
-                        Text("After: \(preview["after"].string ?? "Native fallback")")
-                        Text(preview["message"].string ?? "").foregroundStyle(.secondary)
-                        NativeDetailButton("Exact path and saved preview") { Text(preview.prettyText).font(.system(size: 12, design: .monospaced)).fixedSize(horizontal: false, vertical: true).textSelection(.enabled) }
-                        Button("Apply reviewed default") { Task { await change("apply") } }
-                    }.frame(maxWidth: .infinity, alignment: .leading).fixedSize(horizontal: false, vertical: true).padding(16)
-                }
-            }
+            if preview["id"].string != nil { reviewChange }
             if !(settings["changes"].array ?? []).isEmpty {
                 Divider()
                 Text("Managed changes").font(NativeStyle.heading)
             }
             ForEach(settings["changes"].array ?? [], id: \.self) { receipt in
-                VStack(alignment: .leading, spacing: 12) {
-                    Label("\(receipt["field"].string ?? "Default") · \(receipt["state"].string ?? "Unknown state")", systemImage: receipt["state"].string == "interrupted" ? "exclamationmark.triangle" : "clock.arrow.circlepath").fontWeight(.semibold)
-                    if let message = receipt["message"].string { Text(message).font(NativeStyle.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
-                    if receipt["canUndo"].bool == true, let id = receipt["id"].string {
-                        Button("Undo unchanged \(receipt["field"].string ?? "default")") { Task { await change("undo", changeID: id) } }.controlSize(.regular)
-                    } else if receipt["state"].string == "interrupted" {
-                        Label("Inspect the native config. Changed settings cannot be safely undone by this receipt.", systemImage: "exclamationmark.triangle").foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
-                    }
-                    NativeDetailButton("Managed change receipt") { Text(receipt.prettyText).font(.system(size: 12, design: .monospaced)).fixedSize(horizontal: false, vertical: true).textSelection(.enabled) }
-                }.frame(maxWidth: .infinity, alignment: .leading)
+                receiptRow(receipt)
                 Divider()
             }
-            if working { ProgressView("Reading or changing defaults…").controlSize(.regular) }
-            if !notice.isEmpty { Label(notice, systemImage: "checkmark.circle").foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
-            if !failure.isEmpty { Label(failure, systemImage: "exclamationmark.triangle").foregroundStyle(.red).fixedSize(horizontal: false, vertical: true).textSelection(.enabled) }
-        }.font(NativeStyle.body).frame(maxWidth: .infinity, alignment: .leading)
+            if working { ProgressView().controlSize(.small).accessibilityLabel("Reading or changing defaults") }
+            if !notice.isEmpty { Label(notice, systemImage: "checkmark.circle").font(NativeStyle.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
+            if !failure.isEmpty { Label(failure, systemImage: "exclamationmark.triangle").font(NativeStyle.caption).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true).textSelection(.enabled) }
+        }.font(NativeStyle.body).frame(maxWidth: 800, alignment: .leading)
         .disabled(working || client.busy || !client.connected || client.projectID.isEmpty)
         .onChange(of: model) { _, _ in preview = .null }
         .onChange(of: effort) { _, _ in preview = .null }
@@ -105,6 +96,65 @@ struct NativeDefaultsView: View {
         }
     }
 
+    private var reviewChange: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Divider()
+            HStack(spacing: 10) {
+                Image(systemName: "doc.text.magnifyingglass").foregroundStyle(.secondary)
+                Text("Review \(preview["field"].string ?? "default") change").font(NativeStyle.heading)
+                Spacer()
+                Text(preview["scope"].string ?? "Unknown scope").font(NativeStyle.caption).foregroundStyle(.secondary)
+            }
+            LabeledContent("Before", value: preview["before"].string ?? "Native fallback")
+                .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+            LabeledContent("After", value: preview["after"].string ?? "Native fallback")
+                .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+            Text("Native model access and effort support still apply.").font(NativeStyle.caption).foregroundStyle(.secondary)
+            HStack(spacing: 12) {
+                Button("Apply reviewed default") { Task { await change("apply") } }.buttonStyle(.borderedProminent)
+                Button("Cancel") { preview = .null }.buttonStyle(.plain).foregroundStyle(.secondary)
+                Spacer(minLength: 8)
+                NativeDetailButton("Exact change") {
+                    Text(preview["message"].string ?? "").fixedSize(horizontal: false, vertical: true)
+                    Text(preview.prettyText).font(NativeStyle.source).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+                }.buttonStyle(.plain).foregroundStyle(.tint)
+            }
+        }
+    }
+
+    private func receiptRow(_ receipt: JSON) -> some View {
+        let field = receipt["field"].string ?? "Default"
+        let state = receipt["state"].string ?? "Unknown state"
+        let interrupted = state == "interrupted"
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 12) {
+                Image(systemName: interrupted ? "exclamationmark.triangle" : "clock.arrow.circlepath")
+                    .foregroundStyle(interrupted ? Color.orange : Color.secondary).frame(width: 24)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(field.capitalized + " default").fontWeight(.medium)
+                    Text(state.capitalized).font(NativeStyle.caption).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 12)
+                if receipt["canUndo"].bool == true, let id = receipt["id"].string {
+                    Button("Undo") { Task { await change("undo", changeID: id) } }
+                        .buttonStyle(.bordered).help("Undo only if the native setting is unchanged")
+                        .accessibilityLabel("Undo unchanged \(field) default")
+                }
+                NativeDetailButton("Receipt") {
+                    Text(receipt.prettyText).font(NativeStyle.source).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+                }.buttonStyle(.plain).foregroundStyle(.tint)
+            }
+            if interrupted {
+                Text(receipt["message"].string ?? "The change was interrupted. Inspect native settings before recovery.")
+                    .font(NativeStyle.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+                if receipt["canUndo"].bool != true {
+                    Text("This receipt cannot safely undo the changed settings.")
+                        .font(NativeStyle.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
     private var harnessPicker: some View {
         Picker("Harness", selection: $harness) {
             HStack { NativeHarnessIcon(harness: "claude", size: 18); Text("Claude Code") }.tag("claude")
@@ -112,12 +162,8 @@ struct NativeDefaultsView: View {
         }.pickerStyle(.menu)
     }
     private var refreshButton: some View {
-        Button("Refresh defaults", systemImage: "arrow.clockwise") { Task { await load() } }.controlSize(.regular)
-    }
-
-    @ViewBuilder private var modelActions: some View {
-        Button("Preview model") { Task { await change("preview", field: "model") } }
-        Button("Clear draft") { model = "" }
+        Button { Task { await load() } } label: { Image(systemName: "arrow.clockwise").frame(width: 28, height: 28).contentShape(Rectangle()) }
+            .buttonStyle(.plain).foregroundStyle(.secondary).accessibilityLabel("Refresh defaults").help("Refresh defaults")
     }
 
     private func adopt(_ value: JSON, preservingDrafts: Bool = false) {

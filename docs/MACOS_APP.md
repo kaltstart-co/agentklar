@@ -83,3 +83,12 @@ Team now has compact Routing preset and Delegation controls. Edit presets create
 Only when asked is the default. Use team when helpful is an explicit project choice. Selecting a routing preset does not enable delegation. Connections now has one main connection action, a quiet refresh icon and detail links; installation choices open separately. Sidebar labels fill the row and define its click area.
 
 The MacBook app and idle service are locally updated to beta.35. All 325 service tests, TypeScript, both builds, Foundation checks and package smoke passed. GUI checks covered named preset creation, validation, persistence, separate policy saves, role draft preservation and Settings navigation. The real project and native configs stayed unchanged. Empty-space coordinate clicks and real native-agent policy behavior remain unverified. See [validation details](VALIDATION.md).
+
+
+## Compact settings and extension pages — beta.36
+
+Devices is a computer list with icons, project names and relative last-check times. Connect computer is the main action. SSH details, device/project IDs and exact timestamps open in Details. Share a project and Approval sharing open the existing scoped setup flows; their access warnings and private-code clearing remain in place. Setup errors appear inside their window. A failed connection check reloads its recorded error.
+
+Defaults uses matching Model and Effort rows. Review keeps exact before/after values, scope and an explicit Apply action. Receipts and technical paths open separately; interrupted changes still show warnings. Updates has separate app/runtime rows with versions and short status. Skills and plugins uses compact fields and record rows with quieter details; install reviews and removal confirmations remain available.
+
+The MacBook app is a local beta.36 development preview. The background service remains beta.35; this UI change did not require its replacement. The Mac mini was not updated in this pass. TypeScript, all 325 service tests, production build, Foundation checks, Swift release build and package smoke with 25 MCP tools passed. See [validation details](VALIDATION.md). Signed public distribution and complete native GUI acceptance remain pending.

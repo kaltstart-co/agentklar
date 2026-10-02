@@ -29,11 +29,12 @@ struct NativeExtensionsView: View {
             Divider()
             pluginsSection
             Divider()
-            NativeDetailButton("Native config and extension metadata") { inventorySection }
+            NativeDetailButton("Native inventory") { inventorySection }.buttonStyle(.plain).foregroundStyle(.tint)
             if working { ProgressView("Reading or changing extensions…").controlSize(.small) }
             if !notice.isEmpty { Text(notice).foregroundStyle(.secondary) }
             if !failure.isEmpty { Label(failure, systemImage: "exclamationmark.triangle").foregroundStyle(.red).textSelection(.enabled) }
         }
+        .font(NativeStyle.body).controlSize(.regular).frame(maxWidth: 800, alignment: .leading).frame(maxWidth: .infinity, alignment: .leading)
         .disabled(working || client.busy || !client.connected)
         .onChange(of: source) { _, _ in skillPreview = .null }
         .onChange(of: skillName) { _, _ in skillPreview = .null }
@@ -58,51 +59,72 @@ struct NativeExtensionsView: View {
 
     private var skillsSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Skills").font(NativeStyle.heading)
-            Picker("Install scope", selection: $skillScope) {
-                Text("Project").tag("project")
-                Text("Personal").tag("personal")
+            HStack {
+                Text("Skills").font(NativeStyle.heading)
+                Spacer()
+                Button("Refresh", systemImage: "arrow.clockwise") { Task { await refresh() } }
+                    .accessibilityLabel("Refresh skills and plugin status")
             }
-            Picker("Native skill folder", selection: $harness) { Text("Codex / shared skills").tag("codex"); Text("Claude Code").tag("claude") }
-            Text(skillScope == "project" ? "Project skills stay in this project. Shared skills can also be read by compatible native harnesses." : "Personal skills use the service's native home. Other native profiles may use different folders.").font(NativeStyle.caption).foregroundStyle(.secondary)
-            Text("The native harness decides which skills to load. Installation does not confirm session activation.").font(NativeStyle.caption).foregroundStyle(.secondary)
+            HStack(spacing: 16) {
+                Picker("Scope", selection: $skillScope) {
+                    Text("Project").tag("project")
+                    Text("Personal").tag("personal")
+                }.pickerStyle(.menu)
+                Picker("Folder", selection: $harness) { Text("Codex / shared").tag("codex"); Text("Claude Code").tag("claude") }
+                    .pickerStyle(.menu).accessibilityLabel("Native skill folder")
+            }
+            Text(skillScope == "project" ? "For this project. Your native harness decides what loads." : "For your native home. Other profiles may use different folders.")
+                .font(NativeStyle.caption).foregroundStyle(.secondary)
             if !skillAvailable { Text("Choose a project, or use Personal scope.") }
-            Button("Refresh skills and plugin status", systemImage: "arrow.clockwise") { Task { await refresh() } }
-            Group {
-                TextField("GitHub source", text: $source, prompt: Text("owner/repo#ref"))
-                TextField("Exact skill name", text: $skillName, prompt: Text("lowercase-skill-name"))
+            VStack(alignment: .leading, spacing: 10) {
                 HStack {
-                    Button("Use AgentKlar workflow skill") { source = "kaltstart-co/agentklar#v0.1.0-beta.26"; skillName = "agentklar-workflow" }
+                    TextField("GitHub source", text: $source, prompt: Text("owner/repo#ref")).textFieldStyle(.roundedBorder)
+                    TextField("Exact skill name", text: $skillName, prompt: Text("lowercase-skill-name")).textFieldStyle(.roundedBorder)
+                }
+                HStack {
+                    Button("AgentKlar workflow") { source = "kaltstart-co/agentklar#v0.1.0-beta.26"; skillName = "agentklar-workflow" }
+                        .buttonStyle(.plain).foregroundStyle(.tint).accessibilityLabel("Use AgentKlar workflow skill")
                     Button("Preview skill") { Task { await skillAction("preview", body: ["harness": harness, "source": source.trimmingCharacters(in: .whitespacesAndNewlines), "name": skillName.trimmingCharacters(in: .whitespacesAndNewlines)]) } }.disabled(source.isEmpty || skillName.isEmpty)
                 }
             }.disabled(!skillAvailable)
             if skillPreview["id"].string != nil { skillReview }
             ForEach(skills, id: \.self) { row in
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("\(row["name"].string ?? "Skill") · \(row["harness"].string ?? "Unknown") · \(row["state"].string ?? "Unknown state")").font(NativeStyle.heading)
-                    Text(row["path"].string ?? "Path unavailable").font(NativeStyle.caption).textSelection(.enabled)
-                    if let text = row["message"].string { Text(text).font(NativeStyle.caption).foregroundStyle(.secondary) }
-                    if row["state"].string == "installed", let id = row["id"].string {
-                        HStack {
-                            Button("Preview upstream update") { Task { await skillAction("preview-update", body: ["installId": id]) } }
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(row["name"].string ?? "Skill").font(NativeStyle.heading)
+                        Spacer()
+                        let folder = row["harness"].string == "claude" ? "Claude Code" : row["harness"].string == "codex" ? "Codex" : "Unknown folder"
+                        Text("\(folder) · \(row["state"].string?.capitalized ?? "Unknown state")")
+                            .font(NativeStyle.caption).foregroundStyle(.secondary)
+                    }
+                    if let text = row["message"].string, !text.isEmpty { Text(text).font(NativeStyle.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
+                    HStack {
+                        if row["state"].string == "installed", let id = row["id"].string {
+                            Button("Check update") { Task { await skillAction("preview-update", body: ["installId": id]) } }
                             Button("Remove…", role: .destructive) { pendingRemoval = row; confirmsRemoval = true }
                         }
-                    } else if row["state"].string == "external" {
-                        Text("External skill. AgentKlar does not own or remove it.").font(NativeStyle.caption).foregroundStyle(.secondary)
+                        NativeDetailButton("Details") {
+                            Text(row["path"].string ?? "Path unavailable").textSelection(.enabled)
+                            if row["state"].string == "external" { Text("External skill. AgentKlar does not own or remove it.") }
+                            Text("The native harness decides which skills to load. Installation does not confirm session activation.")
+                                .foregroundStyle(.secondary)
+                            code(row)
+                        }.buttonStyle(.plain).foregroundStyle(.tint)
                     }
-                    NativeDetailButton("Skill record") { code(row) }
-                }.padding(.vertical, 4)
+                }.padding(.vertical, 6)
+                Divider()
             }
-            if skills.isEmpty { Text("No skill records loaded.").foregroundStyle(.secondary) }
+            if skills.isEmpty { Text("No skills loaded.").font(NativeStyle.caption).foregroundStyle(.secondary) }
         }
     }
 
     private var skillReview: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Review \(skillPreview["name"].string ?? "skill")").font(NativeStyle.heading)
-            Text(skillPreview["path"].string ?? "Path unavailable").textSelection(.enabled)
-            Text("Source: \(skillPreview["source"].string ?? "Unknown")").textSelection(.enabled)
-            NativeDetailButton("Review skill files and source") {
+            NativeDetailButton("Review files and source") {
+                Text("Install path").font(NativeStyle.heading)
+                Text(skillPreview["path"].string ?? "Path unavailable").textSelection(.enabled)
+                Text("Source: \(skillPreview["source"].string ?? "Unknown")").textSelection(.enabled)
                 if let current = skillPreview["currentText"].string {
                     Text("Currently installed SKILL.md").font(NativeStyle.heading)
                     Text(current).font(.system(size: 14, design: .monospaced)).textSelection(.enabled)
@@ -111,45 +133,72 @@ struct NativeExtensionsView: View {
                 Text(skillPreview["text"].string ?? "Content unavailable").font(.system(size: 14, design: .monospaced)).textSelection(.enabled)
                 Text("File hashes and source pin").font(NativeStyle.heading)
                 code(skillPreview)
-            }
+            }.buttonStyle(.plain).foregroundStyle(.tint)
+            Text("Start a new native session to load the installed skill.").font(NativeStyle.caption).foregroundStyle(.secondary)
             if skillPreview["hasChanges"].bool == false { Text("Already up to date.").foregroundStyle(.secondary) }
             else if skillPreview["hasChanges"].bool == true, let id = skillPreview["id"].string {
                 Button(skillPreview["updateInstallId"].string == nil ? "Install reviewed skill" : "Apply reviewed skill update") {
                     let operation = skillPreview["updateInstallId"].string == nil ? "install" : "update"
                     Task { await skillAction(operation, body: ["previewId": id]) }
-                }
+                }.buttonStyle(.borderedProminent)
             }
         }.padding(10).background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
     }
 
     private var pluginsSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Claude workflow plugin").font(NativeStyle.heading)
-            Text("A versioned native Claude plugin with the AgentKlar workflow skill. Local project scope. Individual skills stay separate.").foregroundStyle(.secondary)
+            Text("Workflow plugin").font(NativeStyle.heading)
+            Text("Claude Code · This project · Reload plugins or start a new session after installing.")
+                .font(NativeStyle.caption).foregroundStyle(.secondary)
             if client.projectID.isEmpty { Text("Choose a project to manage its plugin.") }
-            if let message = plugins["message"].string { Text(message).font(NativeStyle.caption).foregroundStyle(.secondary) }
-            if plugins != .null { Label(plugins["available"].bool == true ? "Native plugin commands available" : "Native plugin commands unavailable", systemImage: plugins["available"].bool == true ? "checkmark.circle" : "questionmark.circle") }
-            Button("Preview workflow plugin") { Task { await pluginAction("preview") } }.disabled(client.projectID.isEmpty || plugins["available"].bool != true)
+            if plugins != .null, plugins["available"].bool != true {
+                Label("Plugin commands unavailable", systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
+                if let message = plugins["message"].string { Text(message).font(NativeStyle.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
+            }
+            HStack {
+                Button("Preview plugin") { Task { await pluginAction("preview") } }.disabled(client.projectID.isEmpty || plugins["available"].bool != true)
+                if plugins != .null {
+                    NativeDetailButton("Plugin details") {
+                        Text("A versioned native Claude plugin with the AgentKlar workflow skill. Individual skills stay separate.")
+                        if let message = plugins["message"].string { Text(message).foregroundStyle(.secondary) }
+                        code(plugins)
+                    }.buttonStyle(.plain).foregroundStyle(.tint)
+                }
+            }
             if pluginPreview["id"].string != nil {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("\(pluginPreview["name"].string ?? "Plugin") · \(pluginPreview["version"].string ?? "Unknown version")").font(NativeStyle.heading)
-                    Text(pluginPreview["scope"].string ?? "Unknown scope")
+                    Text(pluginPreview["scope"].string ?? "Unknown scope").font(NativeStyle.caption).foregroundStyle(.secondary)
                     let counts = pluginPreview["capabilities"]
                     Text("\((counts["skills"].array ?? []).count) skills · \(Int(counts["agents"].number ?? 0)) agents · \(Int(counts["hooks"].number ?? 0)) hooks · \(Int(counts["mcpServers"].number ?? 0)) MCP servers")
-                    Text(pluginPreview["message"].string ?? "").foregroundStyle(.secondary)
-                    NativeDetailButton("Reviewed commands, manifest, content hashes and pin") { code(pluginPreview) }
-                    Button("Install reviewed native plugin") { Task { await pluginAction("apply") } }
+                    Text("Native permissions still apply.").font(NativeStyle.caption).foregroundStyle(.secondary)
+                    NativeDetailButton("Review plugin") { code(pluginPreview) }.buttonStyle(.plain).foregroundStyle(.tint)
+                    Button("Install reviewed native plugin") { Task { await pluginAction("apply") } }.buttonStyle(.borderedProminent)
                 }.padding(10).background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
             }
             ForEach((plugins["changes"].array ?? []).filter { $0["state"].string != "undone" }, id: \.self) { receipt in
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("\(receipt["version"].string ?? "Unknown version") · \(receipt["state"].string ?? "Unknown state")").font(NativeStyle.heading)
-                    Text(plugins["available"].bool != true ? "Install state unavailable" : receipt["installed"].bool == true ? "Installed" : "Not installed")
-                    Text(receipt["recognized"].bool == true ? "Components recognized at install. Current session activation unknown." : "Native recognition unverified.").font(NativeStyle.caption).foregroundStyle(.secondary)
-                    if let text = receipt["message"].string { Text(text).font(NativeStyle.caption).foregroundStyle(.secondary) }
-                    if receipt["canUndo"].bool == true, let id = receipt["id"].string { Button("Undo unchanged plugin") { Task { await pluginAction("undo", changeID: id) } } }
-                    NativeDetailButton("Owned plugin change receipt") { code(receipt) }
-                }.padding(.vertical, 4)
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(receipt["version"].string ?? "Unknown version").font(NativeStyle.heading)
+                        Spacer()
+                        Text(plugins["available"].bool != true ? "Unavailable" : receipt["installed"].bool == true ? "Installed" : "Not installed")
+                            .font(NativeStyle.caption).foregroundStyle(.secondary)
+                    }
+                    if receipt["state"].string != "applied" {
+                        Label(receipt["state"].string?.capitalized ?? "Unknown state", systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
+                        if let text = receipt["message"].string { Text(text).font(NativeStyle.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
+                    }
+                    if receipt["recognized"].bool != true { Text("Native recognition unverified.").font(NativeStyle.caption).foregroundStyle(.secondary) }
+                    HStack {
+                        if receipt["canUndo"].bool == true, let id = receipt["id"].string { Button("Undo unchanged plugin") { Task { await pluginAction("undo", changeID: id) } } }
+                        NativeDetailButton("Details") {
+                            Text(receipt["recognized"].bool == true ? "Components recognized at install. Current session activation unknown." : "Native recognition unverified.")
+                            if let text = receipt["message"].string { Text(text).foregroundStyle(.secondary) }
+                            code(receipt)
+                        }.buttonStyle(.plain).foregroundStyle(.tint)
+                    }
+                }.padding(.vertical, 6)
+                Divider()
             }
         }
     }

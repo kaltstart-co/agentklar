@@ -328,6 +328,6 @@ struct NativeDetailPage<Content: View>: View {
             HStack { Text(title).font(NativeStyle.heading); Spacer(); Button("Done") { dismiss() }.keyboardShortcut(.cancelAction) }
             Divider()
             ScrollView { VStack(alignment: .leading, spacing: 12) { content }.frame(maxWidth: .infinity, alignment: .leading) }
-        }.font(NativeStyle.body).padding(NativeStyle.pagePadding).frame(minWidth: 480, idealWidth: 700, minHeight: 400, idealHeight: 600)
+        }.font(NativeStyle.body).foregroundStyle(.primary).padding(NativeStyle.pagePadding).frame(minWidth: 480, idealWidth: 700, minHeight: 400, idealHeight: 600)
     }
 }

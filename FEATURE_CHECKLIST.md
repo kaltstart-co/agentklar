@@ -21,6 +21,8 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 - [x] Named routing presets
 - [x] Opt-in delegation
 - [x] Clear connection actions
+- [x] Compact device settings
+- [x] Clear setup feedback
 - [x] Full sidebar click area
 - [x] Harness discovery
 - [x] Native source inventory
@@ -102,7 +104,7 @@ Plan: [docs/ONBOARDING_PLAN.md](docs/ONBOARDING_PLAN.md).
 
 ## Native Mac preview
 
-Plan: [docs/DESKTOP_PLAN.md](docs/DESKTOP_PLAN.md). Beta.34 is a local development preview; full GUI acceptance is pending. Evidence: [native Mac notes](docs/MACOS_APP.md#verification-limits).
+Plan: [docs/DESKTOP_PLAN.md](docs/DESKTOP_PLAN.md). Beta.36 is a local development preview; full GUI acceptance is pending. Evidence: [native Mac notes](docs/MACOS_APP.md#verification-limits).
 
 - [x] SwiftUI build
 - [x] Local boundary checks
