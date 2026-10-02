@@ -9,7 +9,7 @@ This is a fresh TypeScript rewrite. The old Go application is preserved in Git a
 Requires Node 24 and npm on macOS or Linux. Install this pinned GitHub beta package, then start the local service:
 
 ```sh
-npm install -g https://github.com/kaltstart-co/agentklar/releases/download/v0.1.0-beta.25/agentklar-0.1.0-beta.25.tgz
+npm install -g https://github.com/kaltstart-co/agentklar/releases/download/v0.1.0-beta.26/agentklar-0.1.0-beta.26.tgz
 agentklar start
 ```
 
@@ -141,7 +141,13 @@ Start the local service before the MCP connection. The stdio bridge talks to the
 
 Remote history is returned separately as `remoteDispatches`. Continue it with `remoteCursor: remoteNextCursor`; `remoteDispatchesHasMore` reports whether another page exists. `remoteLimit` accepts 1–20 records. Local `cursor` and remote `remoteCursor` are independent. History contains compact last observed owner status; use `run_status` with the dispatch ID to refresh it.
 
-When one harness is coordinating a project, it can explicitly call `project_lead` to claim the advisory lead. Work shows the reported client and when it was last seen. The bridge keeps the claim alive while connected; closing it releases the claim when possible, and a lost connection expires after about 90 seconds. A new client can take over only after reading the current claim ID. The local UI can clear the claim shown there. Reading a project or starting an ordinary task never claims the lead. Every harness can still start tasks and use shared context while another lead is shown. This marker says which MCP connection is coordinating; it does not show whether a model is thinking or transfer control or native permissions.
+When one harness is coordinating a project, it can explicitly call `project_lead` to claim the advisory lead. Work shows the reported client and when it was last seen. The bridge keeps the claim alive while connected; closing it releases the claim when possible, and a lost connection expires after about 90 seconds. In advisory mode, a new client can take over only after reading the current claim ID, and the local UI can clear that observed claim. Coordinated mode uses the reviewed handoff or human recovery below. Reading a project or starting an ordinary task never claims the lead. In default advisory mode, every harness can still start tasks and use shared context while another lead is shown. This marker says which MCP connection is coordinating; it does not show whether a model is thinking or transfer control or native permissions.
+
+## Switch the main harness
+
+Open **Work → Switch main harness** to prepare a saved handoff with context, observed work references and owner/workspace pointers. Read the packet in your receiving native harness through `project_handoff`, then read `projects_list` for current roles and cost preference. After review, explicitly accept with one stable request ID and the packet's exact digest and context/control revisions. A lost reply retries with the same fields. A stale packet needs fresh preparation and review. The dashboard shows saved packets and receipts; acceptance belongs to the receiving MCP client.
+
+Advisory control stays the default. The reviewed **Project control setting** can enable coordinated control: MCP task starts, worker stops and shared-context writes then require the current lead. Reads and trusted human dashboard actions remain available. **Recover a lost lead** releases the freshly observed claim so a harness can claim coordination again. Existing workers continue. This does not transfer native sessions, control direct file edits, change native permissions or automatically save memory. Historical receipts survive restart but do not restore a live lead.
 
 ## Native permissions and data
 

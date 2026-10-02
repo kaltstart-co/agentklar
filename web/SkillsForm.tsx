@@ -11,7 +11,7 @@ import {
 
 type Harness = "codex" | "claude";
 type Scope = "project" | "personal";
-const workflowSource = "kaltstart-co/agentklar#v0.1.0-beta.23";
+const workflowSource = "kaltstart-co/agentklar#v0.1.0-beta.26";
 type Item = {
   id: string | null;
   harness: Harness;

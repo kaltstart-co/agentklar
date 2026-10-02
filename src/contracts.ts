@@ -176,6 +176,7 @@ export type Snapshot = {
   approvals: Approval[];
   harnesses: Harness[];
   leads: Record<string, ProjectLead>;
+  controls?:Record<string,ControlStatus>;
 };
 export type RemoteDispatch = { routing?:RoutingDecision; id: string; prompt: string; createdAt: string; launchHash?: string; projectId: string; peerId: string; ownerDeviceId: string; ownerRunId?: string; lastKnownRun?: Run; lastObservedAt?: string; connection: "unknown" | "observed"; error?: string };
 export type ChangeContinuation = { harness: string; cwd: string; display: string; freshSession: true };
@@ -329,3 +330,59 @@ export type OpenCodeSetupEntry = { type: "local"; command: string[]; environment
 export type SetupChange = { id: string; projectId: string; harness: SetupHarness; operation: "apply" | "undo"; state: "prepared" | "applied" | "undone" | "interrupted"; message: string | null; createdAt: string; updatedAt: string };
 export type SetupStatus = { projectId: string; harness: SetupHarness; scope: "User" | "Local project"; status: "missing" | "configured" | "conflict" | "unavailable"; message: string; checkedAt: string; change: SetupChange | null; canUndo: boolean };
 export type SetupPreview = { id: string; projectId: string; harness: SetupHarness; scope: "User" | "Local project"; configPath: string; cwd: string | null; command: string | null; entry: SetupEntry | OpenCodeSetupEntry | AntigravitySetupEntry; createdAt: string };
+
+export type ControlStatus = {
+  projectId: string;
+  mode: 'advisory'|'coordinated';
+  revision: number;
+  lead: ProjectLead|null
+};
+export type ControlPacket = {
+  receipt?: ControlReceipt;
+  id: string;
+  projectId: string;
+  digest: string;
+  createdAt: string;
+  context: ProjectContext;
+  control: ControlStatus;
+  observedLead: ProjectLead|null;
+  work: {
+    local: {
+      id: string;
+      state: string;
+      harness: string;
+      updatedAt: string;
+      workspace?: {
+        kind: string;
+        path?: string;
+        pathTruncated?: boolean
+      };
+      followUp?: FollowUp
+    }[];
+    remote: {
+      id: string;
+      ownerDeviceId: string;
+      ownerRunId?: string;
+      state: string|null;
+      lastObservedAt?: string;
+      connection: string
+    }[];
+    totalLocal: number;
+    totalRemote: number;
+    pointers: {
+      context: string;
+      runs: string;
+      remoteRuns: string
+    }
+  }
+};
+export type ControlReceipt = {
+  id: string;
+  packetId: string;
+  projectId: string;
+  requestId: string;
+  digest: string;
+  revision: number;
+  lead: ProjectLead;
+  acceptedAt: string
+};

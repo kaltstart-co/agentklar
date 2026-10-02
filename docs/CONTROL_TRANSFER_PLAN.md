@@ -1,6 +1,6 @@
 # Main-harness handoff
 
-Implementation plan. This feature is not shipped yet.
+Implemented in the current source and verified with isolated service, MCP and browser fixtures. It coordinates AgentKlar requests; it does not transfer native execution.
 
 ## User flow
 
@@ -12,7 +12,7 @@ The main harness can prepare and accept this handoff through MCP. The optional d
 
 ## Control scope
 
-Keep today's advisory lead as the default. Add coordinated control as an explicit project option, with a preview of the operations it covers. Once enabled, the active lead controls AgentKlar task starts, worker stops and shared-context changes. Trusted human dashboard actions remain available. Reads remain available to every connected harness.
+Advisory lead remains the default. Coordinated control is an explicit project option, with a review of the operations it covers. Once enabled, the active lead controls AgentKlar task starts, worker stops and shared-context changes. Trusted human dashboard actions remain available. Reads remain available to every connected harness.
 
 The service checks the current lead and its revision before a managed change. Passing an earlier check must not permit a delayed launch after ownership changes. Recheck before local launch or durable remote dispatch. Already accepted remote work continues; a lost acknowledgment keeps its original dispatch and owner.
 
@@ -28,7 +28,7 @@ This coordinates AgentKlar requests. It cannot stop a native harness from editin
 
 MCP client names are reported labels. Bridge identity supports coordination within the local service's existing trust boundary; it is not a new security boundary. Human recovery uses the trusted local UI and a fresh observed revision. Native approvals remain separate.
 
-## Verification gate
+## Verification coverage
 
 - Two real MCP clients: prepare in one, inspect and accept in the other.
 - Context, open work and owner/workspace references survive the switch.
@@ -40,3 +40,10 @@ MCP client names are reported labels. Bridge identity supports coordination with
 - Dashboard recovery uses the same revisions and receipts; compact layout fits.
 
 Passing these checks establishes AgentKlar coordination. It does not establish control over manual native sessions or direct file edits.
+
+
+## Verified scope and remaining limits
+
+Focused backend checks passed for two MCP clients, stale revisions, lost replies, request fencing, expiry and restart. The actual cookie/Origin browser flow prepared context and unfinished-work references, enabled the reviewed coordinated setting, and recovered the freshly observed lead without stopping the fake worker. An official MCP client read current projects and the packet, accepted it, then closed; the dashboard retained its receipt and showed no live lead. Desktop and 320px views fit with no browser errors. Evidence: `/tmp/agentklar-control-ui-qa/`.
+
+No real installed project policy, native configuration, credentials or model calls changed. This verifies local AgentKlar coordination between MCP connections. Switching actual native interactive conversations on two computers, native session transfer and control over direct file edits are not established. Native approvals remain human actions.

@@ -1,3 +1,4 @@
+import { Control, ControlError } from "./control.ts";
 import { Approvals, ApprovalError, approvalAnswerSchema } from "./approvals.ts";
 import { Peers, PeerError, routingEvidenceSchema, type PeerTransport } from "./peers.ts";
 import { DatabaseSync } from "node:sqlite";
@@ -383,6 +384,7 @@ export function createService(
     const run = store.run(runId);
     return !quiesced && !stopping && !!run && ["running","needs_attention"].includes(run.state) && workers.has(runId);
   });
+  const control = new Control(store.db);
   const leads = new Map<string, ProjectLead & { bridgeId: string; deadline: number }>();
   const leadNow = leadOptions.now || (() => performance.now());
   const leadWallNow = leadOptions.wallNow || Date.now;
@@ -393,12 +395,21 @@ export function createService(
   };
   const currentLead = (projectId: string) => {
     const lead = leads.get(projectId);
-    if (lead && lead.deadline <= leadNow()) { leads.delete(projectId); return undefined; }
+    if (lead && lead.deadline <= leadNow()) { leads.delete(projectId); control.bump(projectId); return undefined; }
     return lead;
+  };
+  const initialControl = new WeakMap<Request,Map<string,ReturnType<Control["stamp"]>>>();
+  const controlStamp = (c: any, projectId: string) => {
+    const bypass=c.req.header("x-agentklar-peer-internal")===peerInternal || !c.req.header("authorization");
+    const current=control.stamp(projectId,c.req.header("x-agentklar-bridge-id"),currentLead(projectId),bypass);
+    const captured=initialControl.get(c.req.raw)?.get(projectId);
+    const stamp=captured?{...captured,bypass}:current;
+    control.check(projectId,stamp,currentLead(projectId));
+    return stamp;
   };
   const leadReply = (projectId: string) => {
     const lead = currentLead(projectId);
-    return { projectId, lead: lead ? publicLead(lead) : null };
+    return { ...control.status(projectId,lead ? publicLead(lead) : null) };
   };
   const secretPath = join(home, "mcp-token");
   if (!existsSync(secretPath))
@@ -419,7 +430,7 @@ export function createService(
     !!a &&
     Buffer.byteLength(a) === Buffer.byteLength(b) &&
     timingSafeEqual(Buffer.from(a), Buffer.from(b));
-  app.onError((e, c) => c.json({ error: e.message }, e instanceof ApprovalError || e instanceof PeerError || e instanceof ChangeError ? e.status as 400 : e instanceof InstructionError || e instanceof SetupError || e instanceof SkillError ? e.status : 500));
+  app.onError((e, c) => c.json({ error: e.message }, e instanceof ControlError || e instanceof ApprovalError || e instanceof PeerError || e instanceof ChangeError ? e.status as 400 : e instanceof InstructionError || e instanceof SetupError || e instanceof SkillError ? e.status : 500));
   app.use("*", async (c, next) => {
     const host = c.req.header("host") || new URL(c.req.url).host;
     if (![`127.0.0.1:${port}`, "127.0.0.1:5173"].includes(host))
@@ -447,6 +458,8 @@ export function createService(
         { error: operator ? "Run agentklar service open to open the local UI." : "Open the one-time setup URL printed by the local service." },
         401,
       );
+    if (/^\/api\/projects\/[^/]+\/control(?:\/recover)?$/.test(c.req.path) && c.req.method !== "GET" && (!ui || !!c.req.header("authorization") || !origin || !origins.has(origin)))
+      return c.json({error:"Only the trusted local UI may change project control policy or recover a lead."},403);
     if (c.req.path.startsWith("/api/remote-approvals/") && (!ui || !origin || !origins.has(origin) || !!c.req.header("authorization")))
       return c.json({ error:"Only the trusted local UI with its exact Origin may view or answer remote approvals." },403);
     if (c.req.path.startsWith("/api/peers/settings/human") && (!ui || !!c.req.header("authorization") || (c.req.method !== "GET" && (!origin || !origins.has(origin)))))
@@ -472,6 +485,7 @@ export function createService(
       return c.json({ error: "Skill previews are available through POST only" }, 403);
     if (c.req.method !== "GET" && !mcp && (!origin || !origins.has(origin)))
       return c.json({ error: "Exact local Origin required" }, 403);
+    if(c.req.method!=="GET")initialControl.set(c.req.raw,new Map(store.projects().map(p=>[p.id,control.stamp(p.id,c.req.header("x-agentklar-bridge-id"),currentLead(p.id),true)])));
     await next();
   });
   app.get("/api/health", (c) => c.json({ ok: true }));
@@ -579,6 +593,190 @@ export function createService(
     return c.json({ projectId, runs, nextCursor: hasMore ? nextCursor : null, hasMore,
       ...(remoteRows.length || remoteCursorText !== null ? { remoteDispatches, remoteDispatchesHasMore, remoteNextCursor: remoteDispatchesHasMore ? remoteNextCursor : null } : {}) });
   });
+  app.use("/api/projects/:id/control/*", async (c, next) => {
+    const id = c.req.param("id");
+    if (!z.uuid().safeParse(id).success) return c.json({
+      error: "Invalid project ID"
+    }, 400);
+    if (!store.projects().some(p => p.id === id)) return c.json({
+      error: "Project not found"
+    }, 404);
+    if (c.req.method === "GET") {
+      const url = new URL(c.req.url);
+      const keys = [...url.searchParams.keys()];
+      if (new Set(keys).size !== keys.length || keys.some(k => !(["offset", "limit"].includes(k) && c.req.path.endsWith("/packets")))) return c.json({
+        error: "Invalid handoff query"
+      }, 400);
+    }
+    return next();
+  });
+  const controlStatus = (id: string) => control.status(id, currentLead(id)?publicLead(currentLead(id)!): null);
+  app.get("/api/projects/:id/control", c => {
+    if (!z.uuid().safeParse(c.req.param("id")).success || new URL(c.req.url).search) return c.json({
+      error: "Invalid project ID or control query"
+    }, 400);
+    if (!store.projects().some(p => p.id === c.req.param("id"))) return c.json({
+      error: "Project not found"
+    }, 404);
+    return c.json(controlStatus(c.req.param("id")));
+  });
+  app.put("/api/projects/:id/control", async c => {
+    const id = c.req.param("id");
+    if (!z.uuid().safeParse(id).success) return c.json({
+      error: "Invalid project ID"
+    }, 400);
+    if (!store.projects().some(p => p.id === id)) return c.json({
+      error: "Project not found"
+    }, 404);
+    const input = z.object({
+      mode: z.enum(["advisory", "coordinated"]),
+      expectedRevision: z.number().int().nonnegative()
+    }).strict().safeParse(await c.req.json().catch (() => null));
+    if (!input.success) return c.json({
+      error: "Invalid control policy"
+    }, 400);
+    controlStatus(id);
+    control.policy(id, input.data.mode, input.data.expectedRevision);
+    return c.json(controlStatus(id));
+  });
+  app.post("/api/projects/:id/control/recover", async c => {
+    const id = c.req.param("id");
+    if (!store.projects().some(p => p.id === id)) return c.json({
+      error: "Project not found"
+    }, 404);
+    const input = z.object({
+      expectedRevision: z.number().int().nonnegative(),
+      observedClaimId: z.uuid().nullable()
+    }).strict().safeParse(await c.req.json().catch (() => null));
+    if (!input.success) return c.json({
+      error: "Invalid observed control state"
+    }, 400);
+    const status = controlStatus(id);
+    if (status.revision !== input.data.expectedRevision || (status.lead?.claimId ?? null) !== input.data.observedClaimId) throw new ControlError("Control changed. Read the current state before recovering.");
+    leads.delete(id);
+    control.bump(id);
+    return c.json(controlStatus(id));
+  });
+  app.post("/api/projects/:id/control/prepare", async c => {
+    const id = c.req.param("id");
+    if (!store.projects().some(p => p.id === id)) return c.json({
+      error: "Project not found"
+    }, 404);
+    if (!z.object({
+    }).strict().safeParse(await c.req.json().catch (() => null)).success) return c.json({
+      error: "Expected empty preparation input"
+    }, 400);
+    const local = store.runs().filter(r => r.projectId === id);
+    const remote = peers.list().filter(r => r.projectId === id);
+    const active = (state: string) => ["running", "needs_attention"].includes(state);
+    local.sort((a, b) => Number(active(b.state))-Number(active(a.state)));
+    remote.sort((a, b) => Number(b.connection === "unknown" || active(b.lastKnownRun?.state ?? ""))-Number(a.connection === "unknown" || active(a.lastKnownRun?.state ?? "")));
+    const status = controlStatus(id);
+    return c.json(control.prepare({
+      projectId: id,
+      context: store.context(id),
+      control: status,
+      observedLead: status.lead,
+      work: {
+        local: local.slice(0, 10).map(r => ({
+          id: r.id,
+          state: r.state,
+          harness: r.harness || "codex",
+          updatedAt: r.updatedAt,
+          workspace: r.workspace? {
+            kind: r.workspace.kind,
+            path: r.workspace.path?.slice(0, 300),
+            pathTruncated: (r.workspace.path?.length ?? 0)>300
+          }
+          : undefined,
+          followUp: r.followUp
+        })),
+        remote: remote.slice(0, 10).map(r => ({
+          id: r.id,
+          ownerDeviceId: r.ownerDeviceId,
+          ownerRunId: r.ownerRunId,
+          state: r.lastKnownRun?.state ?? null,
+          lastObservedAt: r.lastObservedAt,
+          connection: r.connection
+        })),
+        totalLocal: local.length,
+        totalRemote: remote.length,
+        pointers: {
+          context: `/api/projects/${id}/context`,
+          runs: `/api/projects/${id}/runs`,
+          remoteRuns: `/api/projects/${id}/runs?remoteLimit=20`
+        }
+      }
+    }));
+  });
+  app.get("/api/projects/:id/control/packets", c => {
+    const parsed = z.object({
+      offset: z.coerce.number().int().min(0).max(Number.MAX_SAFE_INTEGER).default(0),
+      limit: z.coerce.number().int().min(1).max(10).default(10)
+    }).safeParse(c.req.query());
+    if (!parsed.success) return c.json({
+      error: "Invalid handoff page"
+    }, 400);
+    return c.json(control.list(c.req.param("id"), parsed.data.offset, parsed.data.limit));
+  });
+  app.get("/api/projects/:id/control/packets/:packetId", c => c.json({
+    ...control.read(c.req.param("id"), c.req.param("packetId")),
+    receipt: control.receipt(c.req.param("packetId"))
+  }));
+  app.post("/api/projects/:id/control/packets/:packetId/accept", async c => {
+    if (stopping || quiesced) return c.json({
+      error: "Service is stopping"
+    }, 503);
+    if (c.req.header("authorization") !== `Bearer ${bearer}`) return c.json({
+      error: "Receiving MCP bridge required"
+    }, 403);
+    const bridgeId = c.req.header("x-agentklar-bridge-id");
+    if (!bridgeId || !/^[a-f0-9]{64}$/.test(bridgeId)) return c.json({
+      error: "MCP bridge identity required"
+    }, 400);
+    const input = z.object({
+      requestId: z.uuid(),
+      expectedDigest: z.string().regex(/^[a-f0-9]{64}$/),
+      expectedContextRevision: z.number().int().nonnegative(),
+      expectedControlRevision: z.number().int().nonnegative()
+    }).strict().safeParse(await c.req.json().catch (() => null));
+    if (!input.success) return c.json({
+      error: "Invalid handoff acceptance"
+    }, 400);
+    const id = c.req.param("id");
+    const status = controlStatus(id);
+    const wall = leadWallNow(),
+    seen = new Date(wall).toISOString();
+    const source = sourceFromHeader(c.req.header("x-agentklar-mcp-client"));
+    const lead = {
+      claimId: randomUUID(),
+      projectId: id,
+      clientName: source?.kind === "mcp"?source.clientName: null,
+      ...(source?.kind === "mcp" && source.clientVersion? {
+        clientVersion: source.clientVersion
+      }
+      : {
+      }),
+      claimedAt: seen,
+      lastSeenAt: seen,
+      expiresAt: new Date(wall+leadLeaseMs).toISOString()
+    };
+    if (!control.hasRequest(input.data.requestId) && (!currentLead(id) || currentLead(id)!.bridgeId !== bridgeId)) {
+      if ([...leads.keys()].filter(k => currentLead(k)?.bridgeId === bridgeId).length>=16) return c.json({
+        error: "One MCP bridge can lead at most 16 projects"
+      }, 409);
+    }
+    const receipt = control.accept(id, c.req.param("packetId"), bridgeId, input.data, store.context(id).revision, status, lead);
+    if (receipt.lead.claimId === lead.claimId)leads.set(id, {
+      ...lead,
+      bridgeId,
+      deadline: leadNow()+leadLeaseMs
+    });
+    return c.json({
+      receipt,
+      control: controlStatus(id)
+    });
+  });
   app.get("/api/projects/:id/lead", (c) => {
     c.header("Cache-Control", "no-store");
     const projectId = c.req.param("id");
@@ -601,10 +799,11 @@ export function createService(
     if (stopping) return c.json({ error: "Local service is stopping" }, 503);
     const current = currentLead(projectId);
     const { action } = parsed.data;
+    if(action === "takeover" && controlStatus(projectId).mode === "coordinated")return c.json({error:"Accept a reviewed handoff to take over a coordinated project."},409);
     if (action === "release") {
       if (!current || current.bridgeId !== bridgeId || current.claimId !== parsed.data.observedClaimId)
         return c.json({ error: "Lead claim changed", ...leadReply(projectId) }, 409);
-      leads.delete(projectId);
+      leads.delete(projectId); control.bump(projectId);
       return c.json(leadReply(projectId));
     }
     if (action === "claim" && current && current.bridgeId !== bridgeId)
@@ -624,6 +823,7 @@ export function createService(
           ...(source?.kind === "mcp" && source.clientVersion ? { clientVersion: source.clientVersion } : {}),
           claimedAt: seen, lastSeenAt: seen, expiresAt: new Date(wall + leadLeaseMs).toISOString(),
           bridgeId, deadline: clock + leadLeaseMs };
+    if (!(action === "claim" && current)) control.bump(projectId);
     leads.set(projectId, lead);
     return c.json(leadReply(projectId));
   });
@@ -631,17 +831,18 @@ export function createService(
     c.header("Cache-Control", "no-store");
     if (stopping) return c.json({ error: "Local service is stopping" }, 503);
     if (!matches(getCookie(c, `agentklar_session_${port}`), session) ||
-        matches(c.req.header("authorization"), `Bearer ${bearer}`))
+        !!c.req.header("authorization"))
       return c.json({ error: "Local UI required" }, 403);
     const projectId = c.req.param("id");
     if (!z.uuid().safeParse(projectId).success) return c.json({ error: "Invalid project ID" }, 400);
     if (!store.projects().some((p) => p.id === projectId)) return c.json({ error: "Project not found" }, 404);
+    if(controlStatus(projectId).mode==="coordinated")return c.json({error:"Recover coordinated control using its current control revision."},409);
     const parsed = z.object({ observedClaimId: z.uuid() }).strict().safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: "Provide the observed lead claim ID" }, 400);
     if (stopping) return c.json({ error: "Local service is stopping" }, 503);
     if (currentLead(projectId)?.claimId !== parsed.data.observedClaimId)
       return c.json({ error: "Lead claim changed", ...leadReply(projectId) }, 409);
-    leads.delete(projectId);
+    leads.delete(projectId); control.bump(projectId);
     return c.json(leadReply(projectId));
   });
   app.post("/api/leads/renew", async (c) => {
@@ -824,6 +1025,8 @@ export function createService(
         { error: parsed.error.issues[0]?.message || "Invalid project context" },
         400,
       );
+    const stamp = controlStamp(c,id);
+    control.check(id,stamp,currentLead(id));
     const { expectedRevision, ...text } = parsed.data;
     const context = {
       projectId: id,
@@ -867,6 +1070,7 @@ export function createService(
       peers: peers.settings().peers,
       remoteDispatches: peers.list(),
       harnesses: selectedHarnesses(),
+      controls: Object.fromEntries(store.projects().map(p=>[p.id,control.status(p.id,currentLead(p.id)?publicLead(currentLead(p.id)!):null)])),
       leads: Object.fromEntries(store.projects().flatMap((p) => {
         const lead = currentLead(p.id);
         return lead ? [[p.id, publicLead(lead)]] : [];
@@ -977,6 +1181,7 @@ export function createService(
       }
       return c.json(priorDispatch);
     }
+    const stamp = controlStamp(c,p.id);
     const remoteRole = data.roleId ? p.roles.find((item) => item.id === data.roleId) : undefined;
     if (data.roleId && !remoteRole) return c.json({ error: "Role not found" }, 400);
     if (data.followUp && data.readOnly !== (data.followUp.kind === "review"))
@@ -992,6 +1197,7 @@ export function createService(
       const existing = local || remote;
       if (existing && existing.launchHash !== launchHash) throw new PeerError("Idempotency key already used for a different task", 409);
       if (existing) return local ? compactRun(local) : remote;
+      control.check(p.id,stamp,currentLead(p.id));
       const latest = store.projects().find(project => project.id === p.id);
       if (!latest || JSON.stringify(latest) !== JSON.stringify(p)) throw new PeerError("Project settings changed during selection. Start again.", 409);
     };
@@ -1033,6 +1239,7 @@ export function createService(
       const model = automaticRouting?.selected.model ?? data.model ?? remoteRole?.model ?? (!remoteRole ? source?.dispatch.lastKnownRun?.effectiveModel ?? source?.dispatch.lastKnownRun?.model : undefined);
       const prompt = composeWorkerPrompt({ prompt: data.prompt, ...(remoteRole ? { roleSnapshot: remoteRole } : {}), ...(data.includeProjectContext ? { contextSnapshot: store.context(p.id) } : {}) });
       if (prompt.length > 32000) return c.json({ error: "Remote task and project context exceed the supported prompt size. Shorten the task or omit project context." }, 400);
+      control.check(p.id,stamp,currentLead(p.id));
       return c.json(await peers.start({ peerId: mappingId, idempotencyKey: data.idempotencyKey, baseCommit,
         task: { prompt, harness, model, readOnly: data.readOnly, includeProjectContext: false,
           ...(source && data.followUp ? { followUp: { runId: source.dispatch.ownerRunId!, kind: data.followUp.kind } } : {}),
@@ -1245,6 +1452,7 @@ export function createService(
         },
       };
       const launch = (ready: Run) => {
+        control.check(p.id,stamp,currentLead(p.id));
         const worker = factory(command, ready, ready.workspace?.path || p.path, callbacks, openCodeEnv);
         workers.set(r.id, worker);
         return worker;
@@ -1390,9 +1598,11 @@ export function createService(
       : c.json({ error: "Run not found" }, 404);
   });
   app.post("/api/runs/:id/stop", async (c) => {
-    if (peers.list().some((item) => item.id === c.req.param("id"))) return c.json(await peers.cancel(c.req.param("id")));
+    const dispatch = peers.list().find(item=>item.id===c.req.param("id"));
+    if (dispatch) { controlStamp(c,dispatch.projectId); return c.json(await peers.cancel(dispatch.id)); }
     const r = store.run(c.req.param("id"));
     if (!r) return c.json({ error: "Run not found" }, 404);
+    controlStamp(c,r.projectId);
     workers.get(r.id)?.stop();
     if (["running", "needs_attention"].includes(r.state)) {
       store.saveRun({
@@ -1445,11 +1655,11 @@ export function createService(
   });
   app.get("/api/peers/dispatch", c => c.json({ dispatches: peers.list() }));
   app.post("/api/peers/dispatch", async c => {
-    try { return c.json(await peers.start(await c.req.json())); }
+    try { const data = await c.req.json(); const mapping=peers.settings().peers.find(item=>item.id===data.peerId); if(!mapping)return c.json({error:"Peer mapping not found"},404); if(!peers.existing(mapping.projectId,data.idempotencyKey)){const stamp=controlStamp(c,mapping.projectId); control.check(mapping.projectId,stamp,currentLead(mapping.projectId));} return c.json(await peers.start(data)); }
     catch (e) { if (e instanceof z.ZodError) return c.json({ error: "Invalid remote task." }, 400); throw e; }
   });
   app.post("/api/peers/dispatch/:id/status", async c => c.json(await peers.status(c.req.param("id"))));
-  app.post("/api/peers/dispatch/:id/cancel", async c => c.json(await peers.cancel(c.req.param("id"))));
+  app.post("/api/peers/dispatch/:id/cancel", async c => {const d=peers.list().find(item=>item.id===c.req.param("id"));if(!d)return c.json({error:"Dispatch not found"},404);controlStamp(c,d.projectId);return c.json(await peers.cancel(d.id));});
   let closing: Promise<void> | undefined;
   return {
     app,

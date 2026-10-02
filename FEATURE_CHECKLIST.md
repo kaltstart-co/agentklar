@@ -32,6 +32,8 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 - [x] Project run discovery
 - [x] Launch source labels
 - [x] Active lead presence (advisory)
+- [x] Main-harness handoff
+- [x] Optional coordinated control
 - [x] Compact status
 - [x] Run usage
 - [x] Task cancellation
@@ -67,7 +69,6 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 
 ## Next
 
-- [ ] Control transfer
 - [ ] Gemini and Cursor workers
 - [ ] ZCode worker
 - [ ] Antigravity worker

@@ -1,3 +1,4 @@
+import { ProjectHandoff } from "./ProjectHandoff.js";
 import { useEffect, useRef, useState } from "react";
 import { NativeSetupForm } from "./NativeSetupForm.js";
 import { NativeInstallations } from "./NativeInstallations.js";
@@ -487,7 +488,7 @@ export function App() {
           : "This hosted page is a setup guide. Run the local app to see projects, workers and permission requests."}
       </p>
       <p className="hint">Requires Node 24 on macOS or Linux. Install the pinned beta package:</p>
-      <pre>npm install -g https://github.com/kaltstart-co/agentklar/releases/download/v0.1.0-beta.25/agentklar-0.1.0-beta.25.tgz{"\n"}agentklar start</pre>
+      <pre>npm install -g https://github.com/kaltstart-co/agentklar/releases/download/v0.1.0-beta.26/agentklar-0.1.0-beta.26.tgz{"\n"}agentklar start</pre>
       <p>
         Open the setup link from the terminal, then use{" "}
         <code>http://127.0.0.1:4317</code>.
@@ -638,11 +639,12 @@ export function App() {
                 <>
                   <p className="hint instruction-path">
                     {lead ? `Lead connected: ${lead.clientName || "Unknown MCP client"} · MCP client report · Last seen ${time(lead.lastSeenAt)}.` : "No lead connected."}
-                    {lead && <Button size="xs" variant="subtle" ml="xs" disabled={busy}
+                    {lead && snapshot.controls?.[project.id]?.mode !== "coordinated" && <Button size="xs" variant="subtle" ml="xs" disabled={busy}
                       onClick={() => void act(async () => {
                         await api(`/projects/${project.id}/lead`, { observedClaimId: lead.claimId }, "DELETE");
                       })}>Clear lead</Button>}
                   </p>
+                  <ProjectHandoff key={`handoff-${project.id}`} projectId={project.id} connected={connected} request={api} onSelectRun={setRunId} ownerLabel={id => snapshot.peers?.find(peer => peer.deviceId === id)?.label || (snapshot.device?.id === id ? snapshot.device.label : "Other computer")} />
                   <div className="work-toolbar">
                     <TextInput
                       id="task-search"
