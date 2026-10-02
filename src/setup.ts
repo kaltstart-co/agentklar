@@ -8,7 +8,7 @@ import type { DatabaseSync } from "node:sqlite";
 import type { Project, SetupHarness, SetupEntry, SetupStatus, SetupPreview, SetupChange } from "./contracts.ts";
 import { projectRootIdentity, rootStamp } from "./project-root.ts";
 import { applyEdits, getNodeValue, modify, parseTree, type Node as JsonNode, type ParseError } from "jsonc-parser";
-import type { OpenCodeSetupEntry } from "./contracts.ts";
+import type { OpenCodeSetupEntry, AntigravitySetupEntry } from "./contracts.ts";
 
 export class SetupError extends Error {
   constructor(message: string, public status: 400 | 404 | 409 | 422 | 503 = 422) { super(message); }
@@ -61,6 +61,26 @@ function configRead(path: string): { text: string | null; fingerprint: string } 
     if ((e as NodeJS.ErrnoException).code === "ENOENT") return { text: null, fingerprint: hash([path, null]) };
     throw new SetupError("Native configuration cannot be read safely. Use native MCP settings to inspect it.");
   } finally { if (fd !== undefined) closeSync(fd); }
+}
+function antigravityConfig(text: string | null): Record<string, unknown> {
+  if (text === null) return {};
+  const errors: ParseError[] = [];
+  const tree = parseTree(text, errors, { disallowComments: true, allowTrailingComma: false });
+  if (errors.length || !tree || tree.type !== "object") throw new SetupError("Antigravity MCP JSON is unsupported. Inspect native MCP settings.");
+  function inspect(node: JsonNode) {
+    if (node.type === "object") {
+      const keys = new Set<string>();
+      for (const property of node.children ?? []) {
+        const key = String(getNodeValue(property.children![0]));
+        if (keys.has(key)) throw new SetupError("Antigravity MCP JSON has duplicate keys.");
+        keys.add(key); inspect(property.children![1]);
+      }
+    } else for (const child of node.children ?? []) inspect(child);
+  }
+  inspect(tree);
+  const config = nativeObject(getNodeValue(tree)), servers = optionalObject(config.mcpServers);
+  if (Object.hasOwn(servers, "agentklar")) nativeObject(servers.agentklar);
+  return config;
 }
 function museSettings(text: string | null): Record<string, unknown> {
   if (text === null) return { schema_version: 1 };
@@ -262,7 +282,7 @@ export function nativeSetupCommand(command: string, args: string[], cwd: string,
 }
 type ReadState = { target: string; targetFingerprint: string; parentIdentity: string | null; fingerprint: string; entry: unknown | null; entryHash: string | null; root: string; shadow: boolean };
 type SavedPreview = SetupPreview & Omit<ReadState, "entry"> & { expires: number };
-type SavedChange = SetupChange & { target: string; entry: SetupEntry | OpenCodeSetupEntry; entryHash: string; root: string; projectPath: string };
+type SavedChange = SetupChange & { target: string; entry: SetupEntry | OpenCodeSetupEntry | AntigravitySetupEntry; entryHash: string; root: string; projectPath: string };
 const changeMetadata = ({ target, entry, entryHash, root, projectPath, ...change }: SavedChange): SetupChange => change;
 export class NativeSetup {
   private env: NodeJS.ProcessEnv;
@@ -274,7 +294,7 @@ export class NativeSetup {
   private abort = new AbortController();
   readonly entry: SetupEntry;
   private neutral: string;
-  constructor(private db: DatabaseSync, private home: string, private port: number, private commands: Record<"codex" | "claude", string | null> & { muse?: string | null; opencode?: string | null }, private options: NativeSetupOptions = {}) {
+  constructor(private db: DatabaseSync, private home: string, private port: number, private commands: Record<"codex" | "claude", string | null> & { muse?: string | null; opencode?: string | null; antigravity?: string | null }, private options: NativeSetupOptions = {}) {
     this.env = { ...(options.env ?? process.env) };
     const source = import.meta.url.endsWith(".ts");
     this.entry = { type: "stdio", command: process.execPath, args: source
@@ -299,6 +319,10 @@ export class NativeSetup {
   undo(project: Project, harness: SetupHarness, id: string) { return this.tracked(() => this.undoOperation(project, harness, id)); }
   private target(harness: SetupHarness) {
     const userHome = this.env.HOME || homedir();
+    if (harness === "antigravity") {
+      if (!isAbsolute(userHome) || canonicalHome(userHome) !== userHome) throw new SetupError("Antigravity native home must be an absolute real folder.");
+      return join(userHome, ".gemini", "config", "mcp_config.json");
+    }
     if (harness === "opencode") {
       const configHome = this.env.XDG_CONFIG_HOME || join(userHome, ".config");
       if (!isAbsolute(configHome)) throw new SetupError("OpenCode config home must be an absolute path.");
@@ -336,14 +360,14 @@ export class NativeSetup {
     }
     if (harness === "muse" && Object.values(this.entry.env).some((value) => value.includes("${"))) throw new SetupError("Muse would expand a variable in the AgentKlar data path. Use a data home without ${ in its name.");
     if (harness === "opencode" && [...Object.values(this.openCodeEntry().environment), ...this.openCodeEntry().command].some((value) => substitution.test(value))) throw new SetupError("OpenCode would expand a variable in the AgentKlar bridge path. Use a path without native variable markers.");
-    if (!this.commands[harness]) throw new SetupError(`Install ${harness === "codex" ? "Codex" : harness === "muse" ? "Muse" : harness === "opencode" ? "OpenCode" : "Claude Code"} through its native setup first.`);
+    if (!this.commands[harness]) throw new SetupError(`Install ${harness === "codex" ? "Codex" : harness === "muse" ? "Muse" : harness === "opencode" ? "OpenCode" : harness === "antigravity" ? "Antigravity CLI" : "Claude Code"} through its native setup first.`);
   }
   private openCodeEntry(): OpenCodeSetupEntry { return { type: "local", command: [this.entry.command, ...this.entry.args], environment: this.entry.env }; }
-  private desired(harness: SetupHarness): SetupEntry | OpenCodeSetupEntry { return harness === "opencode" ? this.openCodeEntry() : this.entry; }
+  private desired(harness: SetupHarness): SetupEntry | OpenCodeSetupEntry | AntigravitySetupEntry { return harness === "opencode" ? this.openCodeEntry() : harness === "antigravity" ? {command:this.entry.command,args:this.entry.args,env:this.entry.env,disabled:false} : this.entry; }
   private async command(harness: SetupHarness, args: string[], project: Project) {
     if (this.closing) throw new SetupError("Service is shutting down.", 503);
     this.supported(harness);
-    const promise = nativeSetupCommand(this.commands[harness]!, args, harness === "codex" ? this.neutral : project.path, this.env, this.options, this.abort.signal);
+    const promise = nativeSetupCommand(this.commands[harness]!, args, harness === "codex" || harness === "antigravity" ? this.neutral : project.path, this.env, this.options, this.abort.signal);
     this.active.add(promise); try { return await promise; } finally { this.active.delete(promise); }
   }
   private async codexConfig(project: Project) {
@@ -394,9 +418,16 @@ export class NativeSetup {
   private async read(project: Project, harness: SetupHarness): Promise<ReadState> {
     if (this.closing) throw new SetupError("Service is shutting down.", 503);
     this.supported(harness);
-    const root = projectRoot(project), target = this.target(harness), parentIdentity = harness === "muse" || harness === "opencode" ? museParentIdentity(target, harness === "opencode" ? "OpenCode" : "Muse") : null, before = configRead(target);
+    const root = projectRoot(project), target = this.target(harness), parentIdentity = harness === "muse" || harness === "opencode" || harness === "antigravity" ? museParentIdentity(target, harness === "opencode" ? "OpenCode" : harness === "antigravity" ? "Antigravity" : "Muse") : null, before = configRead(target);
     let entry: unknown | null, shadow = false, provenance: unknown = null;
-    if (harness === "opencode") {
+    if (harness === "antigravity") {
+      if (dirname(museLayers(project.path)[0]!) !== project.path) throw new SetupError("Antigravity setup for Git projects requires the registered repository root. Register that root folder and preview setup there; parent workspace loading is not verified.");
+      const workspacePath = join(project.path, ".agents", "mcp_config.json"), workspace = configRead(workspacePath);
+      museParentIdentity(workspacePath, "Antigravity");
+      entry = optionalObject(antigravityConfig(before.text).mcpServers).agentklar ?? null;
+      shadow = Object.hasOwn(optionalObject(antigravityConfig(workspace.text).mcpServers), "agentklar");
+      provenance = workspace.fingerprint;
+    } else if (harness === "opencode") {
       const paths = openCodeLayers(project.path, this.env, target), fingerprints: string[] = [];
       for (const path of paths) {
         museParentIdentity(path, "OpenCode");
@@ -467,8 +498,9 @@ export class NativeSetup {
       // Fingerprint every layer, including parent, managed and system settings.
       provenance = config.layers.map((raw) => { const layer = record(raw); return [layer.name, layer.version]; });
     }
-    if (configRead(target).fingerprint !== before.fingerprint || projectRoot(project) !== root || ((harness === "muse" || harness === "opencode") && museParentIdentity(target, harness === "opencode" ? "OpenCode" : "Muse") !== parentIdentity)) throw new SetupError("Native settings changed while checking. Refresh status.", 409);
-    const projectConfig = harness === "claude" ? configRead(join(project.path, ".mcp.json")).fingerprint : harness === "muse" ? museLayers(project.path).map((path) => configRead(path).fingerprint) : harness === "opencode" ? openCodeLayers(project.path, this.env, target).map((path) => configRead(path).fingerprint) : this.codexProjectFingerprint(project);
+    if (configRead(target).fingerprint !== before.fingerprint || projectRoot(project) !== root || ((harness === "muse" || harness === "opencode" || harness === "antigravity") && museParentIdentity(target, harness === "opencode" ? "OpenCode" : harness === "antigravity" ? "Antigravity" : "Muse") !== parentIdentity)) throw new SetupError("Native settings changed while checking. Refresh status.", 409);
+    const projectConfig = harness === "antigravity" ? configRead(join(project.path,".agents","mcp_config.json")).fingerprint : harness === "claude" ? configRead(join(project.path, ".mcp.json")).fingerprint : harness === "muse" ? museLayers(project.path).map((path) => configRead(path).fingerprint) : harness === "opencode" ? openCodeLayers(project.path, this.env, target).map((path) => configRead(path).fingerprint) : this.codexProjectFingerprint(project);
+    if (harness === "antigravity" && projectConfig !== provenance) throw new SetupError("Antigravity workspace MCP config changed while checking.",409);
     if (harness === "muse" && hash(projectConfig) !== hash((provenance as [string[], string[]])[1])) throw new SetupError("Muse project MCP settings changed while checking. Refresh status.", 409);
     if (harness === "opencode" && (hash(projectConfig) !== hash((provenance as [string[], string[]])[1]) || (this.env.OPENCODE_CONFIG_CONTENT ? hash(this.env.OPENCODE_CONFIG_CONTENT) : null) !== (provenance as [string[], string[], string | null])[2])) throw new SetupError("OpenCode settings changed while checking. Refresh status.", 409);
     return { target, targetFingerprint: before.fingerprint, parentIdentity, fingerprint: hash([before.fingerprint, parentIdentity, projectConfig, provenance]), entry, entryHash: entry === null ? null : entryHash(entry), root, shadow };
@@ -478,6 +510,7 @@ export class NativeSetup {
     return configRead(join(project.path, ".codex", "config.toml")).fingerprint;
   }
   private exact(harness: SetupHarness, value: unknown) {
+    if (harness === "antigravity") return entryHash(value) === entryHash(this.desired(harness));
     if (harness === "opencode") return entryHash(value) === entryHash(this.openCodeEntry());
     if (harness === "claude" || harness === "muse") return entryHash(value) === entryHash(this.entry);
     return entryHash(value) === entryHash({ command: this.entry.command, args: this.entry.args, env: this.entry.env });
@@ -493,7 +526,7 @@ export class NativeSetup {
       const current = await this.read(project, harness);
       const configured = current.entry !== null && this.exact(harness, current.entry);
       const canUndo = !!change && ["applied", "interrupted"].includes(change.state) && (change.operation === "apply" || change.state === "interrupted") && change.target === current.target && change.root === current.root && change.entryHash === current.entryHash && !current.shadow;
-      return { ...base, canUndo, status: current.shadow || (current.entry !== null && !configured) ? "conflict" : configured ? "configured" : "missing", message: current.shadow ? "Another native scope defines agentklar. Resolve it in native MCP settings before using setup here." : configured ? harness === "opencode" ? "AgentKlar has a local OpenCode config entry. Start or restart OpenCode to load it. Runtime and remote settings are not verified; native trust and permissions still apply." : "AgentKlar entry is configured. Start or restart your native session to load it. Native trust and permissions still apply." : current.entry !== null ? "A different agentklar entry exists. Resolve it in native MCP settings; AgentKlar will not overwrite it." : "AgentKlar has no entry in this native scope." };
+      return { ...base, canUndo, status: current.shadow || (current.entry !== null && !configured) ? "conflict" : configured ? "configured" : "missing", message: current.shadow ? "Another native scope defines agentklar. Resolve it in native MCP settings before using setup here." : configured ? harness === "antigravity" ? "AgentKlar MCP entry is configured for native Antigravity CLI. Start or restart agy to load it. Worker execution is unavailable; native trust and permissions still apply." : harness === "opencode" ? "AgentKlar has a local OpenCode config entry. Start or restart OpenCode to load it. Runtime and remote settings are not verified; native trust and permissions still apply." : "AgentKlar entry is configured. Start or restart your native session to load it. Native trust and permissions still apply." : current.entry !== null ? "A different agentklar entry exists. Resolve it in native MCP settings; AgentKlar will not overwrite it." : "AgentKlar has no entry in this native scope." };
     } catch (e) { return { ...base, status: "unavailable", message: e instanceof SetupError ? e.message : "Native MCP status is unavailable." }; }
   }
   private async previewOperation(project: Project, harness: SetupHarness): Promise<SetupPreview> {
@@ -510,7 +543,7 @@ export class NativeSetup {
   }
   private addArgs(harness: SetupHarness) {
     const env = Object.entries(this.entry.env).flatMap(([key, value]) => ["--env", `${key}=${value}`]);
-    return harness === "codex" ? ["mcp", "add", "agentklar", ...env, "--", this.entry.command, ...this.entry.args] : ["mcp", "add", "--scope", "local", "--transport", "stdio", "agentklar", ...env, "--", this.entry.command, ...this.entry.args];
+    return harness === "antigravity" ? ["mcp","add",...env,"agentklar","--",this.entry.command,...this.entry.args] : harness === "codex" ? ["mcp", "add", "agentklar", ...env, "--", this.entry.command, ...this.entry.args] : ["mcp", "add", "--scope", "local", "--transport", "stdio", "agentklar", ...env, "--", this.entry.command, ...this.entry.args];
   }
   private async exclusive<T>(action: () => Promise<T>) {
     // ponytail: native writes share one lock across this local service; use per-config locks if throughput matters.
@@ -554,7 +587,7 @@ export class NativeSetup {
         if (harness === "muse") museWrite(current.target, current.targetFingerprint, current.parentIdentity!, "undo", change.entry as SetupEntry);
         else if (harness === "opencode") openCodeWrite(current.target, current.targetFingerprint, current.parentIdentity!, "undo", change.entry as OpenCodeSetupEntry);
         else {
-          const result = await this.command(harness, harness === "codex" ? ["mcp", "remove", "agentklar"] : ["mcp", "remove", "--scope", "local", "agentklar"], project);
+          const result = await this.command(harness, harness === "codex" || harness === "antigravity" ? ["mcp", "remove", "agentklar"] : ["mcp", "remove", "--scope", "local", "agentklar"], project);
           if (result.code !== 0) throw new SetupError("Native removal did not finish successfully. Refresh status and inspect native MCP settings.", 503);
         }
         const after = await this.read(project, harness);

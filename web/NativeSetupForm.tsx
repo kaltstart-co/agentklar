@@ -11,6 +11,7 @@ async function request<T>(projectId: string, harness: SetupHarness, operation = 
   return data;
 }
 export function NativeSetupForm({ projectId, connected }: { projectId: string; connected: boolean }) {
+  const names = { codex: "Codex", claude: "Claude Code", muse: "Muse", opencode: "OpenCode", antigravity: "Antigravity" };
   const [harness, setHarness] = useState<SetupHarness>("codex");
   const [status, setStatus] = useState<SetupStatus | null>(null);
   const [preview, setPreview] = useState<SetupPreview | null>(null);
@@ -58,8 +59,9 @@ export function NativeSetupForm({ projectId, connected }: { projectId: string; c
   }
   return <Stack gap="sm">
     <Select label="Native harness" value={harness} allowDeselect={false} disabled={Boolean(busy) && busy !== "status"}
-      data={[{ value: "codex", label: "Codex" }, { value: "claude", label: "Claude Code" }, { value: "muse", label: "Muse" }, { value: "opencode", label: "OpenCode" }]} onChange={(value) => setHarness(value as SetupHarness)} />
-    <p className="hint">{harness === "claude" ? "Local project scope · only this project's Claude Code sessions." : `User scope · available to your ${harness === "codex" ? "Codex" : harness === "muse" ? "Muse" : "OpenCode"} projects.`} Setup adds MCP access. Your native session keeps its trust and permission settings.</p>
+      data={[{ value: "codex", label: "Codex" }, { value: "claude", label: "Claude Code" }, { value: "muse", label: "Muse" }, { value: "opencode", label: "OpenCode" }, { value: "antigravity", label: "Antigravity (MCP host)" }]} onChange={(value) => setHarness(value as SetupHarness)} />
+    <p className="hint">{harness === "claude" ? "Local project scope · only this project's Claude Code sessions." : `User scope · available to your ${names[harness]} projects.`} Setup adds MCP access. Your native session keeps its trust and permission settings.</p>
+    {harness === "antigravity" && <p className="hint">Connects your native Antigravity session to AgentKlar. Start or restart agy to load the entry. Antigravity workers are unavailable.</p>}
     {harness === "opencode" && <p className="hint">Checks local config files. Restart OpenCode to load the entry.</p>}
     {status && <div aria-live="polite"><Badge color={status.status === "configured" ? "teal" : status.status === "conflict" ? "orange" : "gray"} variant="light">{status.status === "configured" ? "Entry configured" : status.status}</Badge><p className="hint">{status.message}</p></div>}
     {error && <Alert color="red">{error}</Alert>}
@@ -77,7 +79,7 @@ export function NativeSetupForm({ projectId, connected }: { projectId: string; c
       {preview.command && <pre>{preview.command}</pre>}
       <details><summary>AgentKlar entry</summary><pre>{JSON.stringify(preview.entry, null, 2)}</pre></details>
       <p className="hint">The bridge uses this service's data home and port. It reads the private local token file. No token is added to native settings.</p>
-      <Button mt="sm" disabled={!connected || Boolean(busy)} loading={busy === "apply"} onClick={() => void change("apply")}>Add to {harness === "codex" ? "Codex" : harness === "muse" ? "Muse" : harness === "opencode" ? "OpenCode" : "Claude Code"}</Button>
+      <Button mt="sm" disabled={!connected || Boolean(busy)} loading={busy === "apply"} onClick={() => void change("apply")}>Add to {names[harness]}</Button>
     </div>}
   </Stack>;
 }

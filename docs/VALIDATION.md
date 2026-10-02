@@ -310,3 +310,18 @@ Isolated service and browser fixtures verified full native request details, offe
 Focused tests cover source action persistence, definitive rejection requiring fresh review, revocation, bounded action history, concurrent acknowledgment versus rejection, callback failure and receipt recovery. A callback failure now appears in the owner's normal Work error without changing native run state. Real two-computer setup and Windows remain unverified. Antigravity remains discovery only, and the hosted dashboard cannot execute local agents.
 
 Final beta.23 checks passed: TypeScript, production build, all 177 tests, installed-package smoke exposing 23 MCP tools, and diff whitespace. Evidence: `/tmp/agentklar-beta23-release/`.
+
+
+## Claude native proof and Antigravity MCP setup — beta.24
+
+On this MacBook, Claude Code 2.1.284 bundled with Claude Desktop completed a read-only task through the installed native CLI and official SDK in an isolated project. It used the native Read tool to return an exact hidden nonce, recorded a session and effective `claude-haiku-4-5-20251001` model, and left the project unchanged. It finished in 8.1 seconds. Evidence: `/tmp/agentklar-claude-live-beta24/readonly-evidence.json`.
+
+A separate native Claude task completed in a verified native worktree. The trusted UI explicitly approved two Write requests and one Bash request for `node --test add.test.mjs`. Both expected files existed and an independent Node test passed. The original project stayed unchanged; the temporary service closed. Native completion and usage are recorded in `/tmp/agentklar-claude-live-beta24/write-evidence.json`. Approval screenshots were captured; no browser completion screenshot is claimed. These are narrow native workflow checks, not a benchmark or savings claim. Earlier sign-in-required observations describe the earlier process, not current authentication.
+
+The first write prompt ended with a text question and performed no actions. It failed the task check and is saved separately in `write-attempt-1.json`. One retry used a direct tool instruction and passed. These checks do not establish Claude Edit, follow-up sessions, every model, or Mac mini execution. Reported token totals include cache usage and do not establish billed cost.
+
+Antigravity `agy` MCP host setup passed native temporary-HOME tests and an actual browser cookie/Origin preview, apply and undo. The user entry was verified added and then removed. UI labels it an MCP host and keeps workers unavailable. At 320 pixels, page and scroll widths were both 320, with no browser errors. Evidence: `/tmp/agentklar-antigravity-ui-qa/configured.jpg` and `mobile-undone.jpg`. The temporary service/tab closed and viewport reset. Real native configuration was unchanged. Git projects must register their repository root; nested workspace parent loading remains unverified.
+
+Main-harness control transfer is planned in `docs/CONTROL_TRANSFER_PLAN.md`, not shipped. Real two-computer setup, complete account quotas and Antigravity worker permissions remain unfinished or unverified.
+
+Final beta.24 checks passed: TypeScript, production build, all 181 tests with zero skips, installed-package smoke exposing 23 MCP tools, and diff whitespace. Evidence: `/tmp/agentklar-beta24-release/`.

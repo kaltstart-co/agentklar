@@ -269,7 +269,7 @@ export function createService(
   const instructions = new Instructions(store.db);
   const skills = new ProjectSkills(store.db, home, skillOptions);
   const personalSkills: Project = { id: "__personal_skills__", name: "Personal skills", path: personalHome, preference: "balanced", roles: [], createdAt: "" };
-  const nativeSetup = new NativeSetup(store.db, home, port, { codex: nativeCommand, claude: claudeCommand, muse: museCommand, opencode: opencodeCommand }, setupOptions);
+  const nativeSetup = new NativeSetup(store.db, home, port, { codex: nativeCommand, claude: claudeCommand, muse: museCommand, opencode: opencodeCommand, antigravity: executable("agy") }, setupOptions);
   const catalogs = new CatalogCache(catalogReader, {
     codex: nativeCommand,
     claude: claudeCommand,
@@ -668,7 +668,7 @@ export function createService(
   app.get("/api/projects/:id/setup/:harness", async (c) => {
     const project = store.projects().find((p) => p.id === c.req.param("id"));
     if (!project) return c.json({ error: "Project not found" }, 404);
-    const harness = z.enum(["codex", "claude", "muse", "opencode"]).safeParse(c.req.param("harness"));
+    const harness = z.enum(["codex", "claude", "muse", "opencode", "antigravity"]).safeParse(c.req.param("harness"));
     if (!harness.success) return c.json({ error: "Unknown native setup harness" }, 400);
     c.header("Cache-Control", "no-store");
     return c.json(await nativeSetup.status(project, harness.data));
@@ -677,7 +677,7 @@ export function createService(
     app.post(`/api/projects/:id/setup/:harness/${operation}`, async (c) => {
       const project = store.projects().find((p) => p.id === c.req.param("id"));
       if (!project) return c.json({ error: "Project not found" }, 404);
-      const harness = z.enum(["codex", "claude", "muse", "opencode"]).safeParse(c.req.param("harness"));
+      const harness = z.enum(["codex", "claude", "muse", "opencode", "antigravity"]).safeParse(c.req.param("harness"));
       if (!harness.success) return c.json({ error: "Unknown native setup harness" }, 400);
       const schema = operation === "preview" ? z.object({}).strict() : operation === "apply" ? z.object({ previewId: z.uuid() }).strict() : z.object({ changeId: z.uuid() }).strict();
       const parsed = schema.safeParse(await c.req.json().catch(() => null));

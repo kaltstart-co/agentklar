@@ -487,7 +487,7 @@ export function App() {
           : "This hosted page is a setup guide. Run the local app to see projects, workers and permission requests."}
       </p>
       <p className="hint">Requires Node 24 on macOS or Linux. Install the pinned beta package:</p>
-      <pre>npm install -g https://github.com/kaltstart-co/agentklar/releases/download/v0.1.0-beta.23/agentklar-0.1.0-beta.23.tgz{"\n"}agentklar start</pre>
+      <pre>npm install -g https://github.com/kaltstart-co/agentklar/releases/download/v0.1.0-beta.24/agentklar-0.1.0-beta.24.tgz{"\n"}agentklar start</pre>
       <p>
         Open the setup link from the terminal, then use{" "}
         <code>http://127.0.0.1:4317</code>.
@@ -1323,7 +1323,7 @@ export function App() {
                 {connected && <NativeInstallations device={snapshot.device} request={api} />}
                 <Devices device={snapshot.device} projects={snapshot.projects} connected={connected} request={api} />
                 <h3>Native connection</h3>
-                {connected && project ? <NativeSetupForm key={project.id} projectId={project.id} connected={connected} /> : connected ? <p className="hint">Add or select a project to connect Codex, Claude Code, Muse, or OpenCode.</p> :
+                {connected && project ? <NativeSetupForm key={project.id} projectId={project.id} connected={connected} /> : connected ? <p className="hint">Add or select a project to connect Codex, Claude Code, Muse, OpenCode, or Antigravity.</p> :
                   <p className="hint">Open the local app and select a project. Settings can then check, preview and add the native connection. This hosted guide has no access to your computer.</p>}
                 <details><summary>Manual setup for other MCP hosts</summary><pre>{snippet}</pre></details>
                 <h3>Harnesses on this computer</h3>

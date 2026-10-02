@@ -24,6 +24,8 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 - [x] Background startup (macOS)
 - [x] Package install
 - [x] Codex delegation
+- [x] Claude delegation
+- [x] Antigravity MCP host setup
 - [x] Native approvals
 - [x] Shared remote human approvals
 - [x] Run history
@@ -61,7 +63,6 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 
 ## In progress
 
-- [ ] Claude delegation
 - [ ] Complete account quotas
 
 ## Next
