@@ -22,6 +22,7 @@ import { isAbsolute, join } from "node:path";
 import { homedir } from "node:os";
 import { deviceSettings } from "./devices.ts";
 import { composeWorkerPrompt } from "./prompt.ts";
+import { Changes, ChangeError, type ChangePacket, type ChangeApply } from "./changes.ts";
 import { Store } from "./store.ts";
 import { harnesses, executable } from "./harnesses.ts";
 import { NativeWorker, type NativeCallbacks } from "./native.ts";
@@ -207,6 +208,50 @@ export function createService(
       ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
     return { status: response.status, body: await response.json() };
   }, peerTransport);
+  const changes = new Changes(store, home);
+  function appliedView(applied: ChangeApply) {
+    const quote = (value: string) => `'${value.replaceAll("'", "'\"'\"'")}'`;
+    const continuations = ["codex", "claude"].flatMap((harness) => {
+      const command = commands[harness];
+      if (!command || !applied.workspace.path) return [];
+      const variable = harness === "codex" ? "CODEX_HOME" : "CLAUDE_CONFIG_DIR";
+      const profile = process.env[variable];
+      const environment = profile === undefined ? `env -u ${variable}` : `env ${quote(`${variable}=${profile}`)}`;
+      return [{ harness, cwd: applied.workspace.path, freshSession: true as const, display: `cd -- ${quote(applied.workspace.path)} && ${environment} ${quote(command)}` }];
+    });
+    return { ...applied, continuations, staged: true, message: "Imported changes are staged for review in this separate worktree. Inspect git status and git diff --cached before continuing." };
+  }
+  function sourceHandoffs(id: string) {
+    if (!z.uuid().safeParse(id).success) return [];
+    const dispatch = peers.list().find((item) => item.id === id);
+    const sourceRunId = dispatch?.ownerRunId ?? (dispatch ? undefined : id);
+    return sourceRunId ? changes.forSource(dispatch?.ownerDeviceId ?? devices.device.id, sourceRunId)
+      .map((handoff) => ({ ...handoff, ...(handoff.applied ? { applied: appliedView(handoff.applied) } : {}) })) : [];
+  }
+  const changeQuery = z.object({ includePatch: z.enum(["true", "false"]).optional(), compact: z.enum(["true", "false"]).optional(), patchOffset: z.coerce.number().int().nonnegative().max(96000).optional(), patchLimit: z.coerce.number().int().min(1).max(96000).optional() }).strict();
+  function packetView(packet: ChangePacket, options: z.infer<typeof changeQuery> = {}) {
+    const { patch, ...summary } = packet;
+    const compact = options.compact === "true" || (options.compact !== "false" && options.includePatch !== "true");
+    const metadata = compact ? { ...summary, files: summary.files.slice(0, 10), fileCount: summary.files.length, filesTruncated: summary.files.length > 10,
+      stat: summary.stat.slice(0, 1000), statTruncated: summary.stat.length > 1000, ignoredPaths: summary.ignoredPaths.slice(0, 5), ignoredTruncated: summary.ignoredTruncated || summary.ignoredPaths.length > 5 } : summary;
+    if (options.includePatch !== "true") return { ...metadata, patchIncluded: false };
+    const offset = options.patchOffset ?? 0, limit = options.patchLimit ?? 96000;
+    return { ...metadata, patchIncluded: true, patch: patch.slice(offset, offset + limit), patchOffset: offset, patchNextOffset: offset + limit < patch.length ? offset + limit : null, patchTruncated: offset > 0 || offset + limit < patch.length };
+  }
+  function changeOptions(params: URLSearchParams) {
+    if ([...params.keys()].some((key) => params.getAll(key).length > 1)) throw new ChangeError("Duplicate changes query fields are not supported.", 400);
+    const parsed = changeQuery.safeParse(Object.fromEntries(params));
+    if (!parsed.success) throw new ChangeError("Invalid changes query. Use includePatch, compact, patchOffset and patchLimit only.", 400);
+    return parsed.data;
+  }
+  async function runChanges(id: string) {
+    if (!z.uuid().safeParse(id).success) throw new ChangeError("Invalid source run ID", 400);
+    if (peers.list().some((dispatch) => dispatch.id === id)) return peers.changes(id);
+    const run = store.run(id);
+    if (!run) throw new ChangeError("Source run not found", 404);
+    return changes.export(run, store.projects().find((project) => project.id === run.projectId), devices.device.id,
+      activeRuns().some((item) => sameWorkspace(item, run)));
+  }
   const instructions = new Instructions(store.db);
   const skills = new ProjectSkills(store.db, home, skillOptions);
   const personalSkills: Project = { id: "__personal_skills__", name: "Personal skills", path: personalHome, preference: "balanced", roles: [], createdAt: "" };
@@ -288,7 +333,7 @@ export function createService(
     !!a &&
     Buffer.byteLength(a) === Buffer.byteLength(b) &&
     timingSafeEqual(Buffer.from(a), Buffer.from(b));
-  app.onError((e, c) => c.json({ error: e.message }, e instanceof PeerError ? e.status as 400 : e instanceof InstructionError || e instanceof SetupError || e instanceof SkillError ? e.status : 500));
+  app.onError((e, c) => c.json({ error: e.message }, e instanceof PeerError || e instanceof ChangeError ? e.status as 400 : e instanceof InstructionError || e instanceof SetupError || e instanceof SkillError ? e.status : 500));
   app.use("*", async (c, next) => {
     const host = c.req.header("host") || new URL(c.req.url).host;
     if (![`127.0.0.1:${port}`, "127.0.0.1:5173"].includes(host))
@@ -853,20 +898,39 @@ export function createService(
       return c.json(priorDispatch.connection === "unknown" ? await peers.status(priorDispatch.id) : priorDispatch);
     }
     const remoteRole = data.roleId ? p.roles.find((item) => item.id === data.roleId) : undefined;
-    if (remoteRole?.peerId) {
-      peers.resolveMapping(p.id, remoteRole.peerId);
-      if (data.harness && data.harness !== remoteRole.harness) return c.json({ error: "Task harness must match the selected role harness." }, 400);
-      if (data.followUp) return c.json({ error: "Linked remote review and fix must run on the owning computer." }, 409);
-      if (data.workspace === "project") return c.json({ error: "Remote tasks require a separate Git worktree." }, 400);
-      const base = gitBase(p.path);
-      if (data.baseCommit && data.baseCommit !== base.baseCommit) return c.json({ error: "Local project HEAD differs from the requested Git base." }, 409);
-      const prompt = composeWorkerPrompt({ prompt: data.prompt, roleSnapshot: remoteRole, ...(data.includeProjectContext ? { contextSnapshot: store.context(p.id) } : {}) });
-      if (prompt.length > 32000) return c.json({ error: "Remote task and project context exceed the supported prompt size. Shorten the task or omit project context." }, 400);
-      return c.json(await peers.start({ peerId: remoteRole.peerId, idempotencyKey: data.idempotencyKey, baseCommit: base.baseCommit,
-        task: { prompt, harness: remoteRole.harness, model: data.model || remoteRole.model, readOnly: data.readOnly, includeProjectContext: false, ...(data.routing ? { routing: data.routing } : {}) } }, launchHash, data.prompt), 202);
-    }
+    if (data.roleId && !remoteRole) return c.json({ error: "Role not found" }, 400);
     if (data.followUp && data.readOnly !== (data.followUp.kind === "review"))
       return c.json({ error: "Reviews must be read only; fixes must allow workspace changes" }, 400);
+    const remoteSource = data.followUp ? peers.list().find((item) => item.id === data.followUp!.runId) : undefined;
+    if (remoteSource && remoteSource.projectId !== p.id) return c.json({ error: "Linked dispatch not found in this project" }, 404);
+    if (remoteSource && remoteRole && !remoteRole.peerId)
+      return c.json({ error: "Linked remote work must stay on its owning computer. Prepare and apply a changes handoff before continuing locally." }, 409);
+    if (remoteRole?.peerId || remoteSource) {
+      if (data.followUp && !remoteSource) return c.json({ error: "Linked local work cannot continue on another computer. Prepare and apply a changes handoff first." }, 409);
+      const source = remoteSource ? await peers.followUpSource(p.id, remoteSource.id) : undefined;
+      if (source && source.dispatch.lastKnownRun?.state !== "completed")
+        return c.json({ error: "Linked source must be completed on its owning computer." }, 409);
+      if (source && data.followUp?.kind === "fix" && source.dispatch.lastKnownRun?.followUp?.kind !== "review")
+        return c.json({ error: "A fix must follow a completed review on the owning computer." }, 409);
+      if (source && data.followUp?.kind === "review" && source.dispatch.lastKnownRun?.followUp?.kind === "review")
+        return c.json({ error: "A review must follow implementation or a fix on the owning computer." }, 409);
+      const mappingId = remoteRole?.peerId ?? remoteSource!.peerId;
+      const mapping = peers.resolveMapping(p.id, mappingId);
+      if (source && (mapping.deviceId !== source.mapping.deviceId || mapping.remoteProjectId !== source.mapping.remoteProjectId))
+        return c.json({ error: "Linked work must use the same owning computer and project. Use a changes handoff for another owner." }, 409);
+      if (remoteRole && data.harness && data.harness !== remoteRole.harness) return c.json({ error: "Task harness must match the selected role harness." }, 400);
+      if (data.workspace === "project") return c.json({ error: "Remote tasks require their separate Git worktree." }, 400);
+      const baseCommit = source?.baseCommit ?? gitBase(p.path).baseCommit;
+      if (data.baseCommit && data.baseCommit !== baseCommit) return c.json({ error: "Requested Git base differs from the linked source or local HEAD." }, 409);
+      const harness = remoteRole?.harness ?? data.harness ?? source?.dispatch.lastKnownRun?.harness ?? "codex";
+      const model = data.model ?? remoteRole?.model ?? (!remoteRole ? source?.dispatch.lastKnownRun?.effectiveModel ?? source?.dispatch.lastKnownRun?.model : undefined);
+      const prompt = composeWorkerPrompt({ prompt: data.prompt, ...(remoteRole ? { roleSnapshot: remoteRole } : {}), ...(data.includeProjectContext ? { contextSnapshot: store.context(p.id) } : {}) });
+      if (prompt.length > 32000) return c.json({ error: "Remote task and project context exceed the supported prompt size. Shorten the task or omit project context." }, 400);
+      return c.json(await peers.start({ peerId: mappingId, idempotencyKey: data.idempotencyKey, baseCommit,
+        task: { prompt, harness, model, readOnly: data.readOnly, includeProjectContext: false,
+          ...(source && data.followUp ? { followUp: { runId: source.dispatch.ownerRunId!, kind: data.followUp.kind } } : {}),
+          ...(data.routing ? { routing: data.routing } : {}) } }, launchHash, data.prompt), 202);
+    }
     if (data.followUp) {
       const linked = linkedSource(p.id, data.followUp);
       if (linked.error) return c.json({ error: linked.error }, 409);
@@ -1144,11 +1208,42 @@ export function createService(
     return c.json(runHandoff(run, project,
       activeRuns().some((item) => sameWorkspace(item, run)), cli));
   });
-  app.get("/api/runs/:id/context", (c) => {
+  app.get("/api/runs/:id/context", async (c) => {
+    if (peers.list().some((item) => item.id === c.req.param("id"))) return c.json(await peers.context(c.req.param("id")));
     const r = store.run(c.req.param("id"));
     return r
       ? c.json({ runId: r.id, contextSnapshot: r.contextSnapshot ?? null, followUpContext: r.followUpContext ?? null })
       : c.json({ error: "Run not found" }, 404);
+  });
+  app.get("/api/runs/:id/changes", async (c) => {
+    const options = changeOptions(new URL(c.req.url).searchParams);
+    const handoffs = sourceHandoffs(c.req.param("id"));
+    try { return c.json({ ...packetView(await runChanges(c.req.param("id")), options), handoffs }); }
+    catch (e) {
+      if (handoffs.length && (e instanceof ChangeError || e instanceof PeerError)) return c.json({ currentChangesStatus: "unavailable", message: e.message, handoffs });
+      throw e;
+    }
+  });
+  app.post("/api/runs/:id/changes/prepare", async (c) => {
+    if (quiesced || stopping) return c.json({ error: "Local service is stopping." }, 503);
+    const parsed = z.object({ projectId: z.uuid(), includePatch: z.boolean().default(false) }).strict().safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: "Choose a registered recipient project and optional includePatch boolean." }, 400);
+    const packet = await runChanges(c.req.param("id"));
+    if (quiesced || stopping) return c.json({ error: "Local service is stopping." }, 503);
+    const preview = changes.prepare(parsed.data.projectId, packet);
+    return c.json({ ...preview, ...(preview.applied ? { applied: appliedView(preview.applied) } : {}), packet: packetView(preview.packet, { includePatch: String(parsed.data.includePatch) as "true" | "false" }) });
+  });
+  app.get("/api/changes/:id", (c) => {
+    const options = changeOptions(new URL(c.req.url).searchParams);
+    const preview = changes.read(c.req.param("id"));
+    return c.json({ ...preview, ...(preview.applied ? { applied: appliedView(preview.applied) } : {}), packet: packetView(preview.packet, options) });
+  });
+  app.post("/api/changes/:id/apply", async (c) => {
+    if (quiesced || stopping) return c.json({ error: "Local service is stopping." }, 503);
+    const parsed = z.object({ expectedDigest: z.string().regex(/^[a-f0-9]{64}$/), expectedBaseCommit: z.string().regex(/^[a-f0-9]{40,64}$/) }).strict().safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: "Provide the exact reviewed digest and Git base." }, 400);
+    const applied = await changes.apply(c.req.param("id"), parsed.data.expectedDigest, parsed.data.expectedBaseCommit);
+    return c.json(appliedView(applied));
   });
   app.get("/api/runs/:id/tail", (c) => {
     if (peers.list().some((item) => item.id === c.req.param("id"))) return c.json({ error: "Remote event tails are available on the owning computer. Use run_status here for current owner evidence." }, 409);
@@ -1174,6 +1269,7 @@ export function createService(
     if (dispatch) return c.json({ dispatchId: dispatch.id, ownerDeviceId: dispatch.ownerDeviceId, ownerRunId: dispatch.ownerRunId ?? null,
       connection: dispatch.connection, lastObservedAt: dispatch.lastObservedAt ?? null, state: dispatch.lastKnownRun?.state ?? null,
       result: dispatch.lastKnownRun?.result ?? "", resultTruncated: dispatch.lastKnownRun?.resultTruncated ?? false,
+      ...(sourceHandoffs(dispatch.id).length ? { handoffs: sourceHandoffs(dispatch.id) } : {}),
       message: "Last observed owner result. Use run_status to refresh. Full result and native continuation are available on the owning computer." });
     const r = store.run(c.req.param("id"));
     return r
@@ -1192,6 +1288,7 @@ export function createService(
           followUp: r.followUp ?? null,
           workspace: r.workspace ?? { kind: "project", path: store.projects().find((p) => p.id === r.projectId)?.path },
           launchSource: r.launchSource,
+          ...(sourceHandoffs(r.id).length ? { handoffs: sourceHandoffs(r.id) } : {}),
         })
       : c.json({ error: "Run not found" }, 404);
   });

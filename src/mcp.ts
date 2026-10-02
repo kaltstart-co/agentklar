@@ -308,7 +308,7 @@ Claim project_lead only when coordinating; it is advisory. Saved role peerId pin
     "task_start",
     {
       description:
-        "Start one durable native worker. A saved role peerId routes to that mapped computer using its native accounts. Remote launches return a dispatch ID with separate owner state and connection evidence; preserve that ID for run_status/run_stop. Remote approvals require the owner computer UI. Remote work needs matching committed Git HEAD and does not copy local changes. workspace:'project' (default) uses the current folder; workspace:'worktree' makes a separate Git worktree from local HEAD. Uncommitted and local-only files are not copied. A linked review or fix inherits its source workspace; a conflicting workspace is rejected. At most two workers run per project, one per workspace. For a linked review pass followUp:{runId,kind:'review'} for a completed implementation or fix and readOnly:true; Muse and OpenCode cannot enforce read-only work, so choose Codex or Claude Code for reviews. For a linked fix pass followUp:{runId,kind:'fix'} for a completed review and readOnly:false. The run saves a bounded source snapshot; no loop or native session resume occurs. Includes saved project context by default. Pass routing:{complexity,requiresImages,taskType} for automatic model choice; role, harness and model pins still apply. Completion means only that the worker finished.",
+        "Start one durable native worker. A saved role peerId routes to its mapped computer using native accounts. Remote launches return a dispatch ID; use it for run_status/run_stop and followUp. A remote followUp without a role stays on the source owner. Another role may choose a different supported harness on that same owner/project. Local or different-owner followUps require an explicit changes handoff. Reviews require readOnly:true; fixes require readOnly:false and a completed review. Linked work inherits the exact owner worktree and bounded source snapshot even if main HEAD advanced. Native approvals require the owner UI. New remote work requires matching committed Git HEAD and a separate worktree; local changes are not copied. Local workspace:'project' uses the current folder; workspace:'worktree' makes a separate worktree. At most two workers run per project, one per workspace. Includes saved project context by default. routing selects a model using saved preference and native evidence; role, harness and model pins still apply. Completion means the worker finished, not human review.",
       inputSchema: startSchema,
     },
     (args, ctx: ServerContext) => {
@@ -341,6 +341,38 @@ Claim project_lead only when coordinating; it is advisory. Saved role peerId pin
           name === "run_stop" ? "POST" : "GET",
         ),
     );
+  server.registerTool(
+    "run_changes_read",
+    {
+      description: "Read a finished verified worktree's transferable text changes by local run or remote dispatch ID. Returns compact file/stat/base/source/digest metadata by default, including bounded ignored-file notices. includePatch:true reads an explicit bounded patch page; follow patchNextOffset for more. Reading never applies changes.",
+      inputSchema: z.object({ runId: z.uuid(), includePatch: z.boolean().default(false), patchOffset: z.number().int().min(0).max(96000).default(0), patchLimit: z.number().int().min(1).max(8000).default(8000) }).strict(),
+    },
+    ({ runId, includePatch, patchOffset, patchLimit }) => call(`/api/runs/${runId}/changes?compact=true&includePatch=${includePatch}&patchOffset=${patchOffset}&patchLimit=${patchLimit}`),
+  );
+  server.registerTool(
+    "changes_prepare",
+    {
+      description: "Prepare a local recipient worktree handoff from a finished local run or remote dispatch. Checks the source packet and exact Git base without applying files. Returns a durable preview ID and compact metadata. Save its digest and base for explicit changes_apply; prepare does not imply review or merge.",
+      inputSchema: z.object({ runId: z.uuid(), projectId: z.uuid() }).strict(),
+    },
+    ({ runId, projectId }) => call(`/api/runs/${runId}/changes/prepare`, "POST", { projectId }),
+  );
+  server.registerTool(
+    "changes_preview_read",
+    {
+      description: "Read a saved changes preview and applied destination after reconnecting. Defaults to compact metadata. includePatch:true reads one explicit bounded patch page without applying it.",
+      inputSchema: z.object({ previewId: z.uuid(), includePatch: z.boolean().default(false), patchOffset: z.number().int().min(0).max(96000).default(0), patchLimit: z.number().int().min(1).max(8000).default(8000) }).strict(),
+    },
+    ({ previewId, includePatch, patchOffset, patchLimit }) => call(`/api/changes/${previewId}?compact=true&includePatch=${includePatch}&patchOffset=${patchOffset}&patchLimit=${patchLimit}`),
+  );
+  server.registerTool(
+    "changes_apply",
+    {
+      description: "Explicitly apply a prepared text patch to a NEW recipient worktree at the reviewed base. Requires the exact preview digest and base commit. Keeps source and main checkouts unchanged; repeated apply returns the same destination. This does not merge, start a worker, or certify human review.",
+      inputSchema: z.object({ previewId: z.uuid(), expectedDigest: z.string().regex(/^[a-f0-9]{64}$/), expectedBaseCommit: z.string().regex(/^[a-f0-9]{40,64}$/) }).strict(),
+    },
+    ({ previewId, expectedDigest, expectedBaseCommit }) => call(`/api/changes/${previewId}/apply`, "POST", { expectedDigest, expectedBaseCommit }),
+  );
   server.registerTool(
     "run_tail",
     {

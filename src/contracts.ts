@@ -178,6 +178,7 @@ export type Snapshot = {
   leads: Record<string, ProjectLead>;
 };
 export type RemoteDispatch = { id: string; prompt: string; createdAt: string; launchHash?: string; projectId: string; peerId: string; ownerDeviceId: string; ownerRunId?: string; lastKnownRun?: Run; lastObservedAt?: string; connection: "unknown" | "observed"; error?: string };
+export type ChangeContinuation = { harness: string; cwd: string; display: string; freshSession: true };
 export type NativeInstallation = { path: string; version: string | null; fingerprint: string };
 export type NativeInstallationStatus = { harness: string; selected: string | null; saved: string | null; restartRequired: boolean; installations: NativeInstallation[] };
 

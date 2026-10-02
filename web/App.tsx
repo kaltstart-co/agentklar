@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { NativeSetupForm } from "./NativeSetupForm.js";
 import { NativeInstallations } from "./NativeInstallations.js";
+import { GitChanges } from "./GitChanges.js";
 import { Devices } from "./Devices.js";
 import { InstructionsForm } from "./InstructionsForm.js";
 import { Benchmarks, BenchmarkDetail, BenchmarkEvidenceView } from "./Benchmarks.js";
@@ -152,7 +153,9 @@ export function App() {
   const workers = snapshot.harnesses.filter((h) => h.workerSupported);
   const selectedRole = taskProject?.roles.find((r) => r.id === roleId);
   const taskHarness = selectedRole?.harness || harness;
-  const remoteRole = Boolean(selectedRole?.peerId);
+  const remoteFollowUp = followUp ? snapshot.remoteDispatches?.find((item) => item.id === followUp.runId) : undefined;
+  const remoteRole = Boolean(selectedRole?.peerId || remoteFollowUp);
+  const followUpPeer = remoteFollowUp ? snapshot.peers?.find((p) => p.id === remoteFollowUp.peerId) : undefined;
   const taskWorker = remoteRole || workers.find((h) => h.id === taskHarness);
   const museModels = catalogs[draftProjectId]?.harnesses.find((entry) => entry.harness === "muse")?.models || [];
   const museModel = taskHarness === "muse" ? museModels.find((item) => item.id === (model.trim() || selectedRole?.model)) ||
@@ -251,6 +254,14 @@ export function App() {
     setModel("");
     setTaskModal(true);
   }
+  function openRemoteTask(source: NonNullable<Snapshot["remoteDispatches"]>[number]) {
+    const kind = source.lastKnownRun?.followUp?.kind === "review" ? "fix" : "review";
+    setDraftProjectId(source.projectId);
+    setFollowUp({ runId: source.id, kind });
+    setPrompt(kind === "review" ? "Review the linked work. Check the changes and report concrete findings with file paths and lines." : "Fix the findings in the linked review. Check the result and explain what changed.");
+    setReadOnly(kind === "review"); setWorkspace("worktree"); setRoleId(null);
+    setHarness(source.lastKnownRun?.harness || "codex"); setModel(""); setTaskModal(true);
+  }
   async function refresh() {
     if (!local) return;
     try {
@@ -347,11 +358,11 @@ export function App() {
     setModel("");
   }, [projectId]);
   useEffect(() => {
-    if (workers.length && !workers.some((h) => h.id === harness)) {
+    if (!remoteRole && workers.length && !workers.some((h) => h.id === harness)) {
       setHarness(workers[0]!.id);
       setModel("");
     }
-  }, [snapshot.harnesses, harness]);
+  }, [snapshot.harnesses, harness, remoteRole]);
   useEffect(() => {
     setEvents([]);
     setFullResult(null);
@@ -468,7 +479,7 @@ export function App() {
           : "This hosted page is a setup guide. Run the local app to see projects, workers and permission requests."}
       </p>
       <p className="hint">Requires Node 24 on macOS or Linux. Install the pinned beta package:</p>
-      <pre>npm install -g https://github.com/kaltstart-co/agentklar/releases/download/v0.1.0-beta.20/agentklar-0.1.0-beta.20.tgz{"\n"}agentklar start</pre>
+      <pre>npm install -g https://github.com/kaltstart-co/agentklar/releases/download/v0.1.0-beta.21/agentklar-0.1.0-beta.21.tgz{"\n"}agentklar start</pre>
       <p>
         Open the setup link from the terminal, then use{" "}
         <code>http://127.0.0.1:4317</code>.
@@ -708,6 +719,8 @@ export function App() {
                         <p className="hint">Native approval requests must be answered in AgentKlar on the owner computer. Lost contact does not stop its worker.</p>
                         <Group><Button variant="light" disabled={busy || !connected} onClick={() => void act(async () => { await api(`/runs/${remoteRun.id}`); })}>Check owner status</Button>
                           <Button color="orange" variant="light" disabled={busy || !connected || !remoteRun.ownerRunId} onClick={() => void act(async () => { await api(`/runs/${remoteRun.id}/stop`, {}); })}>Request stop</Button></Group>
+                        {remoteRun.lastKnownRun?.state === "completed" && <Button variant="light" disabled={!connected || busy} onClick={() => openRemoteTask(remoteRun)}>{remoteRun.lastKnownRun.followUp?.kind === "review" ? "Fix findings" : "Review work"}</Button>}
+                        <GitChanges key={remoteRun.id} runId={remoteRun.id} projectId={projectId} snapshot={snapshot} connected={connected} request={api} />
                         {remoteRun.lastKnownRun?.result && <pre className="worker-result">{remoteRun.lastKnownRun.result}</pre>}
                       </Stack> : run ? (
                         <>
@@ -784,6 +797,7 @@ export function App() {
                               </Group>
                             </div>
                           )}
+                          <GitChanges key={run.id} runId={run.id} projectId={projectId} snapshot={snapshot} connected={connected} request={api} />
                           {run.state === "completed" && run.followUp?.kind !== "review" && (
                             <Button size="xs" variant="light" onClick={() => openTask(run)}>Review work</Button>
                           )}
@@ -1407,7 +1421,7 @@ export function App() {
           <Stack gap="sm">
             {error && <Alert color="red">{error}</Alert>}
             {followUp && <p className="hint">Linked to a completed run in {taskProject?.name || "this project"}. {followUp.kind === "review" ? "Review is read only." : "Fix can change workspace files."} Choose the worker and model below.</p>}
-            {followUp ? <p className="hint">This task uses the same workspace as its linked work.</p> : <>
+            {followUp ? <p className="hint">This task uses the same workspace as its linked work{remoteFollowUp ? " on the owner computer" : ""}.</p> : <>
               <Select label="Workspace" disabled={remoteRole} value={remoteRole ? "worktree" : workspace} allowDeselect={false}
                 onChange={(value) => setWorkspace(value as "project" | "worktree")}
                 data={[{ value: "project", label: "Current project folder" }, { value: "worktree", label: "New worktree (separate folder)" }]} />
@@ -1431,7 +1445,7 @@ export function App() {
                 setModel("");
               }}
               data={
-                taskProject?.roles.filter((r) => r.peerId || workers.some((h) => h.id === r.harness)).map((r) => ({ value: r.id, label: r.name })) ||
+                taskProject?.roles.filter((r) => (!remoteFollowUp || snapshot.peers?.some((p) => p.id === r.peerId && p.deviceId === followUpPeer?.deviceId && p.remoteProjectId === followUpPeer?.remoteProjectId)) && (r.peerId || workers.some((h) => h.id === r.harness))).map((r) => ({ value: r.id, label: r.name })) ||
                 []
               }
             />
@@ -1523,11 +1537,11 @@ export function App() {
                   Checks model image support. Browser and tool access depend on
                   the native harness.
                 </p>
-                {remoteRole && <p className="hint">Model preview reads the owner computer's native catalog. Automatic choice is checked again there when you start.</p>}
+                {remoteRole && <p className="hint">{remoteFollowUp && !selectedRole ? "Owner model choice is checked when you start. Choose a saved role on this owner for a model preview." : "Model preview reads the owner computer's native catalog. Automatic choice is checked again there when you start."}</p>}
                 <Button
                   variant="light"
                   loading={adviceBusy === adviceKey}
-                  disabled={!connected || !draftProjectId}
+                  disabled={!connected || !draftProjectId || (!!remoteFollowUp && !selectedRole)}
                   onClick={() => void suggestModel()}
                 >
                   Suggest a model

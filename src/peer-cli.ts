@@ -15,12 +15,12 @@ export async function startPeerStdio() {
     if (Buffer.byteLength(input) > 64_000) throw new Error("Peer request exceeded the allowed size.");
     if (input.includes("\n")) break;
   }
-  let request: { requestId?: string };
+  let request: { requestId?: string; operation?: string };
   try { request = JSON.parse(input.trim()); } catch { throw new Error("Peer request is not valid JSON."); }
   if (!request || typeof request !== "object" || Array.isArray(request)) throw new Error("Peer request must be an object.");
   const response = await fetch(`http://127.0.0.1:${port}/api/peer`, { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify(request), signal: AbortSignal.timeout(33_000) }).catch(() => { throw new Error("Owner AgentKlar service is unavailable. Start it on this device and check its configured port."); });
   const body = await response.text();
-  if (Buffer.byteLength(body) > 120_000) throw new Error("Peer reply exceeded the allowed size.");
+  if (Buffer.byteLength(body) > (request.operation === "changes" ? 760_000 : 120_000)) throw new Error("Peer reply exceeded the allowed size.");
   let result: unknown;
   try { result = JSON.parse(body); } catch { throw new Error("Local service sent an invalid peer reply."); }
   process.stdout.write(JSON.stringify({ id: request.requestId, status: response.status, body: result }) + "\n");

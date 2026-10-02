@@ -65,7 +65,8 @@ test("SDK stdio wire lists and calls tools; closing MCP leaves service worker al
     assert.equal(service.store.runs().length, 0);
     assert.equal(catalogReads, 0);
     const list = await client.listTools();
-    assert.equal(list.tools.length, 19);
+    assert.equal(list.tools.length, 23);
+    for (const name of ["run_changes_read", "changes_prepare", "changes_preview_read", "changes_apply"]) assert.ok(list.tools.some((tool) => tool.name === name));
     assert.equal(
       list.tools.some((t) => /approve/.test(t.name)),
       false,

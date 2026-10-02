@@ -16,6 +16,8 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 - [x] Device pairing UI
 - [x] Remote role pins
 - [x] Remote status and history
+- [x] Linked remote review and fix
+- [x] Explicit Git handoff
 - [x] MCP connection
 - [x] Native MCP setup
 - [x] Background startup (macOS)
@@ -70,5 +72,3 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 - [ ] Real two-computer setup
 - [ ] Shared remote approval UI
 - [ ] Automatic cross-device candidates
-- [ ] Explicit cross-device Git handoff
-- [ ] Linked remote review and fix

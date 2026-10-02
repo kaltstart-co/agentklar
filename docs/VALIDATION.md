@@ -279,3 +279,13 @@ Browser fixtures checked Settings, Team, remote Work and the task modal at 320 p
 Native approvals, full remote results and session continuation remain on the owner computer. Antigravity CLI 1.2.14 was verified with bounded help/version commands only; discovery does not provide an AgentKlar worker adapter. Real two-computer SSH setup, remote native inference, shared remote approval UI, automatic cross-device candidates, linked remote review/fix and Git patch handoff remain unverified or unfinished. The hosted dashboard cannot execute local agents.
 
 Final beta.20 local checks passed: TypeScript, production build, all 160 tests, installed-package smoke exposing 19 MCP tools, and diff whitespace. A fake SSH shell with Node absent from PATH verified that the exported absolute Node and AgentKlar script paths launch the peer bridge; this is an isolated fixture, not a real SSH check. Evidence: `/tmp/agentklar-beta20-release/` and the peer tests.
+
+## Linked work and Git handoff — beta.21
+
+Linked remote review/fix drafts retain the owner project and verified worktree. Explicit patch handoff includes committed, staged, unstaged and nonignored new regular text files. Ignored paths are reported. Binary, symlink, submodule and non-UTF8 changes are rejected. Apply checks source/base/digest and stages changes in a new recipient worktree; the original checkout stays unchanged. Saved handoffs survive restart, and fresh native commands use the selected local CLI profile.
+
+Isolated browser QA verified the file preview and full diff, new text file inclusion, explicit apply, staged Git status, unchanged dirty recipient root, saved applied destination recovery, and a remote Review draft retaining its owner harness. Evidence: `/tmp/agentklar-changes-ui-qa/applied.jpg`. No SSH, inference or native settings changes were made. Native approvals remain owner-dashboard-only; real two-computer setup, automatic cross-device candidates and Windows remain unverified or unfinished.
+
+Final beta.21 checks passed: TypeScript, production build, all 166 tests, installed-package smoke exposing 23 MCP tools, and diff whitespace. Evidence: `/tmp/agentklar-beta21-release/`.
+
+Focused narrow UI check: handoff detail/full diff and remote Review modal had viewport width 320 and document scroll width 320; modal width was 288. Patch and command content stayed inside their containers. Screenshots: `/tmp/agentklar-changes-ui-qa/mobile-applied.jpg` and `mobile-review.jpg`. Temporary viewport and service were reset/stopped.

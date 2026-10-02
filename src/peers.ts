@@ -3,17 +3,18 @@ import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import type { Run, CatalogSnapshot } from "./contracts.ts";
 import type { Store } from "./store.ts";
+import { changePacketSchema, type ChangePacket } from "./changes.ts";
 import { gitBase } from "./workspace.ts";
 import { z } from "zod";
 
 const uuid = z.uuid();
 const nodePath = z.string().startsWith("/").max(1000).refine(value => !/[\0\r\n]/.test(value));
 const hash = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
-const task = z.object({ prompt: z.string().trim().min(1).max(32000), harness: z.enum(["codex", "claude", "muse", "opencode"]).optional(), model: z.string().min(1).max(120).optional(), readOnly: z.boolean().default(false), includeProjectContext: z.literal(false).optional(), routing: z.object({ complexity: z.enum(["routine", "standard", "hard"]).default("standard"), requiresImages: z.boolean().default(false), taskType: z.enum(["coding", "reasoning", "data-analysis", "language"]).default("coding") }).strict().optional() }).strict();
+const task = z.object({ prompt: z.string().trim().min(1).max(32000), harness: z.enum(["codex", "claude", "muse", "opencode"]).optional(), model: z.string().min(1).max(120).optional(), readOnly: z.boolean().default(false), followUp: z.object({ runId: uuid, kind: z.enum(["review", "fix"]) }).strict().optional(), includeProjectContext: z.literal(false).optional(), routing: z.object({ complexity: z.enum(["routine", "standard", "hard"]).default("standard"), requiresImages: z.boolean().default(false), taskType: z.enum(["coding", "reasoning", "data-analysis", "language"]).default("coding") }).strict().optional() }).strict();
 const base = z.string().regex(/^[0-9a-f]{40,64}$/);
 export const peerSaveSchema = z.object({ label: z.string().trim().min(1).max(120), deviceId: uuid, sshHost: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_.@:-]{0,199}$/), command: z.string().regex(/^(?:agentklar|\/[a-zA-Z0-9_./ -]{1,500})$/), nodePath: nodePath.optional(), projectId: uuid, remoteProjectId: uuid, grantId: uuid, grantToken: z.string().regex(/^[0-9a-f]{64}$/) }).strict().refine(value => !value.nodePath || value.command.startsWith("/"), "A pinned Node executable requires an absolute AgentKlar script path.");
 export const peerDispatchSchema = z.object({ peerId: uuid, idempotencyKey: z.string().min(1).max(200), baseCommit: base, task }).strict();
-const envelope = z.object({ version: z.literal(1), sourceDeviceId: uuid, targetDeviceId: uuid, grantId: uuid, token: z.string().regex(/^[0-9a-f]{64}$/), operation: z.enum(["hello", "catalog", "start", "status", "cancel"]), requestId: uuid.optional(), runId: uuid.optional(), baseCommit: base.optional(), task: task.optional() }).strict();
+const envelope = z.object({ version: z.literal(1), sourceDeviceId: uuid, targetDeviceId: uuid, grantId: uuid, token: z.string().regex(/^[0-9a-f]{64}$/), operation: z.enum(["hello", "catalog", "start", "status", "cancel", "changes", "context"]), requestId: uuid.optional(), runId: uuid.optional(), baseCommit: base.optional(), task: task.optional() }).strict();
 export type PeerEnvelope = z.infer<typeof envelope>;
 export type PeerConnection = z.infer<typeof peerSaveSchema> & { id: string; lastObservedAt?: string; lastError?: string };
 type Device = { id: string; label: string; platform: string };
@@ -35,7 +36,7 @@ export const sshPeerTransport: PeerTransport = (peer, request) => new Promise((r
   child.on("exit", () => { if (!done) finish(new PeerError("SSH peer command ended without a verified reply. Check SSH access, the remote command and the running owner service. Owner status is unknown.", 503)); });
   child.stdout.on("data", data => {
     output += data.toString();
-    if (Buffer.byteLength(output) > 128_000) return finish(new PeerError("Peer reply exceeded the allowed size.", 502));
+    if (Buffer.byteLength(output) > (request.operation === "changes" ? 768_000 : 128_000)) return finish(new PeerError("Peer reply exceeded the allowed size.", 502));
     const newline = output.indexOf("\n");
     if (newline < 0) return;
     try {
@@ -122,15 +123,24 @@ export class Peers {
       if (!request.requestId || !request.baseCommit || !request.task) throw new PeerError("Provide a request ID, exact Git base and task.");
       const key = `peer:${request.sourceDeviceId}:${request.requestId}`;
       const prior = this.store.existing(grant.projectId, key);
-      if (!prior) {
+      if (request.task.followUp) {
+        const parent = this.store.run(request.task.followUp.runId);
+        if (!parent || parent.projectId !== grant.projectId || !(this.store.db.prepare("SELECT key FROM runs WHERE id=?").get(parent.id)?.key as string)?.startsWith(`peer:${request.sourceDeviceId}:`)) throw new PeerError("Follow-up source is outside this peer grant.", 403);
+      }
+      if (!prior && !request.task.followUp) {
         const project = this.store.projects().find(p => p.id === grant.projectId);
         if (!project) throw new PeerError("Mapped project not found", 404);
         if (gitBase(project.path).baseCommit !== request.baseCommit) throw new PeerError("Mapped owner project HEAD differs from the explicit Git base. Synchronize it explicitly before launch.", 409);
       }
-      return this.call("/api/tasks/start", "POST", { ...request.task, projectId: grant.projectId, idempotencyKey: key, workspace: "worktree", includeProjectContext: false, baseCommit: request.baseCommit });
+      return this.call("/api/tasks/start", "POST", { ...request.task, projectId: grant.projectId, idempotencyKey: key, ...(request.task.followUp ? {} : { workspace: "worktree", baseCommit: request.baseCommit }), includeProjectContext: false });
     }
     const run = request.runId && this.store.run(request.runId);
     if (!run || run.projectId !== grant.projectId || !(this.store.db.prepare("SELECT key FROM runs WHERE id=?").get(run.id)?.key as string)?.startsWith(`peer:${request.sourceDeviceId}:`)) throw new PeerError("Run is outside this peer grant.", 403);
+    if (request.operation === "context") return this.call(`/api/runs/${run.id}/context`);
+    if (request.operation === "changes") {
+      const reply = await this.call(`/api/runs/${run.id}/changes?includePatch=true&compact=false`);
+      return reply.status >= 400 ? reply : { status: reply.status, body: changePacketSchema.strip().parse(reply.body) };
+    }
     return this.call(`/api/runs/${run.id}${request.operation === "cancel" ? "/stop" : ""}`, request.operation === "cancel" ? "POST" : "GET");
   }
   private saveDispatch(d: Dispatch) { this.store.db.prepare("INSERT INTO peer_dispatches(id,projectId,key,data) VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data").run(d.id, d.projectId, d.key, JSON.stringify(d)); }
@@ -154,7 +164,7 @@ export class Peers {
     let d = prior;
     if (!d) {
       const project = this.store.projects().find(p => p.id === peer.projectId);
-      if (!project || gitBase(project.path).baseCommit !== data.baseCommit) throw new PeerError("Local project HEAD differs from the explicit Git base.", 409);
+      if (!project || (!data.task.followUp && gitBase(project.path).baseCommit !== data.baseCommit)) throw new PeerError("Local project HEAD differs from the explicit Git base.", 409);
       const id = randomUUID();
       d = { id, ...(launchHash ? { launchHash } : {}), prompt: (displayPrompt ?? data.task.prompt).slice(0, 300), createdAt: new Date().toISOString(), projectId: peer.projectId, peerId: peer.id, ownerDeviceId: peer.deviceId, key: data.idempotencyKey, digest, request: this.request(peer, "start", { requestId: id, baseCommit: data.baseCommit, task: data.task }), connection: "unknown" };
       this.saveDispatch(d);
@@ -164,6 +174,28 @@ export class Peers {
   async status(id: string) {
     const d = this.dispatch(uuid.parse(id));
     return this.observe(d, d.ownerRunId ? this.request(this.peer(d.peerId), "status", { runId: d.ownerRunId }) : d.request);
+  }
+  async followUpSource(projectId: string, dispatchId: string) {
+    let dispatch = this.dispatch(uuid.parse(dispatchId));
+    if (dispatch.projectId !== projectId) throw new PeerError("Follow-up dispatch belongs to another project.", 403);
+    const observed = await this.status(dispatch.id);
+    if (observed.connection !== "observed" || !observed.ownerRunId) throw new PeerError("Owner status is unavailable. Reconnect before starting linked work.", 503);
+    dispatch = this.dispatch(dispatch.id);
+    return { dispatch: this.publicDispatch(dispatch), mapping: this.resolveMapping(projectId, dispatch.peerId), baseCommit: dispatch.request.baseCommit! };
+  }
+  async context(dispatchId: string) {
+    const dispatch = this.dispatch(uuid.parse(dispatchId));
+    if (!dispatch.ownerRunId) throw new PeerError("Owner run is unknown. Query status before reading its context.", 409);
+    const peer = this.peer(dispatch.peerId);
+    return this.send(peer, this.request(peer, "context", { runId: dispatch.ownerRunId }));
+  }
+  async changes(dispatchId: string): Promise<ChangePacket> {
+    const dispatch = this.dispatch(uuid.parse(dispatchId));
+    if (!dispatch.ownerRunId) throw new PeerError("Owner run is unknown. Query status before preparing changes.", 409);
+    const peer = this.peer(dispatch.peerId);
+    const packet = changePacketSchema.parse(await this.send(peer, this.request(peer, "changes", { runId: dispatch.ownerRunId })));
+    if (packet.sourceRunId !== dispatch.ownerRunId || packet.sourceProjectId !== peer.remoteProjectId || packet.sourceDeviceId !== peer.deviceId || packet.baseCommit !== dispatch.request.baseCommit) throw new PeerError("Changes do not match the saved source run, device, project or Git base.", 409);
+    return packet;
   }
   async cancel(id: string) {
     const d = this.dispatch(uuid.parse(id));
