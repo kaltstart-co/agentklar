@@ -386,3 +386,35 @@ export type ControlReceipt = {
   lead: ProjectLead;
   acceptedAt: string
 };
+
+export type NativeInventorySource = {
+  path: string | null;
+  pathTruncated: boolean;
+  scope: "user" | "project" | "system" | "environment";
+  kind: "config" | "plugin-cache" | "plugin-manifest" | "marketplace" | "extension-directory" | "desktop-sync";
+  status: "present" | "missing" | "unsafe" | "unreadable" | "oversized" | "invalid" | "unsupported" | "changed";
+  inspection: "metadata" | "manifest";
+  message: string;
+};
+export type NativeInventoryExtension = {
+  name: string;
+  version: string | null;
+  sourcePath: string;
+  pathTruncated: boolean;
+  scope: "user" | "project";
+  evidence: "cached-package" | "project-manifest";
+  activationUnknown: true;
+};
+export type NativeInventory = {
+  projectId: string;
+  checkedAt: string;
+  activationUnknown: true;
+  harnesses: {
+    harness: SetupHarness;
+    sources: NativeInventorySource[];
+    extensions: NativeInventoryExtension[];
+    extensionsTruncated: boolean;
+    coverage: string[];
+  }[];
+  truncated: boolean;
+};

@@ -9,7 +9,7 @@ This is a fresh TypeScript rewrite. The old Go application is preserved in Git a
 Requires Node 24 and npm on macOS or Linux. Install this pinned GitHub beta package, then start the local service:
 
 ```sh
-npm install -g https://github.com/kaltstart-co/agentklar/releases/download/v0.1.0-beta.26/agentklar-0.1.0-beta.26.tgz
+npm install -g https://github.com/kaltstart-co/agentklar/releases/download/v0.1.0-beta.27/agentklar-0.1.0-beta.27.tgz
 agentklar start
 ```
 
@@ -99,6 +99,12 @@ Open **Instructions** and choose **AGENTS.md** (shared by Codex, Muse and OpenCo
 These files are separate from the shared project context above. [Muse checks AGENTS.md before CLAUDE.md](https://dev.meta.ai/docs/muse-code/configuration) at each folder level and loads only trusted project rules. [OpenCode also prefers AGENTS.md](https://opencode.ai/docs/rules/) over its Claude-compatible fallback. Creating root AGENTS.md when CLAUDE.md exists can change which root file they read. Native settings and parent files can change what loads. Start a new native session to check. Creating CLAUDE.md may stop Claude from loading AGENTS.md under its default settings; AgentKlar does not copy the instructions between files.
 
 Drafts stay in the open app when you switch views or harnesses, or the local service briefly disconnects. If a file changes on disk, the UI keeps your draft. **Reload file (replaces draft)** loads the current file. **Undo latest change** restores the saved prior contents only when the current file still matches that change. Recent changes remain visible in the local UI. An interrupted change has a **Try undo** action with the same file check. Instruction editing is available through the trusted local UI; MCP can read file status and change metadata.
+
+## Native config and extension inventory
+
+Open **Settings → Native config and extensions**, then select **Refresh native inventory**. This read-only view lists bounded source presence and scope for the selected project and this computer. Expand a harness to inspect known config paths and extension metadata. It does not show config values, credentials or native commands, and makes no native writes or model calls.
+
+Cached package names/versions and project manifests are evidence of files, not proof of installed, enabled or loaded extensions. Activation and incomplete source coverage stay explicit. Native settings still decide what loads. This inventory does not install plugins or provide general native config editing. Actual native cross-harness continuation still needs verification, and an easy user upgrade flow remains unfinished; real two-computer setup remains later.
 
 ## Skills
 

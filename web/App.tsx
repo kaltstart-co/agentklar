@@ -1,3 +1,4 @@
+import { NativeInventory } from "./NativeInventory.js";
 import { ProjectHandoff } from "./ProjectHandoff.js";
 import { useEffect, useRef, useState } from "react";
 import { NativeSetupForm } from "./NativeSetupForm.js";
@@ -488,7 +489,7 @@ export function App() {
           : "This hosted page is a setup guide. Run the local app to see projects, workers and permission requests."}
       </p>
       <p className="hint">Requires Node 24 on macOS or Linux. Install the pinned beta package:</p>
-      <pre>npm install -g https://github.com/kaltstart-co/agentklar/releases/download/v0.1.0-beta.26/agentklar-0.1.0-beta.26.tgz{"\n"}agentklar start</pre>
+      <pre>npm install -g https://github.com/kaltstart-co/agentklar/releases/download/v0.1.0-beta.27/agentklar-0.1.0-beta.27.tgz{"\n"}agentklar start</pre>
       <p>
         Open the setup link from the terminal, then use{" "}
         <code>http://127.0.0.1:4317</code>.
@@ -1323,6 +1324,7 @@ export function App() {
                 </>}
                 {connected && backgroundSetup}
                 {connected && <NativeInstallations device={snapshot.device} request={api} />}
+                {project && <NativeInventory key={`inventory-${project.id}`} projectId={project.id} connected={connected} request={api} />}
                 <Devices device={snapshot.device} projects={snapshot.projects} connected={connected} request={api} />
                 <h3>Native connection</h3>
                 {connected && project ? <NativeSetupForm key={project.id} projectId={project.id} connected={connected} /> : connected ? <p className="hint">Add or select a project to connect Codex, Claude Code, Muse, OpenCode, or Antigravity.</p> :

@@ -1,3 +1,4 @@
+import { nativeInventory } from "./inventory.ts";
 import { Control, ControlError } from "./control.ts";
 import { Approvals, ApprovalError, approvalAnswerSchema } from "./approvals.ts";
 import { Peers, PeerError, routingEvidenceSchema, type PeerTransport } from "./peers.ts";
@@ -611,6 +612,14 @@ export function createService(
     return next();
   });
   const controlStatus = (id: string) => control.status(id, currentLead(id)?publicLead(currentLead(id)!): null);
+  app.get("/api/projects/:id/native-inventory", c => {
+    const id = c.req.param("id");
+    if (!z.uuid().safeParse(id).success || new URL(c.req.url).search) return c.json({ error: "Invalid project ID or inventory query" }, 400);
+    const project = store.projects().find(p => p.id === id);
+    if (!project) return c.json({ error: "Project not found" }, 404);
+    c.header("Cache-Control", "no-store");
+    return c.json(nativeInventory(id, project.path, { env: setupOptions.env, userHome: skillOptions.userHome }));
+  });
   app.get("/api/projects/:id/control", c => {
     if (!z.uuid().safeParse(c.req.param("id")).success || new URL(c.req.url).search) return c.json({
       error: "Invalid project ID or control query"

@@ -10,6 +10,7 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 - [x] Model pins
 - [x] Cost preference
 - [x] Harness discovery
+- [x] Native source inventory
 - [x] Device identity
 - [x] Native CLI choice
 - [x] Antigravity CLI discovery
@@ -64,6 +65,9 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 - [x] Parallel worktrees
 
 ## In progress
+
+- [ ] Native cross-harness proof
+- [ ] Easy product upgrades
 
 - [ ] Complete account quotas
 

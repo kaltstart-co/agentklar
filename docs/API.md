@@ -150,3 +150,10 @@ List returns bounded summaries. Read returns the exact complete supported reques
 - POST `.../packets/:packetId/accept`: receiving MCP bridge only, `{requestId,expectedDigest,expectedContextRevision,expectedControlRevision}`. The bridge identity comes from the connection. Stable exact retries return the saved receipt; stale context/control and changed input conflict.
 
 The `project_handoff` MCP tool supports `prepare`, `read`, `list` and `accept`. The receiving harness reads `projects_list` for current roles and cost preference. Coordinated control fences older AgentKlar requests before launch or durable remote dispatch. Existing workers, native sessions, native approvals and direct file edits remain separate. A saved receipt after restart does not restore a live lead. Mode changes and human recovery require the trusted UI cookie and exact local Origin and reject Authorization headers.
+
+
+## Read-only native inventory
+
+GET `/api/projects/:id/native-inventory` returns `{projectId,checkedAt,activationUnknown:true,harnesses,truncated}` for a registered project. Each harness has bounded `sources`, `extensions`, `extensionsTruncated` and coverage notes. Sources report path/scope/kind/presence and inspection limits. Extension records report name, version or null, source path, scope and cache/project-manifest evidence; activation remains unknown. No raw config values, credentials, native commands or enabled-state claims are returned.
+
+The fixed-source read uses no CLI, network, write or model call. It accepts no arbitrary source paths or query parameters. Bounds are 40 sources, 24 extension records, 32 KiB per manifest, 256 KiB total manifest reads, 64 manifest attempts, 200 cache directories at fixed depth three, and a 22,000-character response. Partial observations are flagged. Settings requests this data only on explicit Refresh. This is source inventory, not plugin installation or general config management.
