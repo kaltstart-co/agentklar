@@ -15,7 +15,7 @@ function fixture(native?:string) {
  const fake=join(dir,"agy-fixture.mjs");
  writeFileSync(fake,`#!${process.execPath}\n`+String.raw`
 import {readFileSync,writeFileSync} from "node:fs";import {join} from "node:path";
-const path=join(process.env.HOME,".gemini","config","mcp_config.json"),data=JSON.parse(readFileSync(path,"utf8")),args=process.argv.slice(2);data.mcpServers ??= {};
+const path=join(process.env.HOME,".gemini","config","mcp_config.json"),source=readFileSync(path,"utf8"),data=source.trim() ? JSON.parse(source) : {},args=process.argv.slice(2);data.mcpServers ??= {};
 if(args[1]==="add") {const env={};let i=2;while(args[i]==="--env") {const value=args[i+1],k=value.indexOf("=");env[value.slice(0,k)]=value.slice(k+1);i+=2;}const name=args[i++];if(args[i]==="--")i++;data.mcpServers[name]={command:args[i++],args:args.slice(i),env,disabled:false};}
 else if(args[1]==="remove") delete data.mcpServers[args[2]];else process.exit(2);
 writeFileSync(path,JSON.stringify(data,null,2));
@@ -63,4 +63,34 @@ test("Antigravity Git setup requires registered repository root and checks its w
   const preview=await f.setup.preview(f.project,"antigravity");
   await assert.rejects(f.setup.apply(nestedProject,"antigravity",preview.id),/registered repository root/);
  } finally {await f.cleanup();}
+});
+
+
+async function emptyRoundTrip(command?: string) {
+ for (const text of ["", " \n\t"]) {
+  const f = fixture(command);
+  try {
+   writeFileSync(f.config, text);
+   assert.equal((await f.setup.status(f.project, "antigravity")).status, "missing");
+   const preview = await f.setup.preview(f.project, "antigravity");
+   assert.equal(readFileSync(f.config, "utf8"), text); // Status and preview do not normalize the file.
+   const change = await f.setup.apply(f.project, "antigravity", preview.id);
+   assert.deepEqual(JSON.parse(readFileSync(f.config, "utf8")).mcpServers.agentklar, preview.entry);
+   await f.setup.undo(f.project, "antigravity", change.id);
+   assert.deepEqual(JSON.parse(readFileSync(f.config, "utf8")), {mcpServers: {}});
+  } finally { await f.cleanup(); }
+ }
+}
+test("Antigravity empty MCP files remain unchanged until reviewed setup and undo", () => emptyRoundTrip());
+test("installed agy accepts zero-byte and whitespace MCP files in isolated native HOME", {skip: !native}, () => emptyRoundTrip(native!));
+test("Antigravity malformed nonempty MCP files are never normalized or overwritten", async () => {
+ const f = fixture();
+ try {
+  for (const text of [" { ", "null", "[]", "{\"mcpServers\":[]}"]) {
+   writeFileSync(f.config, text);
+   assert.equal((await f.setup.status(f.project, "antigravity")).status, "unavailable");
+   await assert.rejects(f.setup.preview(f.project, "antigravity"));
+   assert.equal(readFileSync(f.config, "utf8"), text);
+  }
+ } finally { await f.cleanup(); }
 });

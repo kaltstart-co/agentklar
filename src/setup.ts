@@ -63,7 +63,8 @@ function configRead(path: string): { text: string | null; fingerprint: string } 
   } finally { if (fd !== undefined) closeSync(fd); }
 }
 function antigravityConfig(text: string | null): Record<string, unknown> {
-  if (text === null) return {};
+  // Native agy accepts an empty MCP file as an unconfigured scope.
+  if (text === null || /^[ \t\r\n]*$/.test(text)) return {};
   const errors: ParseError[] = [];
   const tree = parseTree(text, errors, { disallowComments: true, allowTrailingComma: false });
   if (errors.length || !tree || tree.type !== "object") throw new SetupError("Antigravity MCP JSON is unsupported. Inspect native MCP settings.");

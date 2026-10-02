@@ -325,3 +325,10 @@ Antigravity `agy` MCP host setup passed native temporary-HOME tests and an actua
 Main-harness control transfer is planned in `docs/CONTROL_TRANSFER_PLAN.md`, not shipped. Real two-computer setup, complete account quotas and Antigravity worker permissions remain unfinished or unverified.
 
 Final beta.24 checks passed: TypeScript, production build, all 181 tests with zero skips, installed-package smoke exposing 23 MCP tools, and diff whitespace. Evidence: `/tmp/agentklar-beta24-release/`.
+
+
+## Empty Antigravity MCP configuration — beta.25
+
+The installed beta.24 browser check found a legitimate zero-byte Antigravity user MCP file and reported setup unavailable. Native `agy` 1.2.14 tests in a temporary HOME then verified that zero-byte and ASCII whitespace-only files represent an unconfigured scope. AgentKlar now accepts only those empty forms as missing. Status and preview leave the original bytes unchanged; an explicit reviewed apply lets the native CLI serialize the entry. Undo removes the managed entry. Malformed nonempty JSON remains unavailable and untouched.
+
+All seven focused Antigravity setup tests passed, including real installed `agy` add/remove in temporary native homes. No real native config, authentication or CLI choice changed. Final combined checks passed: TypeScript, production build, all 184 tests with zero skips, installed-package smoke with 23 MCP tools, and diff whitespace. Installed browser verification remains pending. Evidence: `/tmp/agentklar-beta25-release/`. Historical beta.24 evidence remains above; its public install link and healthy installed service were verified before this fix.
