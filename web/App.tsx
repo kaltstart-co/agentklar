@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { NativeSetupForm } from "./NativeSetupForm.js";
 import { NativeInstallations } from "./NativeInstallations.js";
 import { GitChanges } from "./GitChanges.js";
+import { RemoteApprovals, type PendingHumanAnswer } from "./RemoteApprovals.js";
 import { Devices } from "./Devices.js";
 import { InstructionsForm } from "./InstructionsForm.js";
 import { Benchmarks, BenchmarkDetail, BenchmarkEvidenceView } from "./Benchmarks.js";
@@ -133,6 +134,7 @@ export function App() {
   const [adviceBusy, setAdviceBusy] = useState("");
   const [adviceError, setAdviceError] = useState<{ key: string; message: string } | null>(null);
   const adviceRequest = useRef(0);
+  const humanApprovalPending = useRef<Record<string, PendingHumanAnswer>>({});
   const [readOnly, setReadOnly] = useState(true);
   const [includeProjectContext, setIncludeProjectContext] = useState(true);
   const [workspace, setWorkspace] = useState<"project" | "worktree">("project");
@@ -485,7 +487,7 @@ export function App() {
           : "This hosted page is a setup guide. Run the local app to see projects, workers and permission requests."}
       </p>
       <p className="hint">Requires Node 24 on macOS or Linux. Install the pinned beta package:</p>
-      <pre>npm install -g https://github.com/kaltstart-co/agentklar/releases/download/v0.1.0-beta.22/agentklar-0.1.0-beta.22.tgz{"\n"}agentklar start</pre>
+      <pre>npm install -g https://github.com/kaltstart-co/agentklar/releases/download/v0.1.0-beta.23/agentklar-0.1.0-beta.23.tgz{"\n"}agentklar start</pre>
       <p>
         Open the setup link from the terminal, then use{" "}
         <code>http://127.0.0.1:4317</code>.
@@ -729,7 +731,12 @@ export function App() {
                           <ul>{[...remoteRun.routing.reasons, ...remoteRun.routing.warnings].map((reason) => <li key={reason}>{reason}</li>)}</ul>
                         </details>}
                         {remoteRun.error && <Alert color="orange">{remoteRun.error}</Alert>}
-                        <p className="hint">Native approval requests must be answered in AgentKlar on the owner computer. Lost contact does not stop its worker.</p>
+                        <RemoteApprovals key={`approvals-${remoteRun.id}`} dispatchId={remoteRun.id} peerId={remoteRun.peerId}
+                          owner={snapshot.peers?.find(p => p.id === remoteRun.peerId)?.label || "Owner computer"}
+                          connected={connected} connection={remoteRun.connection}
+                          active={!!remoteRun.lastKnownRun && ["running", "needs_attention"].includes(remoteRun.lastKnownRun.state)}
+                          request={api} pendingStore={humanApprovalPending.current} details={approval => <PermissionDetails kind={approval.kind} details={approval.details} />} />
+                        <p className="hint">Lost contact does not stop the owner worker.</p>
                         <Group><Button variant="light" disabled={busy || !connected} onClick={() => void act(async () => { await api(`/runs/${remoteRun.id}`); })}>Check owner status</Button>
                           <Button color="orange" variant="light" disabled={busy || !connected || !remoteRun.ownerRunId} onClick={() => void act(async () => { await api(`/runs/${remoteRun.id}/stop`, {}); })}>Request stop</Button></Group>
                         {remoteRun.lastKnownRun?.state === "completed" && <Button variant="light" disabled={!connected || busy} onClick={() => openRemoteTask(remoteRun)}>{remoteRun.lastKnownRun.followUp?.kind === "review" ? "Fix findings" : "Review work"}</Button>}

@@ -7,12 +7,18 @@ type Peer = { id: string; label: string; deviceId: string; sshHost: string; comm
 type Grant = { id: string; sourceDeviceId: string; projectId: string; revoked: boolean };
 type Settings = { launch?: { nodePath: string; command: string }; device: Device; peers: Peer[]; grants: Grant[]; projects: { id: string; name: string; path: string }[] };
 type Export = { launch?: { nodePath: string; command: string }; id: string; sourceDeviceId: string; projectId: string; token: string };
+type HumanGrant = { id: string; grantId: string; sourceDeviceId: string; ownerDeviceId: string; projectId: string; revoked?: boolean };
+type HumanSettings = { grants: HumanGrant[]; connections: { peerId: string; humanGrantId: string; configured: true }[] };
 const blank = { label: "", deviceId: "", sshHost: "", command: "agentklar", projectId: "", remoteProjectId: "", grantId: "", grantToken: "" };
 
 export function Devices({ device, connected, request }: {
   device: Snapshot["device"]; projects?: Snapshot["projects"]; connected: boolean;
   request: <T>(path: string, body?: unknown) => Promise<T>;
 }) {
+  const [human, setHuman] = useState<HumanSettings | null>(null);
+  const [humanCode, setHumanCode] = useState("");
+  const [humanPeer, setHumanPeer] = useState<string | null>(null);
+  const [humanExport, setHumanExport] = useState<(HumanGrant & {token:string}) | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [draft, setDraft] = useState(blank);
   const [connectionCode, setConnectionCode] = useState("");
@@ -27,15 +33,19 @@ export function Devices({ device, connected, request }: {
   const currentConnected = useRef(connected);
   currentConnected.current = connected;
   async function load() {
+    const key=generation.current;
     const data = await request<Settings>("/peers/settings");
-    if (currentConnected.current) setSettings(data);
+    if (currentConnected.current && key===generation.current) setSettings(data);
+    const value = await request<HumanSettings>("/peers/settings/human");
+    if (currentConnected.current && key===generation.current) setHuman(value);
   }
   useEffect(() => {
     const id = ++generation.current;
     if (connected) void request<Settings>("/peers/settings").then((data) => {
       if (id === generation.current) setSettings(data);
     }).catch((e) => { if (id === generation.current) setError((e as Error).message); });
-    else { setSettings(null); setExported(null); setDraft(blank); setConnectionCode(""); setChecks({}); }
+    if(connected) void request<HumanSettings>("/peers/settings/human").then(value => {if(id === generation.current) setHuman(value);}).catch(() => {});
+    else { setHuman(null); setHumanCode(""); setHumanExport(null); setSettings(null); setExported(null); setDraft(blank); setConnectionCode(""); setChecks({}); }
     return () => { generation.current++; };
   }, [connected, request]);
   async function act(key: string, action: () => Promise<void>) {
@@ -89,6 +99,27 @@ export function Devices({ device, connected, request }: {
       </Stack>;
     })}
     <details>
+      <summary>Optional approval sharing</summary>
+      <Stack gap="sm">
+        <p className="hint">Off by default. A separate private code lets a person on the connected computer answer native requests for this project. Pairing alone does not enable it.</p>
+        <Select label="Saved computer and project" data={settings?.peers.map(peer => ({value:peer.id,label:`${peer.label} · ${settings.projects.find(p => p.id === peer.projectId)?.name || "Project"}`})) || []} value={humanPeer} onChange={value => {setHumanPeer(value);setHumanCode("");}} disabled={disabled} />
+        {humanPeer && human?.connections.some(item => item.peerId === humanPeer) ? <Group><Badge>Approval sharing configured</Badge><Button color="orange" variant="light" disabled={disabled} onClick={() => void act("human-remove",async()=>{await request("/peers/settings/human/remove",{peerId:humanPeer});setNotice("Approval sharing removed on this computer.");await load();})}>Remove sharing</Button></Group> : <>
+          <Textarea label="Private approval code from owner" description="Separate from the connection code. Keep it private." value={humanCode} onChange={e=>setHumanCode(e.currentTarget.value)} maxLength={4096} autoComplete="off" disabled={disabled} />
+          <Button disabled={disabled || !humanPeer || !humanCode} onClick={() => void act("human-save",async()=>{
+            let code: Record<string,unknown>; try {if(humanCode.length>4096) throw Error();code=JSON.parse(humanCode);} catch {throw Error("Paste the complete private approval code.");}
+            const peer=settings?.peers.find(item=>item.id===humanPeer);
+            const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+            if(!code || typeof code!=="object" || Array.isArray(code) || !peer || typeof code.humanGrantId!=="string" || !uuid.test(code.humanGrantId) || typeof code.token!=="string" || !/^[0-9a-f]{64}$/.test(code.token) || code.grantId!==peer.grantId || code.ownerDeviceId!==peer.deviceId || code.projectId!==peer.remoteProjectId || code.sourceDeviceId!==settings?.device.id) throw Error("This approval code does not match the selected computer and project.");
+            const key=generation.current;await request("/peers/settings/human/save",{peerId:peer.id,humanGrantId:code.humanGrantId,token:code.token});if(key!==generation.current)return;setHumanCode("");setNotice("Approval sharing configured. Requests still need an explicit human decision.");await load();
+          })}>Save approval sharing</Button>
+        </>}
+        <p className="hint">On the owner computer, choose an existing project grant below to create a separate approval code.</p>
+        {settings?.grants.filter(grant=>!grant.revoked).map(grant=><Group key={grant.id} justify="space-between"><p className="hint">{settings.projects.find(p=>p.id===grant.projectId)?.name || "Project"}<br/>Source computer: {grant.sourceDeviceId}</p><Button variant="light" disabled={disabled} onClick={()=>void act("human-grant",async()=>{setHumanExport(null);const key=generation.current;const value=await request<HumanGrant & {token:string}>("/peers/settings/human/grant",{grantId:grant.id});if(key!==generation.current)return;setHumanExport(value);await load();})}>Create approval code</Button></Group>)}
+        {humanExport && <Alert color="blue"><Stack gap="xs"><p>Share this private code only with the named source computer.</p><Textarea label="Private approval code" autoComplete="off" readOnly value={JSON.stringify({humanGrantId:humanExport.id,token:humanExport.token,grantId:humanExport.grantId,sourceDeviceId:humanExport.sourceDeviceId,ownerDeviceId:humanExport.ownerDeviceId,projectId:humanExport.projectId})}/><Button variant="light" onClick={()=>void navigator.clipboard.writeText(JSON.stringify({humanGrantId:humanExport.id,token:humanExport.token,grantId:humanExport.grantId,sourceDeviceId:humanExport.sourceDeviceId,ownerDeviceId:humanExport.ownerDeviceId,projectId:humanExport.projectId})).then(()=>setNotice("Private approval code copied.")).catch(()=>setError("Could not copy the approval code."))}>Copy approval code</Button><Button variant="subtle" onClick={()=>setHumanExport(null)}>Hide code</Button></Stack></Alert>}
+        {human?.grants.map(grant=><Group key={grant.id} justify="space-between"><p className="hint">{settings?.projects.find(p=>p.id===grant.projectId)?.name || "Project"} · Approval sharing</p>{grant.revoked?<Badge color="gray">Revoked</Badge>:<Button color="orange" variant="light" disabled={disabled} onClick={()=>void act("human-revoke",async()=>{await request("/peers/settings/human/revoke",{humanGrantId:grant.id});if(humanExport?.id===grant.id)setHumanExport(null);setNotice("Approval sharing revoked.");await load();})}>Revoke approval sharing</Button>}</Group>)}
+      </Stack>
+    </details>
+    <details>
       <summary>Add a computer and project mapping</summary>
       <form onSubmit={(e) => { e.preventDefault(); void act("save", async () => {
         if (connectionCode.length > 4096) throw new Error("Connection code is too long.");
@@ -140,6 +171,7 @@ export function Devices({ device, connected, request }: {
           {grant.revoked ? <Badge color="gray">Revoked</Badge> : <Button color="orange" variant="light" disabled={disabled} onClick={() => void act(grant.id, async () => {
             await request("/peers/settings/revoke", { grantId: grant.id });
             if (exported?.id === grant.id) setExported(null);
+            if (humanExport?.grantId === grant.id) setHumanExport(null);
             setNotice("Project grant revoked."); await load();
           })}>Revoke grant</Button>}
         </Group>)}

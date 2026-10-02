@@ -299,3 +299,14 @@ Isolated integration checks cover exact Git HEAD, exhausted allowance, missing l
 Browser fixtures verified Automatic harness, connected/local scope, remote-only exact model pins, scope preview reset, human owner labels, saved remote routing evidence and compact result details. Desktop and 320px screenshots are under `/tmp/agentklar-routing-ui-qa/`; document width stayed 320 and modal width was 288. Fixtures were stopped and browser viewport reset. Real two-computer setup, shared remote approvals and Windows remain unverified. Antigravity is discovery only; the hosted dashboard cannot execute local agents.
 
 Final beta.22 checks passed: TypeScript, production build, all 171 tests, installed-package smoke exposing 23 MCP tools, and diff whitespace. Evidence: `/tmp/agentklar-beta22-release/`.
+
+
+## Optional remote human approvals — beta.23
+
+Approval sharing is off by default. A separate private human code binds an existing owner project grant to one saved connection. Trusted UI routes require a session cookie, reject Authorization headers, and require the exact browser Origin for native request reads and answers. Ordinary peer grants and MCP cannot read or answer approvals. Revocation blocks remote operations, including receipt replay.
+
+Isolated service and browser fixtures verified full native request details, offered decisions, an acknowledgment lost after one native callback, durable recovery after browser reload, explicit retry of the same choice, and a submitted receipt without duplicate callback. The receipt states that native execution is not confirmed. Desktop and 320px views fit; full JSON details stay in a scroll container. Settings removal returned sharing to its off state. Evidence: `/tmp/agentklar-human-ui-qa/`. Temporary services and tabs were stopped, and the viewport was reset. No real approvals, SSH, inference, pairing or native settings were changed.
+
+Focused tests cover source action persistence, definitive rejection requiring fresh review, revocation, bounded action history, concurrent acknowledgment versus rejection, callback failure and receipt recovery. A callback failure now appears in the owner's normal Work error without changing native run state. Real two-computer setup and Windows remain unverified. Antigravity remains discovery only, and the hosted dashboard cannot execute local agents.
+
+Final beta.23 checks passed: TypeScript, production build, all 177 tests, installed-package smoke exposing 23 MCP tools, and diff whitespace. Evidence: `/tmp/agentklar-beta23-release/`.

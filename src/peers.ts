@@ -7,6 +7,7 @@ import type { Store } from "./store.ts";
 import { changePacketSchema, type ChangePacket } from "./changes.ts";
 import { gitBase } from "./workspace.ts";
 import { z } from "zod";
+import {humanEnvelopeSchema,humanAnswerSchema,type HumanEnvelope,type HumanCall,type HumanGrant,type HumanConfiguration} from "./peer-human.ts";
 
 const uuid = z.uuid();
 const nodePath = z.string().startsWith("/").max(1000).refine(value => !/[\0\r\n]/.test(value));
@@ -24,7 +25,8 @@ export type PeerEnvelope = z.infer<typeof envelope>;
 export type PeerConnection = z.infer<typeof peerSaveSchema> & { id: string; lastObservedAt?: string; lastError?: string };
 type Device = { id: string; label: string; platform: string };
 type Reply = { status: number; body: unknown };
-export type PeerTransport = (peer: PeerConnection, request: PeerEnvelope) => Promise<Reply>;
+export type PeerTransport = (peer: PeerConnection, request: PeerEnvelope | HumanEnvelope) => Promise<Reply>;
+export type HumanAction = {id:string;dispatchId:string;ownerRunId:string;approvalId:string;requestId:string;expectedDigest:string;decision:string;state:"pending"|"acknowledged"|"rejected";createdAt:string;receipt?:unknown;error?:string;review?:{digest:string;decisions:string[];readAt:string};rejectedHistory?:{requestId:string;expectedDigest:string;decision:string;error?:string;recordedAt:string}[]};
 type Dispatch = { id: string; launchHash?: string; prompt: string; createdAt: string; projectId: string; peerId: string; ownerDeviceId: string; key: string; digest: string; request: PeerEnvelope; ownerRunId?: string; lastObservedAt?: string; lastKnownRun?: Run; connection: "unknown" | "observed"; error?: string };
 export type RemoteDispatch = Omit<Dispatch, "request" | "digest" | "key"> & {routing?:RoutingDecision};
 export class PeerError extends Error { constructor(message: string, public status = 400) { super(message); } }
@@ -55,8 +57,9 @@ export const sshPeerTransport: PeerTransport = (peer, request) => new Promise((r
 
 export class Peers {
   private launch = { nodePath: process.execPath, command: fileURLToPath(new URL(import.meta.url.endsWith(".ts") ? "../bin/agentklar.mjs" : "../../bin/agentklar.mjs", import.meta.url)) };
-  constructor(private store: Store, private device: Device, private call: (path: string, method?: string, body?: unknown) => Promise<Reply>, private transport: PeerTransport = sshPeerTransport) {
+  constructor(private store: Store, private device: Device, private call: (path: string, method?: string, body?: unknown) => Promise<Reply>, private transport: PeerTransport = sshPeerTransport, private humanCall?:HumanCall) {
     store.db.exec("CREATE TABLE IF NOT EXISTS peer_grants(id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE IF NOT EXISTS peer_connections(id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE IF NOT EXISTS peer_dispatches(id TEXT PRIMARY KEY,projectId TEXT NOT NULL,key TEXT NOT NULL,data TEXT NOT NULL,UNIQUE(projectId,key));");
+    store.db.exec("CREATE TABLE IF NOT EXISTS peer_human_grants(id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE IF NOT EXISTS peer_human_configurations(id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE IF NOT EXISTS peer_request_origins(key TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE IF NOT EXISTS peer_run_origins(runId TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE IF NOT EXISTS peer_human_actions(id TEXT PRIMARY KEY,data TEXT NOT NULL);");
   }
   private rows<T>(table: string): T[] { return this.store.db.prepare(`SELECT data FROM ${table} ORDER BY rowid`).all().map(r => JSON.parse(r.data as string)); }
   private save<T extends { id: string }>(table: string, value: T) { this.store.db.prepare(`INSERT INTO ${table}(id,data) VALUES(?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data`).run(value.id, JSON.stringify(value)); }
@@ -152,7 +155,14 @@ export class Peers {
         if (!project) throw new PeerError("Mapped project not found", 404);
         if (gitBase(project.path).baseCommit !== request.baseCommit) throw new PeerError("Mapped owner project HEAD differs from the explicit Git base. Synchronize it explicitly before launch.", 409);
       }
-      return this.call("/api/tasks/start", "POST", { ...request.task, projectId: grant.projectId, idempotencyKey: key, ...(request.task.followUp ? {} : { workspace: "worktree", baseCommit: request.baseCommit }), includeProjectContext: false });
+      const recorded = this.store.db.prepare("SELECT data FROM peer_request_origins WHERE key=?").get(key);
+      const origin = {grantId:grant.id,sourceDeviceId:request.sourceDeviceId,projectId:grant.projectId};
+      if (recorded && JSON.stringify(JSON.parse(recorded.data as string)) !== JSON.stringify(origin)) throw new PeerError("This request belongs to another parent grant.",403);
+      if (!prior && !recorded) this.store.db.prepare("INSERT OR IGNORE INTO peer_request_origins(key,data) VALUES(?,?)").run(key,JSON.stringify(origin));
+      const reply = await this.call("/api/tasks/start", "POST", { ...request.task, projectId: grant.projectId, idempotencyKey: key, ...(request.task.followUp ? {} : { workspace: "worktree", baseCommit: request.baseCommit }), includeProjectContext: false });
+      const accepted = reply.body as {id?:string;projectId?:string};
+      if (reply.status < 400 && accepted?.id && accepted.projectId === grant.projectId && this.store.db.prepare("SELECT data FROM peer_request_origins WHERE key=?").get(key)) this.store.db.prepare("INSERT OR IGNORE INTO peer_run_origins(runId,data) VALUES(?,?)").run(accepted.id,JSON.stringify(origin));
+      return reply;
     }
     const run = request.runId && this.store.run(request.runId);
     if (!run || run.projectId !== grant.projectId || !(this.store.db.prepare("SELECT key FROM runs WHERE id=?").get(run.id)?.key as string)?.startsWith(`peer:${request.sourceDeviceId}:`)) throw new PeerError("Run is outside this peer grant.", 403);
@@ -162,6 +172,92 @@ export class Peers {
       return reply.status >= 400 ? reply : { status: reply.status, body: changePacketSchema.strip().parse(reply.body) };
     }
     return this.call(`/api/runs/${run.id}${request.operation === "cancel" ? "/stop" : ""}`, request.operation === "cancel" ? "POST" : "GET");
+  }
+  humanSettings() {
+    return {grants:this.rows<HumanGrant>("peer_human_grants").map(({tokenHash,...grant})=>grant),actionIntents:this.rows<HumanAction>("peer_human_actions").sort((a,b)=>Number(b.state==="pending")-Number(a.state==="pending") || b.createdAt.localeCompare(a.createdAt)).slice(0,100),connections:this.rows<HumanConfiguration>("peer_human_configurations").map(c=>({peerId:c.id,humanGrantId:c.humanGrantId,configured:true as const}))};
+  }
+  humanGrant(input:unknown) {
+    const {grantId}=z.object({grantId:uuid}).strict().parse(input);
+    const parent=this.rows<{id:string;sourceDeviceId:string;projectId:string;revoked:boolean}>("peer_grants").find(g=>g.id===grantId && !g.revoked);
+    if(!parent) throw new PeerError("A live parent peer grant is required.",403);
+    const token=randomBytes(32).toString("hex"),grant:HumanGrant={id:randomUUID(),grantId,sourceDeviceId:parent.sourceDeviceId,ownerDeviceId:this.device.id,projectId:parent.projectId,tokenHash:hash(token),revoked:false};
+    this.save("peer_human_grants",grant);
+    const {tokenHash,revoked,...publicGrant}=grant;
+    return {...publicGrant,token};
+  }
+  humanRevoke(input:unknown) {
+    const {humanGrantId}=z.object({humanGrantId:uuid}).strict().parse(input);
+    const grant=this.rows<HumanGrant>("peer_human_grants").find(g=>g.id===humanGrantId);
+    if(!grant) throw new PeerError("Human grant not found.",404);
+    this.save("peer_human_grants",{...grant,revoked:true});return {ok:true};
+  }
+  humanSave(input:unknown) {
+    const data=z.object({peerId:uuid,humanGrantId:uuid,token:z.string().regex(/^[0-9a-f]{64}$/)}).strict().parse(input),peer=this.peer(data.peerId);
+    this.save("peer_human_configurations",{id:peer.id,humanGrantId:data.humanGrantId,token:data.token,grantId:peer.grantId,deviceId:peer.deviceId,remoteProjectId:peer.remoteProjectId});
+    return {peerId:peer.id,humanGrantId:data.humanGrantId,configured:true};
+  }
+  humanRemove(input:unknown) {const {peerId}=z.object({peerId:uuid}).strict().parse(input);this.store.db.prepare("DELETE FROM peer_human_configurations WHERE id=?").run(peerId);return {ok:true};}
+  async humanOwner(input:unknown):Promise<Reply> {
+    const request=humanEnvelopeSchema.parse(input);
+    const grant=this.rows<HumanGrant>("peer_human_grants").find(g=>g.id===request.humanGrantId);
+    if(!grant || grant.revoked || request.targetDeviceId!==this.device.id || grant.ownerDeviceId!==this.device.id || grant.sourceDeviceId!==request.sourceDeviceId || !timingSafeEqual(Buffer.from(grant.tokenHash),Buffer.from(hash(request.token)))) throw new PeerError("Human capability is missing, revoked or does not match.",403);
+    const parent=this.rows<{id:string;sourceDeviceId:string;projectId:string;revoked:boolean}>("peer_grants").find(g=>g.id===grant.grantId);
+    if(!parent || parent.revoked || parent.sourceDeviceId!==grant.sourceDeviceId || parent.projectId!==grant.projectId) throw new PeerError("Parent peer grant is revoked or does not match.",403);
+    const run=this.store.run(request.runId),saved=this.store.db.prepare("SELECT data FROM peer_run_origins WHERE runId=?").get(request.runId);
+    const origin=saved && JSON.parse(saved.data as string) as {grantId:string;sourceDeviceId:string;projectId:string}|undefined;
+    if(!run || run.projectId!==grant.projectId || !origin || origin.grantId!==grant.grantId || origin.sourceDeviceId!==grant.sourceDeviceId || origin.projectId!==grant.projectId) throw new PeerError("This run has no exact origin for this human capability. Use the owner UI.",403);
+    if(!this.humanCall) throw new PeerError("Owner human approval channel is unavailable.",503);
+    if(request.operation==="list") {if(request.approvalId || request.expectedDigest || request.decision) throw new PeerError("List does not accept approval or decision fields.");return this.humanCall(run.id,"list",{});}
+    if(request.operation==="read") {if(!request.approvalId || request.expectedDigest || request.decision) throw new PeerError("Read requires only an exact approval ID.");return this.humanCall(run.id,"read",{approvalId:request.approvalId});}
+    const answer=humanAnswerSchema.parse({approvalId:request.approvalId,requestId:request.requestId,expectedDigest:request.expectedDigest,decision:request.decision});
+    return this.humanCall(run.id,"answer",answer);
+  }
+  private humanConfiguration(peer:PeerConnection) {
+    const config=this.rows<HumanConfiguration>("peer_human_configurations").find(c=>c.id===peer.id);
+    if(!config || config.grantId!==peer.grantId || config.deviceId!==peer.deviceId || config.remoteProjectId!==peer.remoteProjectId) throw new PeerError("Import a separate owner-issued human capability for this mapping.",403);
+    return config;
+  }
+  private async humanRequest(dispatchId:string,operation:HumanEnvelope["operation"],fields:Partial<HumanEnvelope>={}) {
+    const dispatch=this.dispatch(uuid.parse(dispatchId));
+    if(!dispatch.ownerRunId) throw new PeerError("Owner run is unknown. Query its status before requesting approvals.",409);
+    const peer=this.peer(dispatch.peerId),config=this.humanConfiguration(peer);
+    const request=humanEnvelopeSchema.parse({version:1,channel:"human",sourceDeviceId:this.device.id,targetDeviceId:peer.deviceId,humanGrantId:config.humanGrantId,token:config.token,operation,runId:dispatch.ownerRunId,requestId:randomUUID(),...fields});
+    const reply=await this.transport(peer,request);
+    if(reply.status>=400) throw new PeerError(typeof (reply.body as {error?:string})?.error === "string" ? (reply.body as {error:string}).error.slice(0,240) : "Owner rejected this human request.",reply.status);
+    return reply.body;
+  }
+  humanList(dispatchId:string) {return this.humanRequest(dispatchId,"list");}
+  async humanRead(dispatchId:string,approvalId:string) {
+    const body=await this.humanRequest(dispatchId,"read",{approvalId:z.string().min(1).max(200).parse(approvalId)}) as Record<string,unknown>;
+    let actionIntent=this.rows<HumanAction>("peer_human_actions").find(a=>a.dispatchId===dispatchId && a.approvalId===approvalId);
+    if(actionIntent?.state==="rejected") {actionIntent={...actionIntent,review:undefined};this.save("peer_human_actions",actionIntent);}
+    const approval=body.approval as {id?:string;runId?:string;decisions?:unknown}|null;
+    if(actionIntent?.state==="rejected" && approval?.id===approvalId && approval.runId===actionIntent.ownerRunId && typeof body.digest==="string" && /^[0-9a-f]{64}$/.test(body.digest) && Array.isArray(approval.decisions) && approval.decisions.length<=50 && approval.decisions.every(d=>typeof d==="string" && d.length<=200)) {
+      actionIntent={...actionIntent,review:{digest:body.digest,decisions:approval.decisions,readAt:new Date().toISOString()}};
+      this.save("peer_human_actions",actionIntent);
+    }
+    return {...body,...(actionIntent ? {actionIntent} : {})};
+  }
+  async humanAnswer(dispatchId:string,input:unknown) {
+    const answer=humanAnswerSchema.parse(input),dispatch=this.dispatch(uuid.parse(dispatchId));
+    if(!dispatch.ownerRunId) throw new PeerError("Owner run is unknown.",409);
+    this.humanConfiguration(this.peer(dispatch.peerId));
+    const actions=this.rows<HumanAction>("peer_human_actions"),id=`${dispatch.id}:${answer.approvalId}`,saved=actions.find(a=>a.id===id),prior=saved?.state==="rejected" ? undefined : saved;
+    if(saved?.state==="rejected" && (!saved.review || saved.review.digest!==answer.expectedDigest || !saved.review.decisions.includes(answer.decision) || saved.requestId===answer.requestId)) throw new PeerError("Read the complete current owner approval again before submitting a new reviewed action.",409);
+    if(!prior && actions.filter(a=>a.state==="pending").length>=100) throw new PeerError("Resolve saved pending human actions before creating more.",409);
+    if(prior && (prior.requestId!==answer.requestId || prior.expectedDigest!==answer.expectedDigest || prior.decision!==answer.decision || prior.ownerRunId!==dispatch.ownerRunId)) throw new PeerError("This approval already has a saved action. Retry its same request ID, digest and decision.",409);
+    const action:HumanAction=prior || {id,dispatchId:dispatch.id,ownerRunId:dispatch.ownerRunId,...answer,state:"pending",createdAt:new Date().toISOString(),...(saved?.state==="rejected" ? {rejectedHistory:[...(saved.rejectedHistory || []),{requestId:saved.requestId,expectedDigest:saved.expectedDigest,decision:saved.decision,error:saved.error,recordedAt:new Date().toISOString()}].slice(-10)} : {})};
+    this.save("peer_human_actions",action);
+    try {
+      const receipt=await this.humanRequest(dispatch.id,"answer",answer);
+      const latest=this.rows<HumanAction>("peer_human_actions").find(a=>a.id===id);
+      if(latest?.requestId===answer.requestId) this.save("peer_human_actions",{...latest,state:"acknowledged",receipt});
+      return receipt;
+    } catch(error) {
+      const latest=this.rows<HumanAction>("peer_human_actions").find(a=>a.id===id);
+      if(latest?.requestId===answer.requestId && latest.state==="pending" && error instanceof PeerError && [400,401,403,404,409,413].includes(error.status)) this.save("peer_human_actions",{...latest,state:"rejected",error:error.message});
+      throw error;
+    }
   }
   private saveDispatch(d: Dispatch) { this.store.db.prepare("INSERT INTO peer_dispatches(id,projectId,key,data) VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data").run(d.id, d.projectId, d.key, JSON.stringify(d)); }
   private publicDispatch({ request, digest, key, ...d }: Dispatch) { return {...d,...(request.task?.routingEvidence ? {routing: request.task?.routingEvidence as RoutingDecision} : {})}; }

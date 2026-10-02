@@ -1,3 +1,4 @@
+import { Approvals, ApprovalError, approvalAnswerSchema } from "./approvals.ts";
 import { Peers, PeerError, routingEvidenceSchema, type PeerTransport } from "./peers.ts";
 import { DatabaseSync } from "node:sqlite";
 import { Hono } from "hono";
@@ -210,7 +211,17 @@ export function createService(
       headers: { Authorization: `Bearer ${bearer}`, "Content-Type": "application/json", "x-agentklar-peer-internal": peerInternal },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
     return { status: response.status, body: await response.json() };
-  }, peerTransport);
+  }, peerTransport, async (runId, operation, fields) => {
+    try {
+      if (operation === "list") return { status: 200, body: approvalActions.list(runId) };
+      if (operation === "read") return { status: 200, body: approvalActions.read(runId, z.uuid().parse(fields.approvalId)) };
+      return { status: 200, body: approvalActions.consume(runId, fields) };
+    } catch (error) {
+      if (error instanceof ApprovalError) return { status:error.status,body:{error:error.message} };
+      if (error instanceof z.ZodError) return { status:400,body:{error:"Invalid concrete approval request."} };
+      throw error;
+    }
+  });
   const changes = new Changes(store, home);
   function appliedView(applied: ChangeApply) {
     const quote = (value: string) => `'${value.replaceAll("'", "'\"'\"'")}'`;
@@ -368,6 +379,10 @@ export function createService(
     return overlaps(aPath, bPath);
   };
   const answers = new Map<string, (decision: string) => void>();
+  const approvalActions = new Approvals(store,answers,runId => {
+    const run = store.run(runId);
+    return !quiesced && !stopping && !!run && ["running","needs_attention"].includes(run.state) && workers.has(runId);
+  });
   const leads = new Map<string, ProjectLead & { bridgeId: string; deadline: number }>();
   const leadNow = leadOptions.now || (() => performance.now());
   const leadWallNow = leadOptions.wallNow || Date.now;
@@ -404,7 +419,7 @@ export function createService(
     !!a &&
     Buffer.byteLength(a) === Buffer.byteLength(b) &&
     timingSafeEqual(Buffer.from(a), Buffer.from(b));
-  app.onError((e, c) => c.json({ error: e.message }, e instanceof PeerError || e instanceof ChangeError ? e.status as 400 : e instanceof InstructionError || e instanceof SetupError || e instanceof SkillError ? e.status : 500));
+  app.onError((e, c) => c.json({ error: e.message }, e instanceof ApprovalError || e instanceof PeerError || e instanceof ChangeError ? e.status as 400 : e instanceof InstructionError || e instanceof SetupError || e instanceof SkillError ? e.status : 500));
   app.use("*", async (c, next) => {
     const host = c.req.header("host") || new URL(c.req.url).host;
     if (![`127.0.0.1:${port}`, "127.0.0.1:5173"].includes(host))
@@ -432,6 +447,10 @@ export function createService(
         { error: operator ? "Run agentklar service open to open the local UI." : "Open the one-time setup URL printed by the local service." },
         401,
       );
+    if (c.req.path.startsWith("/api/remote-approvals/") && (!ui || !origin || !origins.has(origin) || !!c.req.header("authorization")))
+      return c.json({ error:"Only the trusted local UI with its exact Origin may view or answer remote approvals." },403);
+    if (c.req.path.startsWith("/api/peers/settings/human") && (!ui || !!c.req.header("authorization") || (c.req.method !== "GET" && (!origin || !origins.has(origin)))))
+      return c.json({ error:"Only the trusted local UI may configure human approval relay." },403);
     if (c.req.path.startsWith("/api/peers/settings") && (!ui || mcp || (c.req.method !== "GET" && (!origin || !origins.has(origin)))))
       return c.json({ error: "Only the trusted local UI may pair devices or change peer grants" }, 403);
     if (c.req.path.includes("/setup/") && (!ui || mcp || (c.req.method !== "GET" && (!origin || !origins.has(origin)))))
@@ -1386,20 +1405,33 @@ export function createService(
     return c.json(compactRun(store.run(r.id)!));
   });
   app.post("/api/approvals/:id", async (c) => {
-    const a = store.approvals().find((a) => a.id === c.req.param("id"));
-    if (!a) return c.json({ error: "Approval no longer pending" }, 404);
     const data = await c.req.json().catch(() => null);
-    if (
-      typeof data?.decision !== "string" ||
-      !a.decisions.includes(data.decision)
-    )
-      return c.json({ error: "Unsupported decision" }, 400);
-    const answer = answers.get(a.id);
-    if (!answer) return c.json({ error: "Native worker unavailable" }, 409);
-    answer(data.decision);
-    answers.delete(a.id);
-    store.db.prepare("DELETE FROM approvals WHERE id=?").run(a.id);
-    return c.json({ ok: true });
+    const receipt = approvalActions.local(c.req.param("id"),data?.decision);
+    return c.json({ ok:true,receipt });
+  });
+  app.get("/api/peers/settings/human", c => c.json(peers.humanSettings()));
+  for (const [operation, handler] of [["grant", (v: unknown) => peers.humanGrant(v)], ["save", (v: unknown) => peers.humanSave(v)], ["revoke", (v: unknown) => peers.humanRevoke(v)], ["remove", (v: unknown) => peers.humanRemove(v)]] as const)
+    app.post(`/api/peers/settings/human/${operation}`, async c => {
+      try { return c.json(handler(await c.req.json())); }
+      catch (error) { if(error instanceof z.ZodError) return c.json({error:"Invalid human approval settings."},400);throw error; }
+    });
+  app.post("/api/peer-human",async c => {
+    try { const reply=await peers.humanOwner(await c.req.json());return c.json(reply.body as object,reply.status as 200); }
+    catch(error) { if(error instanceof z.ZodError) return c.json({error:"Invalid human peer request."},400);throw error; }
+  });
+  const emptyHumanRead = async (c: { req: { json: () => Promise<unknown> } }) => z.object({}).strict().safeParse(await c.req.json().catch(()=>null)).success;
+  app.post("/api/remote-approvals/:dispatchId/list",async c => {
+    if(!await emptyHumanRead(c))return c.json({error:"Approval reads require an empty object."},400);
+    return c.json(await peers.humanList(c.req.param("dispatchId")) as object);
+  });
+  app.post("/api/remote-approvals/:dispatchId/:approvalId/read",async c => {
+    if(!await emptyHumanRead(c))return c.json({error:"Approval reads require an empty object."},400);
+    return c.json(await peers.humanRead(c.req.param("dispatchId"),c.req.param("approvalId")) as object);
+  });
+  app.post("/api/remote-approvals/:dispatchId/:approvalId/answer",async c => {
+    const parsed=approvalAnswerSchema.omit({approvalId:true}).safeParse(await c.req.json().catch(()=>null));
+    if(!parsed.success)return c.json({error:"Provide the reviewed digest, offered decision and stable request ID."},400);
+    return c.json(await peers.humanAnswer(c.req.param("dispatchId"),{...parsed.data,approvalId:c.req.param("approvalId")}) as object);
   });
   app.get("/api/peers/settings", c => c.json(peers.settings()));
   for (const [operation, handler] of [["grant", (v: unknown) => peers.grant(v)], ["revoke", (v: unknown) => peers.revoke(v)], ["save", (v: unknown) => peers.saveConnection(v)], ["test", (v: unknown) => peers.test(v)]] as const)

@@ -198,3 +198,108 @@ test("routing metadata is scoped to saved device/project/base and rejects stale 
   await assert.rejects(f.ownerPeers.owner(request),/HEAD differs/);
  } finally {await f.coordinator.close();await f.owner.close();rmSync(f.dir,{recursive:true,force:true});}
 });
+
+test("separate human capability binds exact parent grant and durable source action replay", async () => {
+ const f=fixture();
+ try {
+  const receiptMap=new Map<string,unknown>();let answers=0,loseAck=true;
+  const approvalId="approval-native-1",digest="a".repeat(64);
+  const owner=new Peers(f.owner.store,f.remoteDevice,async()=>({status:500,body:{error:"not used"}}),undefined,async(runId,operation,fields)=>{
+   if(operation==="list") return {status:200,body:{approvals:[{id:approvalId,runId,digest}]}};
+   if(operation==="read") return {status:200,body:{approval:{id:approvalId,runId,decisions:["accept","decline"]},digest}};
+   if(fields.expectedDigest!==digest) return {status:409,body:{error:"Approval digest changed."}};
+   assert.equal(fields.approvalId,approvalId);assert.equal(fields.decision,"accept");
+   if(!receiptMap.has(fields.requestId!)) {answers++;receiptMap.set(fields.requestId!,{requestId:fields.requestId,approvalId,runId,decision:fields.decision,digest,state:"submitted",recordedAt:new Date().toISOString(),message:"Submitted to native worker."});}
+   return {status:200,body:receiptMap.get(fields.requestId!)};
+  });
+  const transport:PeerTransport=async(_peer,request)=>{
+   const reply="channel" in request ? await owner.humanOwner(request) : await f.ownerPeers.owner(request);
+   if("channel" in request && request.operation==="answer" && reply.status<400 && loseAck) {loseAck=false;throw new PeerError("fixture human ack lost",503);}
+   return reply;
+  };
+  const source=()=>new Peers(f.coordinator.store,f.localDevice,async()=>({status:500,body:{}}),transport);
+  let peers=source();
+  const dispatch=await peers.start({peerId:f.peer.id,idempotencyKey:"human-build",baseCommit:f.baseCommit,task:{prompt:"Scoped work",harness:"codex"}});
+  assert.ok(dispatch.ownerRunId);
+  await assert.rejects(peers.humanList(dispatch.id),/separate owner-issued/);
+  const capability=owner.humanGrant({grantId:f.grant.id});
+  peers.humanSave({peerId:f.peer.id,humanGrantId:capability.id,token:capability.token});
+  const publicText=JSON.stringify({source:peers.humanSettings(),owner:owner.humanSettings(),settings:peers.settings()});
+  assert.ok(!publicText.includes(capability.token));assert.ok(!publicText.includes(f.grant.token));
+  assert.ok(await peers.humanRead(dispatch.id,approvalId));
+  await assert.rejects(peers.humanAnswer(dispatch.id,{approvalId,requestId:randomUUID(),expectedDigest:"b".repeat(64),decision:"accept"}),/digest changed/);
+  assert.equal(peers.humanSettings().actionIntents[0]?.state,"rejected");
+  const answer={approvalId,requestId:randomUUID(),expectedDigest:digest,decision:"accept"};
+  await assert.rejects(peers.humanAnswer(dispatch.id,answer),/Read the complete/);
+  await peers.humanRead(dispatch.id,approvalId);
+  await assert.rejects(peers.humanAnswer(dispatch.id,answer),/ack lost/);
+  assert.equal(answers,1);assert.equal(peers.humanSettings().actionIntents[0]?.state,"pending");
+  peers=source(); // Reopen the coordinator capability/intent from durable storage.
+  const read=await peers.humanRead(dispatch.id,approvalId);
+  assert.equal((read.actionIntent as {requestId:string}).requestId,answer.requestId);
+  await assert.rejects(peers.humanAnswer(dispatch.id,{...answer,requestId:randomUUID()}),/saved action/);
+  const receipt=await peers.humanAnswer(dispatch.id,answer) as {state:string};
+  assert.equal(receipt.state,"submitted");assert.equal(answers,1);
+  assert.equal(peers.humanSettings().actionIntents[0]?.state,"acknowledged");
+  assert.equal(peers.humanSettings().actionIntents[0]?.rejectedHistory?.length,1);
+  const other=f.ownerPeers.grant({sourceDeviceId:f.localDevice.id,projectId:f.remoteProject.id});
+  const wrong=owner.humanGrant({grantId:other.id});
+  await assert.rejects(owner.humanOwner({version:1,channel:"human",sourceDeviceId:f.localDevice.id,targetDeviceId:f.remoteDevice.id,humanGrantId:wrong.id,token:wrong.token,operation:"list",runId:dispatch.ownerRunId,requestId:randomUUID()}),/exact origin/);
+  owner.humanRevoke({humanGrantId:capability.id});
+  await assert.rejects(peers.humanAnswer(dispatch.id,answer),/revoked/);assert.equal(answers,1);
+  const renewed=owner.humanGrant({grantId:f.grant.id});peers.humanSave({peerId:f.peer.id,humanGrantId:renewed.id,token:renewed.token});
+  f.ownerPeers.revoke({grantId:f.grant.id});
+  await assert.rejects(peers.humanList(dispatch.id),/Parent peer grant/);
+ } finally {await f.coordinator.close();await f.owner.close();rmSync(f.dir,{recursive:true,force:true});}
+});
+
+test("ordinary grant cannot enter human channel; origin cannot be rebound by grant replay", async () => {
+ const f=fixture();
+ try {
+  const request:PeerEnvelope={version:1,sourceDeviceId:f.localDevice.id,targetDeviceId:f.remoteDevice.id,grantId:f.grant.id,token:f.grant.token,operation:"start",requestId:randomUUID(),baseCommit:f.baseCommit,task:{prompt:"Origin",harness:"codex",readOnly:false}};
+  const accepted=await f.ownerPeers.owner(request),run=(accepted.body as {id:string}).id;
+  const other=f.ownerPeers.grant({sourceDeviceId:f.localDevice.id,projectId:f.remoteProject.id});
+  await assert.rejects(f.ownerPeers.owner({...request,grantId:other.id,token:other.token}),/another parent grant/);
+  const cap=f.ownerPeers.humanGrant({grantId:f.grant.id});
+  const human={version:1,channel:"human",sourceDeviceId:f.localDevice.id,targetDeviceId:f.remoteDevice.id,humanGrantId:cap.id,token:cap.token,operation:"list",runId:run,requestId:randomUUID()};
+  await assert.rejects(f.ownerPeers.owner(human));
+  await assert.rejects(f.ownerPeers.humanOwner({...human,token:f.grant.token}),/capability/);
+  f.owner.store.db.prepare("DELETE FROM peer_run_origins WHERE runId=?").run(run);
+  f.owner.store.db.prepare("DELETE FROM peer_request_origins").run();
+  await f.ownerPeers.owner(request); // Legacy replay must not invent provenance.
+  await assert.rejects(f.ownerPeers.humanOwner(human),/no exact origin/);
+ } finally {await f.coordinator.close();await f.owner.close();rmSync(f.dir,{recursive:true,force:true});}
+});
+
+
+test("human settings keep pending and recent rejected actions visible within history bound", async () => {
+ const f=fixture();
+ try {
+  const put=f.coordinator.store.db.prepare("INSERT INTO peer_human_actions(id,data) VALUES(?,?)");
+  for(let i=0;i<110;i++) {const action={id:String(i),dispatchId:randomUUID(),ownerRunId:randomUUID(),approvalId:"approval",requestId:randomUUID(),expectedDigest:"a".repeat(64),decision:"accept",state:i===109 ? "rejected" : "acknowledged",createdAt:new Date(1700000000000+i*1000).toISOString()};put.run(action.id,JSON.stringify(action));}
+  put.run("pending",JSON.stringify({id:"pending",dispatchId:randomUUID(),ownerRunId:randomUUID(),approvalId:"approval",requestId:randomUUID(),expectedDigest:"a".repeat(64),decision:"accept",state:"pending",createdAt:new Date(1600000000000).toISOString()}));
+  const actions=f.peers.humanSettings().actionIntents;
+  assert.equal(actions.length,100);assert.equal(actions[0]?.id,"pending");assert.equal(actions[1]?.id,"109");assert.ok(!actions.some(a=>a.id==="0"));
+ } finally {await f.coordinator.close();await f.owner.close();rmSync(f.dir,{recursive:true,force:true});}
+});
+
+
+test("concurrent same action acknowledgement cannot be downgraded by later rejection", async () => {
+ const f=fixture();
+ try {
+  let count=0,release!:()=>void;const held=new Promise<void>(resolve=>{release=resolve;});
+  const transport:PeerTransport=async(_peer,request)=>{
+   if(!("channel" in request)) return f.ownerPeers.owner(request);
+   if(++count===1) return {status:200,body:{state:"submitted",requestId:request.requestId}};
+   await held;return {status:403,body:{error:"Human capability revoked."}};
+  };
+  const peers=new Peers(f.coordinator.store,f.localDevice,async()=>({status:500,body:{}}),transport);
+  const dispatch=await peers.start({peerId:f.peer.id,idempotencyKey:"human-race",baseCommit:f.baseCommit,task:{prompt:"Race fixture",harness:"codex"}});
+  const cap=f.ownerPeers.humanGrant({grantId:f.grant.id});peers.humanSave({peerId:f.peer.id,humanGrantId:cap.id,token:cap.token});
+  const answer={approvalId:"approval-race",requestId:randomUUID(),expectedDigest:"a".repeat(64),decision:"accept"};
+  const first=peers.humanAnswer(dispatch.id,answer),second=peers.humanAnswer(dispatch.id,answer);
+  await first;assert.equal(peers.humanSettings().actionIntents[0]?.state,"acknowledged");
+  const rejected=assert.rejects(second,/revoked/);release();await rejected;
+  assert.equal(peers.humanSettings().actionIntents[0]?.state,"acknowledged");
+ } finally {await f.coordinator.close();await f.owner.close();rmSync(f.dir,{recursive:true,force:true});}
+});

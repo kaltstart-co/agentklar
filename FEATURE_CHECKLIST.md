@@ -25,6 +25,7 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 - [x] Package install
 - [x] Codex delegation
 - [x] Native approvals
+- [x] Shared remote human approvals
 - [x] Run history
 - [x] Project run discovery
 - [x] Launch source labels
@@ -72,4 +73,3 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 - [ ] Plugin bundles
 - [ ] Wider config preview and rollback
 - [ ] Real two-computer setup
-- [ ] Shared remote approval UI
