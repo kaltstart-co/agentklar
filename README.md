@@ -9,7 +9,7 @@ This is a fresh TypeScript rewrite. The old Go application is preserved in Git a
 Requires Node 24 and npm on macOS or Linux. Install this pinned GitHub beta package, then start the local service:
 
 ```sh
-npm install -g https://github.com/kaltstart-co/agentklar/releases/download/v0.1.0-beta.27/agentklar-0.1.0-beta.27.tgz
+npm install -g https://github.com/kaltstart-co/agentklar/releases/download/v0.1.0-beta.28/agentklar-0.1.0-beta.28.tgz
 agentklar start
 ```
 
@@ -46,7 +46,20 @@ Stop a foreground `agentklar start` first. `open` creates a new one-use browser 
 
 `AGENTKLAR_HOME` and `AGENTKLAR_PORT` choose an isolated service. Set the same values for each command. The setup saves absolute paths for Node and the installed service files. It never stores model API keys in launchd settings. The one-use browser link is not written to launchd logs. A service restart marks unfinished runs interrupted; it does not resume workers.
 
-To update, stop the service, install a new pinned release tarball, then start it again. Native MCP entries and a macOS launchd job contain absolute file paths, so keep the same global npm prefix and Node 24 path when updating. If either path changes, remove and add the managed connection or background job through the local UI and CLI.
+### Update AgentKlar
+
+From beta.28, open **Settings → AgentKlar updates** to check the official release, then run:
+
+```sh
+agentklar update --check
+agentklar update
+```
+
+The command supports writable global npm installs. It verifies the official release checksum and package compatibility, stages the new package, and keeps the previous package. Active workers, pending permissions, and saves in progress block a managed service restart. Save open dashboard drafts first. A managed macOS service restarts at its existing paths; stop a foreground service before updating. Open the dashboard again with `agentklar service open` or `agentklar start`.
+
+Before replacing files, the command prints a recovery command using a private folder. Keep that command if an update is interrupted. `agentklar update --recover <private recovery folder>` restores an unfinished package replacement or checks a committed update. The printed absolute Node command also works if the main CLI is temporarily missing. Recovery refuses changed package folders or ownership. Saved work stays in place; this is package recovery, not a database backup.
+
+Older releases need one manual install of beta.28. Source checkouts keep their normal Git and build workflow. Native MCP entries and macOS startup use absolute paths, so keep the same global npm prefix and Node 24 path. If either path changes, remove and add the managed connection or background job through the local UI and CLI.
 
 Register an existing project folder. Add roles with a harness, optional model, and responsibility. Start a task from your native harness through MCP or from the local UI. Only registered projects can run workers. Choose **Current project folder** or **New worktree** for each new task. A worktree is a separate Git checkout made from the latest local commit. Uncommitted changes, ignored files and local-only files stay in the original folder. AgentKlar allows up to two active workers per project, each in a different checkout. A second worker in the same checkout gets a busy error. Repeating the same task with the same idempotency key returns its original run.
 
@@ -104,7 +117,7 @@ Drafts stay in the open app when you switch views or harnesses, or the local ser
 
 Open **Settings → Native config and extensions**, then select **Refresh native inventory**. This read-only view lists bounded source presence and scope for the selected project and this computer. Expand a harness to inspect known config paths and extension metadata. It does not show config values, credentials or native commands, and makes no native writes or model calls.
 
-Cached package names/versions and project manifests are evidence of files, not proof of installed, enabled or loaded extensions. Activation and incomplete source coverage stay explicit. Native settings still decide what loads. This inventory does not install plugins or provide general native config editing. Actual native cross-harness continuation still needs verification, and an easy user upgrade flow remains unfinished; real two-computer setup remains later.
+Cached package names/versions and project manifests are evidence of files, not proof of installed, enabled or loaded extensions. Activation and incomplete source coverage stay explicit. Native settings still decide what loads. This inventory does not install plugins or provide general native config editing. Actual native cross-harness continuation still needs verification; real two-computer setup remains later.
 
 ## Skills
 

@@ -1,3 +1,5 @@
+import { readUpdateMaintenance } from "./launchd.ts";
+import { currentVersion, checkUpdate, updateStatus } from "./update.ts";
 import { nativeInventory } from "./inventory.ts";
 import { Control, ControlError } from "./control.ts";
 import { Approvals, ApprovalError, approvalAnswerSchema } from "./approvals.ts";
@@ -180,6 +182,7 @@ export function createService(
   opencodeCommand: string | null = executable("opencode"),
   peerTransport?: PeerTransport,
 ) {
+  const startupMaintenance = readUpdateMaintenance(home, operator?.id);
   const personalHome = realpathSync(skillOptions.userHome ?? homedir());
   const release = ownHome(home);
   let store: Store;
@@ -335,17 +338,7 @@ export function createService(
     advice.warnings = [...advice.warnings, ...warnings].slice(0, 12);
     return advice;
   }
-  app.get("/api/projects/:id/routing-metadata", async c => {
-    const project = store.projects().find(p => p.id === c.req.param("id"));
-    if (!project) return c.json({ error: "Project not found" }, 404);
-    if (activeRuns(project.id).length >= 2) return c.json({ error: "Mapped project already has two active workers." }, 409);
-    const baseCommit = gitBase(project.path).baseCommit;
-    const catalog = withObservedMuseQuota(await catalogs.refresh(project), store.runs());
-    if (quiesced || stopping) return c.json({ error: "Local service is stopping." }, 503);
-    if (gitBase(project.path).baseCommit !== baseCommit) return c.json({ error: "Project Git HEAD changed during discovery." }, 409);
-    if (activeRuns(project.id).length >= 2) return c.json({ error: "Mapped project already has two active workers." }, 409);
-    return c.json({ deviceId: devices.device.id, projectId: project.id, baseCommit, catalog, installed: installedWorkers() });
-  });
+
   function linkedSource(projectId: string, link: { runId: string; kind: "review" | "fix" }) {
     const source = store.run(link.runId);
     if (!source || source.projectId !== projectId)
@@ -420,7 +413,8 @@ export function createService(
   const session = randomBytes(32).toString("hex");
   let setup = randomBytes(32).toString("hex");
   let setupExpires = Date.now() + 5 * 60_000;
-  let quiesced = false;
+  let mutations = 0;
+  let quiesced = !!startupMaintenance;
   let stopping = false;
   const setupUrl = () => `http://127.0.0.1:${port}/setup?token=${setup}`;
   const origins = new Set([
@@ -467,6 +461,8 @@ export function createService(
       return c.json({ error:"Only the trusted local UI may configure human approval relay." },403);
     if (c.req.path.startsWith("/api/peers/settings") && (!ui || mcp || (c.req.method !== "GET" && (!origin || !origins.has(origin)))))
       return c.json({ error: "Only the trusted local UI may pair devices or change peer grants" }, 403);
+    if (c.req.path.startsWith("/api/update") && (!ui || c.req.header("authorization") !== undefined || (c.req.method !== "GET" && (!origin || !origins.has(origin)))))
+      return c.json({ error: "Only the trusted local UI may check AgentKlar updates" }, 403);
     if (c.req.path.includes("/setup/") && (!ui || mcp || (c.req.method !== "GET" && (!origin || !origins.has(origin)))))
       return c.json({ error: "Only the trusted local UI may read or change native MCP setup" }, 403);
     if (
@@ -486,13 +482,34 @@ export function createService(
       return c.json({ error: "Skill previews are available through POST only" }, 403);
     if (c.req.method !== "GET" && !mcp && (!origin || !origins.has(origin)))
       return c.json({ error: "Exact local Origin required" }, 403);
+    const mutation = c.req.method !== "GET";
+    if (mutation && (quiesced || stopping)) return c.json({ error: "Local service is stopping." }, 503);
     if(c.req.method!=="GET")initialControl.set(c.req.raw,new Map(store.projects().map(p=>[p.id,control.stamp(p.id,c.req.header("x-agentklar-bridge-id"),currentLead(p.id),true)])));
-    await next();
+    if (mutation) mutations++;
+    try { await next(); } finally { if (mutation) mutations--; }
+  });
+  app.get("/api/projects/:id/routing-metadata", async c => {
+    if (quiesced || stopping) return c.json({ error: "Local service is stopping." }, 503);
+    const project = store.projects().find(p => p.id === c.req.param("id"));
+    if (!project) return c.json({ error: "Project not found" }, 404);
+    if (activeRuns(project.id).length >= 2) return c.json({ error: "Mapped project already has two active workers." }, 409);
+    const baseCommit = gitBase(project.path).baseCommit;
+    const catalog = withObservedMuseQuota(await catalogs.refresh(project), store.runs());
+    if (quiesced || stopping) return c.json({ error: "Local service is stopping." }, 503);
+    if (gitBase(project.path).baseCommit !== baseCommit) return c.json({ error: "Project Git HEAD changed during discovery." }, 409);
+    if (activeRuns(project.id).length >= 2) return c.json({ error: "Mapped project already has two active workers." }, 409);
+    return c.json({ deviceId: devices.device.id, projectId: project.id, baseCommit, catalog, installed: installedWorkers() });
+  });
+  app.get("/api/update", c => { c.header("Cache-Control", "no-store"); return c.json(updateStatus()); });
+  app.post("/api/update/check", async c => {
+    if (!z.object({}).strict().safeParse(await c.req.json().catch(() => null)).success) return c.json({ error: "Provide an empty JSON object." }, 400);
+    c.header("Cache-Control", "no-store");
+    return c.json(await checkUpdate());
   });
   app.get("/api/health", (c) => c.json({ ok: true }));
   app.get("/api/operator/status", (c) => {
     c.header("Cache-Control", "no-store");
-    return c.json({ id: operator!.id, pid: process.pid, quiesced,
+    return c.json({ id: operator!.id, pid: process.pid, version: currentVersion, quiesced,
       activeRuns: store.runs().filter((r) => ["running", "needs_attention"].includes(r.state) || workers.has(r.id) || (r.workerPid !== undefined && processGroupAlive(r.workerPid))).length });
   });
   app.post("/api/operator/open", (c) => {
@@ -506,12 +523,15 @@ export function createService(
     if (stopping) return c.json({ error: "Local service is stopping." }, 503);
     if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).length !== 1 || typeof body.force !== "boolean")
       return c.json({ error: "Provide only a boolean force field" }, 400);
+    if (store.approvals().length && !body.force) return c.json({ error: "Native approvals are still pending. Finish the work before stopping." }, 409);
+    if (mutations && !body.force) return c.json({ error: "Local changes are still being saved. Retry after they finish." }, 409);
     quiesced = true;
     const activeRuns = store.runs().filter((r) => ["running", "needs_attention"].includes(r.state) || workers.has(r.id) || (r.workerPid !== undefined && processGroupAlive(r.workerPid))).length;
     if (activeRuns && !body.force) { if (!stopping) quiesced = false; return c.json({ error: `${activeRuns} active run(s); use --force to stop them` }, 409); }
     return c.json({ ok: true, activeRuns });
   });
   app.post("/api/operator/resume", (c) => {
+    if (readUpdateMaintenance(home, operator!.id)) return c.json({ error: "An update is paused for recovery. Inspect its private recovery record first." }, 409);
     if (stopping) return c.json({ error: "Local service is stopping." }, 503);
     quiesced = false;
     return c.json({ ok: true });

@@ -259,19 +259,20 @@ test("concurrent routing rechecks idempotency, busy state, and saved settings af
   }
 });
 
-test("quiesce and close prevent pending metadata from launching a worker", async () => {
+test("forced quiesce and close prevent pending metadata from launching a worker", async () => {
   for (const action of ["quiesce", "close"] as const) {
     let release!: (value: CatalogSnapshot) => void;
     let started!: () => void;
     const entered = new Promise<void>((resolve) => { started = resolve; });
     const metadata = new Promise<CatalogSnapshot>((resolve) => { release = resolve; });
     const t = fixture(async () => { started(); return metadata; }, true);
+    let p: Project | undefined;
     try {
-      const p = await t.register();
+      p = await t.register();
       const pending = t.call("/api/tasks/start", { projectId: p.id, prompt: "auto", idempotencyKey: "auto", routing: {} });
       await entered;
       if (action === "quiesce") {
-        const response = await t.call("/api/operator/quiesce", { force: false }, {
+        const response = await t.call("/api/operator/quiesce", { force: true }, {
           "x-agentklar-operator-key": "secret", "x-agentklar-service-id": "service", "Content-Type": "application/json",
         });
         assert.equal(response.status, 200);
@@ -291,6 +292,6 @@ test("quiesce and close prevent pending metadata from launching a worker", async
       assert.equal((await pending).status, 503);
       assert.equal(t.service.store.runs().length, 0);
       assert.equal(t.launched.length, 0);
-    } finally { await t.cleanup(); }
+    } finally { if (p) release(snapshot(p)); await t.cleanup(); }
   }
 });

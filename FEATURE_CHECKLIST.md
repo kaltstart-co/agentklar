@@ -24,6 +24,8 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 - [x] Native MCP setup
 - [x] Background startup (macOS)
 - [x] Package install
+- [x] Guarded package updates
+- [x] Interrupted update recovery
 - [x] Codex delegation
 - [x] Claude delegation
 - [x] Antigravity MCP host setup
@@ -67,7 +69,6 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 ## In progress
 
 - [ ] Native cross-harness proof
-- [ ] Easy product upgrades
 
 - [ ] Complete account quotas
 

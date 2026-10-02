@@ -15,7 +15,7 @@ function canonical(path: string): string {
     return join(canonical(dirname(path)), basename(path));
   }
 }
-function privateText(path: string): string {
+export function privateText(path: string): string {
   const st = lstatSync(path);
   if (!st.isFile() || st.isSymbolicLink() || st.nlink !== 1 || st.uid !== process.getuid!() || (st.mode & 0o077) || st.size > 65536)
     throw new Error(`Unsafe private file: ${path}`);
@@ -49,13 +49,13 @@ export async function waitUnregistered(target: string, control: typeof launchctl
     await new Promise((resolve) => setTimeout(resolve, 150));
   }
 }
-function paths() {
+function paths(homeOverride?: string, portOverride?: number) {
   if (process.platform !== "darwin") throw new Error("Background startup is supported on macOS only.");
   if (Number(process.versions.node.split(".")[0]) !== 24) throw new Error("Use Node 24 for AgentKlar.");
-  const rawHome = process.env.AGENTKLAR_HOME || join(homedir(), ".agentklar", "local-v1");
+  const rawHome = homeOverride || process.env.AGENTKLAR_HOME || join(homedir(), ".agentklar", "local-v1");
   if (!isAbsolute(rawHome)) throw new Error("AGENTKLAR_HOME must be absolute.");
   const home = canonical(rawHome);
-  const port = Number(process.env.AGENTKLAR_PORT || 4317);
+  const port = portOverride ?? Number(process.env.AGENTKLAR_PORT || 4317);
   if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error("Invalid AGENTKLAR_PORT.");
   const label = `com.agentklar.local.${hash(home).slice(0, 16)}`;
   const plist = join(homedir(), "Library", "LaunchAgents", `${label}.plist`);
@@ -234,3 +234,85 @@ export async function main(args = process.argv.slice(2)) {
 }
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url))
   main().catch((e) => { console.error((e as Error).message); process.exitCode = 1; });
+
+export type UpdateMaintenance = { transaction: string; serviceId: string; recovery: string };
+export function readUpdateMaintenance(home: string, serviceId?: string): UpdateMaintenance | null {
+  const path = join(home, "update-maintenance.json");
+  if (!existsSync(path)) return null;
+  const text = privateText(path);
+  if (text.length > 1024) throw new Error("Invalid update maintenance marker. Inspect recovery before starting.");
+  const entry = JSON.parse(text) as UpdateMaintenance;
+  if (!/^[0-9a-f-]{36}$/.test(entry.transaction) || typeof entry.recovery !== "string" || !isAbsolute(entry.recovery) ||
+      !/^[0-9a-f-]{36}$/.test(entry.serviceId) || (serviceId !== undefined && entry.serviceId !== serviceId))
+    throw new Error("Update maintenance belongs to a different service. Inspect recovery before starting.");
+  return entry;
+}
+
+/** Only operates the existing owned launchd job at the unchanged package path. */
+export type UpdateService = { home: string; port: number; id: string; running: boolean; transaction: string };
+export async function managedUpdate(expectedServer: string, recovery: string, expectedVersion: string, saved?: UpdateService) {
+  const p = paths(saved?.home, saved?.port);
+  const entry = installed(p);
+  if (!entry) { if (saved) throw new Error("Saved managed service is missing."); return undefined; }
+  if (saved && entry.id !== saved.id) throw new Error("Saved service ownership changed.");
+  const existing = readUpdateMaintenance(p.home, entry.id);
+  if (existing && (!saved || existing.transaction !== saved.transaction || existing.recovery !== recovery)) throw new Error("An earlier update is paused. Inspect its recovery record before retrying.");
+  const converted = command("/usr/bin/plutil", ["-convert", "json", "-o", "-", p.plist]);
+  if (converted.status !== 0) throw new Error("Could not inspect managed startup.");
+  const plist = JSON.parse(converted.stdout);
+  if (plist.ProgramArguments?.length !== 2 || plist.ProgramArguments[0] !== process.execPath || plist.ProgramArguments[1] !== expectedServer || plist.WorkingDirectory !== dirname(dirname(dirname(expectedServer))))
+    throw new Error("Managed startup belongs to a different package. Inspect it before updating.");
+  const running = saved?.running ?? launchctl(["print", p.target], false);
+  if (running && !saved) {
+    const state = await operator(p, entry, "status");
+    if (state.version !== expectedVersion || state.quiesced) throw new Error("The running service does not match this package, or is paused. Inspect status before updating.");
+  }
+  const marker = join(p.home, "update-maintenance.json");
+  const transaction = saved?.transaction || randomUUID();
+  const text = existing ? privateText(marker) : JSON.stringify({ transaction, serviceId: entry.id, recovery });
+  let marked = !!existing;
+  let identity: { dev: number; ino: number } | undefined = existing ? lstatSync(marker) : undefined;
+  const unchanged = () => { const current = lstatSync(marker); if (!marked || !identity || current.dev !== identity.dev || current.ino !== identity.ino || privateText(marker) !== text) throw new Error("Update maintenance changed. Recovery files were kept."); };
+  return {
+    running,
+    info: { home: p.home, port: p.port, id: entry.id, running, transaction },
+    paused: () => marked,
+    stop: async () => {
+      if (!launchctl(["print", p.target], false)) return;
+      if (!marked) {
+        await operator(p, entry, "quiesce", { force: false });
+        try { writeFileSync(marker, text, { mode: 0o600, flag: "wx" }); identity = lstatSync(marker); marked = true; }
+        catch (error) { await operator(p, entry, "resume", {}).catch(() => {}); throw error; }
+      }
+      unchanged(); installed(p);
+      const state = await operator(p, entry, "status").catch(() => null);
+      if (state && (state.activeRuns !== 0 || !state.quiesced)) throw new Error("The service has active work or is not paused. Recovery was refused.");
+      // The replacement starts paused under our unchanged marker, even when health fails.
+      launchctl(["bootout", p.target]);
+      await waitUnregistered(p.target);
+    },
+    start: async (version: string, commit?: () => void) => {
+      if (saved && !marked) {
+        const state = await operator(p, entry, "status");
+        if (state.version !== version) throw new Error("Committed service version changed.");
+        if (state.quiesced) await operator(p, entry, "resume", {});
+        return;
+      }
+      unchanged(); installed(p);
+      if (!launchctl(["print", p.target], false)) {
+        if (await portBusy(p.port)) throw new Error("Service port is occupied. Recovery files were kept.");
+        launchctl(["bootstrap", p.domain, p.plist]);
+      }
+      await healthy(p, entry);
+      const state = await operator(p, entry, "status");
+      if (state.version !== version || state.quiesced !== true || state.activeRuns !== 0) throw new Error("Restarted service version or state did not match the update.");
+      commit?.();
+      unchanged(); unlinkSync(marker); marked = false;
+      try { await operator(p, entry, "resume", {}); }
+      catch {
+        const resumed = await operator(p, entry, "status").catch(() => null);
+        if (!resumed || resumed.version !== version || resumed.quiesced) throw new Error("Update installed; resume is unclear. Run the printed recovery command to check and resume it.");
+      }
+    },
+  };
+}
