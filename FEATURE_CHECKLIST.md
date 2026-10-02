@@ -98,6 +98,7 @@ Plan: [docs/DESKTOP_PLAN.md](docs/DESKTOP_PLAN.md).
 
 - [x] SwiftUI build
 - [x] Local boundary checks
+- [x] Native GUI smoke
 - [ ] Native GUI acceptance
 - [ ] Full native parity
 - [ ] Signed distribution

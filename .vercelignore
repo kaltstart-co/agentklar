@@ -1,8 +1,1 @@
-.git
-.vercel
-node_modules
-agentklar
-agentklar-bar
-tests
-*.sqlite*
-.env*
+macos/

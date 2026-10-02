@@ -46,4 +46,6 @@ Sparkle activation checks the signed-release marker, fixed feed, key and Apple D
 
 ## Verification limits
 
-The native release build compiles all views. Foundation checks cover the local API boundary and bounded runtime commands. These are build and fixture checks, not proof of every native interaction. Real native GUI acceptance is pending. No signing identity is available for this preview, so Developer ID distribution, notarization and a signed Sparkle download/install round trip remain unverified. See [validation evidence](VALIDATION.md) for the service and browser checks.
+The native release build compiles all views. Six XCTest cases and the standalone boundary checks passed in Mac CI. A GUI smoke check on the MacBook opened all seven pages, switched saved projects, read the actual root instruction file, checked service update status, and opened and cancelled a task draft. Both Macs have the preview in Applications and a healthy beta.32 local service; the Mac mini GUI was not exercised.
+
+Full native GUI acceptance is pending. Worker launch and concrete approval decisions, instruction apply/undo, context/team saves, metadata refresh and first installation still need GUI workflow proof. No signing identity is available, so Developer ID distribution, notarization and a signed Sparkle download/install round trip remain unverified. See [validation evidence](VALIDATION.md) for the exact checks and limits.
