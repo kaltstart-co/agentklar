@@ -68,7 +68,7 @@ enum LocalBoundary {
         return try await operation()
     }
     var hasExistingLauncher: Bool {
-        ([home.appendingPathComponent(".local/bin/agentklar").path, "/opt/homebrew/bin/agentklar", "/usr/local/bin/agentklar"] + (environment["PATH"] ?? "").split(separator: ":").map { String($0) + "/agentklar" }).contains { FileManager.default.fileExists(atPath: $0) }
+        ([home.appendingPathComponent(".local/bin/agentklar").path, "/opt/homebrew/bin/agentklar", "/usr/local/bin/agentklar"] + (environment["PATH"] ?? "").split(separator: ":").map { String($0) + "/agentklar" }).contains { (try? FileManager.default.attributesOfItem(atPath: $0)) != nil }
     }
     func installService() async throws {
         guard !hasExistingLauncher else { throw LocalError.message("An existing launcher needs repair. Keep it and follow agentklar service status in your terminal.") }
