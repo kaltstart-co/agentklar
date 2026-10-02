@@ -9,13 +9,15 @@ This is a fresh TypeScript rewrite. The old Go application is preserved in Git a
 Requires Node 24 and npm on macOS or Linux. Install this pinned GitHub beta package, then start the local service:
 
 ```sh
-npm install -g https://github.com/kaltstart-co/agentklar/releases/download/v0.1.0-beta.19/agentklar-0.1.0-beta.19.tgz
+npm install -g https://github.com/kaltstart-co/agentklar/releases/download/v0.1.0-beta.20/agentklar-0.1.0-beta.20.tgz
 agentklar start
 ```
 
 The install does not start a service, open a browser, or change native harness settings. Keep that terminal running. Open the one-time setup URL it prints within five minutes. It creates a private local browser session. After setup, the UI lives at `http://127.0.0.1:4317`.
 
 For workers, install Codex or Claude Code and sign in through its native setup first. Use the discovered executable path if the command is not on your shell PATH. For Claude Code, run that executable with `auth login`. No new model API key is required. An installed executable does not prove that you are signed in.
+
+**Settings → This computer** shows the service's computer name, platform, device ID, and current native CLI paths. **Find native installations** lists existing executable paths and versions, including supported app bundles. Choose an installation and **Save for next restart** to pin it on this computer. The running service keeps its current CLI until you restart after jobs finish. Workers, model reads, native MCP setup, and continuation use the same selected CLI. Normal updates at the chosen path remain usable; the chosen Claude Desktop installation follows its latest bundled Code version after restart. A missing selected installation blocks that worker until you review another installation. AgentKlar preserves native accounts and settings. Antigravity's `agy` CLI is discovered as a host; its worker adapter remains unavailable.
 
 <details>
 <summary>Run from a source checkout</summary>
@@ -135,6 +137,8 @@ For other MCP hosts, use their normal setup. This example expects `agentklar` on
 
 Start the local service before the MCP connection. The stdio bridge talks to the independent service. Closing the MCP caller leaves its worker running. A new MCP client can call `projects_list`, then `project_runs_list({projectId})` to find saved run IDs in small pages. It can read run status, events, results, and handoff details by ID. Task detail shows which local UI or reported MCP client started a run. Older runs show Unknown. This record does not say who currently leads the work, and an MCP client name is self-reported. No MCP tool can approve a native permission request. The API and tool list are in [docs/API.md](docs/API.md).
 
+Remote history is returned separately as `remoteDispatches`. Continue it with `remoteCursor: remoteNextCursor`; `remoteDispatchesHasMore` reports whether another page exists. `remoteLimit` accepts 1–20 records. Local `cursor` and remote `remoteCursor` are independent. History contains compact last observed owner status; use `run_status` with the dispatch ID to refresh it.
+
 When one harness is coordinating a project, it can explicitly call `project_lead` to claim the advisory lead. Work shows the reported client and when it was last seen. The bridge keeps the claim alive while connected; closing it releases the claim when possible, and a lost connection expires after about 90 seconds. A new client can take over only after reading the current claim ID. The local UI can clear the claim shown there. Reading a project or starting an ordinary task never claims the lead. Every harness can still start tasks and use shared context while another lead is shown. This marker says which MCP connection is coordinating; it does not show whether a model is thinking or transfer control or native permissions.
 
 ## Native permissions and data
@@ -161,3 +165,5 @@ npm run smoke:package
 Tests use a fake native protocol process and the official MCP SDK on real stdio. They verify persistence, project isolation, idempotency, cancellation, restart state, exclusive service ownership, native event identity, role context, and approval boundaries. The package smoke builds a tarball, installs only production dependencies in a clean prefix, then checks the CLI, built UI, and generated MCP bridge from another working folder. It starts no model. The verified Codex smoke tests use separate temporary projects and explicitly pinned Sol models. Claude Code integration is in progress. The discovered Claude Code CLI reported no sign-in in its current native profile; this does not check Claude Desktop sign-in. A successful live Claude worker run has not been verified.
 
 See [docs/VALIDATION.md](docs/VALIDATION.md) for local and real native evidence. See [BUILD_PLAN.md](BUILD_PLAN.md) for the staged roadmap and [FEATURE_CHECKLIST.md](FEATURE_CHECKLIST.md) for verified scope. MIT license.
+
+**Settings → Other computers** saves project-scoped grants through one private connection code and an existing SSH host. Choose a saved computer in Team, then use normal tasks and MCP tools. Work keeps owner state separate from connection state. Remote launches require matching committed Git HEADs and use an owner worktree. Native approvals, full results and continuation stay on the owner computer. Real two-computer SSH setup is unverified; automatic cross-device choices and Git patch handoff remain future work.

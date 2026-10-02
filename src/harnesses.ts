@@ -2,17 +2,17 @@ import { accessSync, constants, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, join } from "node:path";
 import type { Harness } from "./contracts.ts";
-export function executable(
+export function executables(
   name: string,
   pathEnv = process.env.PATH || "",
   home = homedir(),
-): string | null {
+): string[] {
   const candidates = pathEnv
     .split(delimiter)
     .filter(Boolean)
     .map((p) => join(p, name));
   if (name === "codex")
-    candidates.push("/Applications/Codex.app/Contents/Resources/codex");
+    candidates.push("/Applications/Codex.app/Contents/Resources/codex", "/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex");
   if (name === "claude") {
     candidates.push(join(home, ".local", "bin", "claude"));
     const desktop = join(
@@ -39,13 +39,18 @@ export function executable(
     } catch {}
   }
   if (name === "muse") candidates.push(join(home, ".local", "bin", "muse"));
+  if (name === "agy") candidates.push(join(home, ".local", "bin", "agy"));
   if (name === "opencode") candidates.push(join(home, ".opencode", "bin", "opencode"), join(home, ".bun", "bin", "opencode"));
-  for (const path of candidates)
+  const found: string[] = [];
+  for (const path of new Set(candidates))
     try {
       accessSync(path, constants.X_OK);
-      if (statSync(path).isFile()) return path;
+      if (statSync(path).isFile()) found.push(path);
     } catch {}
-  return null;
+  return found;
+}
+export function executable(name: string, pathEnv = process.env.PATH || "", home = homedir()): string | null {
+  return executables(name, pathEnv, home)[0] ?? null;
 }
 export function harnesses(): Harness[] {
   return [
@@ -55,8 +60,9 @@ export function harnesses(): Harness[] {
     ["gemini", "Gemini CLI"],
     ["cursor-agent", "Cursor"],
     ["opencode", "OpenCode"],
+    ["antigravity", "Antigravity CLI"],
   ].map(([id, name]) => {
-    const path = executable(id);
+    const path = executable(id === "antigravity" ? "agy" : id);
     return {
       id,
       name,
@@ -73,7 +79,9 @@ export function harnesses(): Harness[] {
               ? "Native MSP worker adapter; MCP host setup uses Muse settings"
             : id === "opencode"
               ? "Native OpenCode local server worker adapter; provider setup stays in OpenCode"
-            : "Discovered host CLI; worker adapter is planned",
+            : id === "antigravity"
+              ? "Native Antigravity CLI found; worker support unavailable until its adapter is verified"
+              : "Discovered host CLI; worker adapter is planned",
     };
   });
 }

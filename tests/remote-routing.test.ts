@@ -1,0 +1,54 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, realpathSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { randomUUID } from "node:crypto";
+import { createService } from "../src/service.ts";
+import { Peers, type PeerTransport, PeerError } from "../src/peers.ts";
+import { deviceSettings } from "../src/devices.ts";
+
+test("normal task API routes role to exact owner, preserves context, reports disconnect and cancels by dispatch ID", async () => {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "agentklar-role-peer-")));
+  const a = join(dir,"a"), b = join(dir,"b"); mkdirSync(a);
+  const git=(...args:string[])=>execFileSync("git",args,{encoding:"utf8",stdio:["ignore","pipe","ignore"]}).trim();
+  git("-C",a,"init");git("-C",a,"config","user.email","test@example.test");git("-C",a,"config","user.name","Test");
+  writeFileSync(join(a,"one.txt"),"one");git("-C",a,"add",".");git("-C",a,"commit","-m","base");git("clone",a,b);
+  let ownerStarts=0, localStarts=0, offline=false;
+  const owner=createService(join(dir,"owner"),4322,(_,run,__,callbacks)=>{ownerStarts++;return {stop(){callbacks.update({state:"cancelled"});callbacks.done();},closed:Promise.resolve()};},process.execPath,null);
+  const ownerDevice=deviceSettings(owner.store.db).device;
+  const call=(service:typeof owner,port:number)=>(path:string,method="GET",body?:unknown)=>Promise.resolve(service.app.request(`http://127.0.0.1:${port}${path}`,{method,headers:{Authorization:`Bearer ${service.bearer}`,"Content-Type":"application/json"},...(body===undefined?{}:{body:JSON.stringify(body)})})).then(async r=>({status:r.status,body:await r.json()}));
+  const ownerPeers=new Peers(owner.store,ownerDevice,call(owner,4322));
+  const transport:PeerTransport=async(_,request)=>{if(offline)throw new PeerError("Fixture offline",503);return ownerPeers.owner(request);};
+  const coordinator=createService(join(dir,"coordinator"),4321,()=>{localStarts++;throw new Error("must not run locally");},null,null,undefined,undefined,undefined,undefined,undefined,null,undefined,null,transport);
+  try {
+    const project=(service:typeof owner,path:string)=>{const p={id:randomUUID(),name:"test",path,roles:[],preference:"balanced" as const,createdAt:"now"};service.store.saveProject(p);return p;};
+    const local=project(coordinator,a),remote=project(owner,b),device=deviceSettings(coordinator.store.db).device;
+    const peers=new Peers(coordinator.store,device,call(coordinator,4321),transport);
+    const grant=ownerPeers.grant({sourceDeviceId:device.id,projectId:remote.id});
+    const mapping=peers.saveConnection({label:"Owner",deviceId:ownerDevice.id,sshHost:"fixture",command:"agentklar",projectId:local.id,remoteProjectId:remote.id,grantId:grant.id,grantToken:grant.token});
+    const request=call(coordinator,4321);
+    assert.equal((await request(`/api/projects/${local.id}`,"PATCH",{roles:[{id:"worker",name:"Builder",harness:"codex",model:"gpt-6.1-sol",responsibility:"Keep changes small",peerId:mapping.id}]})).status,200);
+    coordinator.store.saveContext({projectId:local.id,revision:1,brief:"Source brief",memory:"",handoff:"",updatedAt:"now",updatedVia:"ui"},0);
+    const input={projectId:local.id,prompt:"Do the bounded task",roleId:"worker",idempotencyKey:"task-one",workspace:"worktree"};
+    const first=await request("/api/tasks/start","POST",input);assert.equal(first.status,202);
+    const dispatch=first.body as {id:string;ownerDeviceId:string;ownerRunId:string};assert.equal(dispatch.ownerDeviceId,ownerDevice.id);
+    assert.equal(first.body.prompt,input.prompt);
+    for(let i=0;i<100&&ownerStarts===0;i++)await new Promise(r=>setTimeout(r,10));
+    assert.equal(ownerStarts,1);assert.equal(localStarts,0);assert.equal(coordinator.store.runs().length,0);
+    assert.match(owner.store.runs()[0].prompt,/Source brief/);assert.match(owner.store.runs()[0].prompt,/Keep changes small/);
+    assert.equal(owner.store.runs()[0].model,"gpt-6.1-sol");assert.equal(owner.store.runs()[0].contextSnapshot,undefined);
+    assert.equal((await request("/api/tasks/start","POST",input)).body.id,dispatch.id);assert.equal(ownerStarts,1);
+    const snapshot=(await request("/api/snapshot")).body;assert.equal(snapshot.remoteDispatches[0].id,dispatch.id);assert.equal(snapshot.peers[0].id,mapping.id);assert.doesNotMatch(JSON.stringify(snapshot),new RegExp(grant.token));
+    offline=true;const status=(await request(`/api/runs/${dispatch.id}`)).body;assert.equal(status.connection,"unknown");assert.equal(status.lastKnownRun.state,"running");
+    offline=false;assert.equal((await request(`/api/runs/${dispatch.id}/stop`,"POST",{})).body.lastKnownRun.state,"cancelled");
+    assert.equal((await request(`/api/projects/${local.id}/runs`)).body.remoteDispatches[0].id,dispatch.id);
+    const result=(await request(`/api/runs/${dispatch.id}/result`)).body;assert.equal(result.ownerDeviceId,ownerDevice.id);assert.equal(result.state,"cancelled");
+    assert.equal((await request(`/api/runs/${dispatch.id}/tail`)).status,409);
+    await request(`/api/projects/${local.id}`,"PATCH",{roles:[{id:"worker",name:"Builder",harness:"codex",responsibility:"Now local"}]});
+    assert.equal((await request("/api/tasks/start","POST",input)).body.id,dispatch.id);
+    assert.equal((await request("/api/tasks/start","POST",{...input,prompt:"changed"})).status,409);
+    assert.equal(localStarts,0);
+  } finally {await coordinator.close();await owner.close();rmSync(dir,{recursive:true,force:true});}
+});

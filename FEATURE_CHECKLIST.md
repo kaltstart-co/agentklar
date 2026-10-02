@@ -10,6 +10,12 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 - [x] Model pins
 - [x] Cost preference
 - [x] Harness discovery
+- [x] Device identity
+- [x] Native CLI choice
+- [x] Antigravity CLI discovery
+- [x] Device pairing UI
+- [x] Remote role pins
+- [x] Remote status and history
 - [x] MCP connection
 - [x] Native MCP setup
 - [x] Background startup (macOS)
@@ -61,5 +67,8 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 - [ ] ZCode worker
 - [ ] Plugin bundles
 - [ ] Wider config preview and rollback
-- [ ] Device pairing
-- [ ] Remote work
+- [ ] Real two-computer setup
+- [ ] Shared remote approval UI
+- [ ] Automatic cross-device candidates
+- [ ] Explicit cross-device Git handoff
+- [ ] Linked remote review and fix

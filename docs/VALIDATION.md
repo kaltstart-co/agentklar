@@ -268,3 +268,14 @@ Final beta.5 local checks passed: `npm run check`, all 93 tests, `npm run build`
 Fixture checks cover fresh exhausted Codex windows, explicit pin preservation with an overage warning, old and future allowance observations, and saved Muse account observations. Saved Muse readings appear in Models and reach both advice and automatic task launch. Advice ignores readings older than five minutes and expired windows. The five-minute bound is a product rule. These checks do not prove a live Muse numeric balance, remaining task counts, subscription savings, or paid overage availability. Complete account quota coverage remains unfinished.
 
 Final beta.19 local checks passed: TypeScript, production build, all 149 tests, package smoke exposing 19 MCP tools, and diff whitespace. Claude login text names the selected CLI profile, gives its native login command, and makes no claim about Claude Desktop sign-in. No native inference calls were made for these changes.
+
+
+## Device workflow milestone — beta.20
+
+Device identity, native CLI choices, Antigravity CLI discovery, scoped project grants, saved remote role pins, owner model advice, and distinct remote owner/connection state are implemented. Isolated service tests use temporary homes, Git repositories, fake workers and a fake peer transport; they do not contact another computer or call a model. A grant cannot access native approvals or settings. Lost acknowledgments keep one durable request ID, changed inputs conflict, and reconnect preserves last known owner state. Remote launches require matching committed Git HEADs and use a separate owner worktree. Local changes are not copied.
+
+Browser fixtures checked Settings, Team, remote Work and the task modal at 320 pixels. Page width and scroll width were 320 pixels; modal width was 288 pixels. The remote role showed its selected computer and model, used a worktree, and displayed owner-only approval guidance. Unknown contact kept the last known active state. Evidence: `/tmp/agentklar-device-ui-qa/`. The temporary UI service was stopped after the checks.
+
+Native approvals, full remote results and session continuation remain on the owner computer. Antigravity CLI 1.2.14 was verified with bounded help/version commands only; discovery does not provide an AgentKlar worker adapter. Real two-computer SSH setup, remote native inference, shared remote approval UI, automatic cross-device candidates, linked remote review/fix and Git patch handoff remain unverified or unfinished. The hosted dashboard cannot execute local agents.
+
+Final beta.20 local checks passed: TypeScript, production build, all 160 tests, installed-package smoke exposing 19 MCP tools, and diff whitespace. A fake SSH shell with Node absent from PATH verified that the exported absolute Node and AgentKlar script paths launch the peer bridge; this is an isolated fixture, not a real SSH check. Evidence: `/tmp/agentklar-beta20-release/` and the peer tests.

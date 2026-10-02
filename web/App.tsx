@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { NativeSetupForm } from "./NativeSetupForm.js";
+import { NativeInstallations } from "./NativeInstallations.js";
+import { Devices } from "./Devices.js";
 import { InstructionsForm } from "./InstructionsForm.js";
 import { Benchmarks, BenchmarkDetail, BenchmarkEvidenceView } from "./Benchmarks.js";
 import type { BenchmarkSnapshot, TaskType } from "../src/benchmarks.js";
@@ -140,6 +142,8 @@ export function App() {
   const run = snapshot.runs.find(
     (r) => r.id === runId && r.projectId === projectId,
   );
+  const remoteRun = snapshot.remoteDispatches?.find((r) => r.id === runId && r.projectId === projectId);
+  const projectPeers = snapshot.peers?.filter((p) => p.projectId === projectId) || [];
   const catalog = catalogs[projectId];
   const modelChoices = (id: string, forProjectId = projectId) =>
     catalogs[forProjectId]?.harnesses
@@ -148,7 +152,8 @@ export function App() {
   const workers = snapshot.harnesses.filter((h) => h.workerSupported);
   const selectedRole = taskProject?.roles.find((r) => r.id === roleId);
   const taskHarness = selectedRole?.harness || harness;
-  const taskWorker = workers.find((h) => h.id === taskHarness);
+  const remoteRole = Boolean(selectedRole?.peerId);
+  const taskWorker = remoteRole || workers.find((h) => h.id === taskHarness);
   const museModels = catalogs[draftProjectId]?.harnesses.find((entry) => entry.harness === "muse")?.models || [];
   const museModel = taskHarness === "muse" ? museModels.find((item) => item.id === (model.trim() || selectedRole?.model)) ||
     (!model.trim() && !selectedRole?.model ? museModels.find((item) => item.isDefault) : undefined) : undefined;
@@ -156,7 +161,7 @@ export function App() {
     if (taskHarness === "muse" || taskHarness === "opencode") setAutomaticRouting(false);
   }, [taskHarness]);
   useEffect(() => {
-    if (!taskModal || (taskHarness !== "muse" && taskHarness !== "opencode") || !connected || !draftProjectId ||
+    if (remoteRole || !taskModal || (taskHarness !== "muse" && taskHarness !== "opencode") || !connected || !draftProjectId ||
         catalogs[draftProjectId]?.harnesses.some((entry) => entry.harness === taskHarness)) return;
     let active = true;
     setCatalogBusy(draftProjectId);
@@ -175,7 +180,7 @@ export function App() {
   const currentAdvice = advice?.key === adviceKey ? advice.data : null;
   const adviceChoice = currentAdvice?.choice;
   const canUseAdvice = Boolean(adviceChoice && connected &&
-    workers.some((worker) => worker.id === adviceChoice.harness) &&
+    (remoteRole || workers.some((worker) => worker.id === adviceChoice.harness)) &&
     (!selectedRole || selectedRole.harness === adviceChoice.harness));
   useEffect(() => {
     adviceRequest.current++;
@@ -218,6 +223,9 @@ export function App() {
         (status === "all" || r.state === status),
     )
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const remoteRuns = (snapshot.remoteDispatches || []).filter((r) => r.projectId === projectId)
+    .filter((r) => (r.prompt || r.lastKnownRun?.prompt || "Remote task").toLowerCase().includes(search.toLowerCase()) &&
+      (status === "all" || r.lastKnownRun?.state === status));
   const museUsage = snapshot.runs
     .filter((item) => !projectId || item.projectId === projectId)
     .reduce<MuseSubscriptionUsage | undefined>((latest, item) =>
@@ -348,7 +356,7 @@ export function App() {
     setEvents([]);
     setFullResult(null);
     setTailShortened(false);
-    if (!runId || !connected) return;
+    if (!run || !connected) return;
     let active = true;
     let after = 0;
     let polling = false;
@@ -402,7 +410,7 @@ export function App() {
       active = false;
       clearInterval(interval);
     };
-  }, [runId, connected]);
+  }, [runId, connected, run?.id]);
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key === "k") {
@@ -460,7 +468,7 @@ export function App() {
           : "This hosted page is a setup guide. Run the local app to see projects, workers and permission requests."}
       </p>
       <p className="hint">Requires Node 24 on macOS or Linux. Install the pinned beta package:</p>
-      <pre>npm install -g https://github.com/kaltstart-co/agentklar/releases/download/v0.1.0-beta.19/agentklar-0.1.0-beta.19.tgz{"\n"}agentklar start</pre>
+      <pre>npm install -g https://github.com/kaltstart-co/agentklar/releases/download/v0.1.0-beta.20/agentklar-0.1.0-beta.20.tgz{"\n"}agentklar start</pre>
       <p>
         Open the setup link from the terminal, then use{" "}
         <code>http://127.0.0.1:4317</code>.
@@ -639,6 +647,11 @@ export function App() {
                   </div>
                   <div className="work-grid">
                     <section className="task-list" aria-label="Tasks">
+                      {remoteRuns.map((item) => <button key={item.id} className={item.id === runId ? "task-row selected" : "task-row"} onClick={() => setRunId(item.id)}>
+                        <div><span className="task-title">{item.prompt || item.lastKnownRun?.prompt || "Remote task awaiting owner confirmation"}</span></div>
+                        <div className="task-meta"><span>{snapshot.peers?.find((p) => p.id === item.peerId)?.label || "Other computer"} · {item.lastKnownRun ? `Last known: ${labels[item.lastKnownRun.state]}` : "Owner state unknown"}</span></div>
+                        <div className="task-meta"><span>{item.connection === "unknown" ? "Connection unknown" : "Owner observed"}{item.lastObservedAt ? ` · ${time(item.lastObservedAt)}` : ""}</span></div>
+                      </button>)}
                       {runs.length ? (
                         runs.map((item) => (
                           <button
@@ -660,7 +673,7 @@ export function App() {
                             </div>
                           </button>
                         ))
-                      ) : (
+                      ) : remoteRuns.length ? null : (
                         <div className="list-empty">
                           <h3>
                             {search || status !== "all"
@@ -684,7 +697,19 @@ export function App() {
                       )}
                     </section>
                     <section className="task-detail" aria-label="Task detail">
-                      {run ? (
+                      {remoteRun ? <Stack gap="sm">
+                        <h3>{remoteRun.prompt || remoteRun.lastKnownRun?.prompt || "Remote task"}</h3>
+                        <p>Owner: {snapshot.peers?.find((p) => p.id === remoteRun.peerId)?.label || remoteRun.ownerDeviceId}</p>
+                        <p className="hint">Owner run ID: {remoteRun.ownerRunId || "Acceptance not confirmed"}</p>
+                        <Badge color={remoteRun.connection === "unknown" ? "orange" : "blue"}>{remoteRun.connection === "unknown" ? "Connection unknown" : "Owner observed"}</Badge>
+                        <p>Last known worker state: {remoteRun.lastKnownRun ? labels[remoteRun.lastKnownRun.state] : "Unknown"}</p>
+                        {remoteRun.lastObservedAt && <p className="hint">Observed {time(remoteRun.lastObservedAt)}. This is saved evidence; the worker may have changed since then.</p>}
+                        {remoteRun.error && <Alert color="orange">{remoteRun.error}</Alert>}
+                        <p className="hint">Native approval requests must be answered in AgentKlar on the owner computer. Lost contact does not stop its worker.</p>
+                        <Group><Button variant="light" disabled={busy || !connected} onClick={() => void act(async () => { await api(`/runs/${remoteRun.id}`); })}>Check owner status</Button>
+                          <Button color="orange" variant="light" disabled={busy || !connected || !remoteRun.ownerRunId} onClick={() => void act(async () => { await api(`/runs/${remoteRun.id}/stop`, {}); })}>Request stop</Button></Group>
+                        {remoteRun.lastKnownRun?.result && <pre className="worker-result">{remoteRun.lastKnownRun.result}</pre>}
+                      </Stack> : run ? (
                         <>
                           <div className="detail-top">
                             <Badge
@@ -976,12 +1001,17 @@ export function App() {
                             )
                           }
                         />
+                        <Select label="Computer" value={role.peerId || "local"} data={[
+                          { value: "local", label: `This computer${snapshot.device ? ` · ${snapshot.device.label}` : ""}` },
+                          ...projectPeers.map((peer) => ({ value: peer.id, label: peer.label })),
+                          ...(role.peerId && !projectPeers.some((peer) => peer.id === role.peerId) ? [{ value: role.peerId, label: "Saved computer unavailable", disabled: true }] : []),
+                        ]} onChange={(value) => setRoles(roles.map((r) => r.id === role.id ? { ...r, peerId: value && value !== "local" ? value : undefined } : r))} />
                         <Select
                           label="Harness"
                           value={role.harness}
                           data={[
-                            ...workers.map((h) => ({ value: h.id, label: h.name })),
-                            ...(!workers.some((h) => h.id === role.harness)
+                            ...(role.peerId ? ["codex", "claude", "muse", "opencode"].map((id) => ({ value: id, label: harnessName(id) })) : workers.map((h) => ({ value: h.id, label: h.name }))),
+                            ...(![...(role.peerId ? ["codex", "claude", "muse", "opencode"] : workers.map((h) => h.id))].includes(role.harness) && !workers.some((h) => h.id === role.harness)
                               ? [{ value: role.harness, label: `${harnessName(role.harness)} (worker unavailable)`, disabled: true }]
                               : []),
                           ]}
@@ -1000,7 +1030,7 @@ export function App() {
                           }
                         />
                         <Autocomplete
-                          data={modelChoices(role.harness)}
+                          data={role.peerId ? [] : modelChoices(role.harness)}
                           label="Model (optional)"
                           placeholder={`${harnessName(role.harness)} native default`}
                           value={role.model || ""}
@@ -1255,6 +1285,8 @@ export function App() {
                   {setup}
                 </>}
                 {connected && backgroundSetup}
+                {connected && <NativeInstallations device={snapshot.device} request={api} />}
+                <Devices device={snapshot.device} projects={snapshot.projects} connected={connected} request={api} />
                 <h3>Native connection</h3>
                 {connected && project ? <NativeSetupForm key={project.id} projectId={project.id} connected={connected} /> : connected ? <p className="hint">Add or select a project to connect Codex, Claude Code, Muse, or OpenCode.</p> :
                   <p className="hint">Open the local app and select a project. Settings can then check, preview and add the native connection. This hosted guide has no access to your computer.</p>}
@@ -1266,6 +1298,7 @@ export function App() {
                       <div>
                         <strong>{h.name}</strong>
                         <p>{h.reason}</p>
+                        {h.executable && <p className="hint">Current CLI: {h.executable}</p>}
                       </div>
                       <Badge
                         color={h.available ? "teal" : "gray"}
@@ -1361,7 +1394,7 @@ export function App() {
                 readOnly,
                 includeProjectContext,
                 ...(followUp ? { followUp } : {}),
-                ...(!followUp ? { workspace } : {}),
+                ...(!followUp ? { workspace: remoteRole ? "worktree" : workspace } : {}),
               });
               setProjectId(draftProjectId);
               setRunId(task.id);
@@ -1375,7 +1408,7 @@ export function App() {
             {error && <Alert color="red">{error}</Alert>}
             {followUp && <p className="hint">Linked to a completed run in {taskProject?.name || "this project"}. {followUp.kind === "review" ? "Review is read only." : "Fix can change workspace files."} Choose the worker and model below.</p>}
             {followUp ? <p className="hint">This task uses the same workspace as its linked work.</p> : <>
-              <Select label="Workspace" value={workspace} allowDeselect={false}
+              <Select label="Workspace" disabled={remoteRole} value={remoteRole ? "worktree" : workspace} allowDeselect={false}
                 onChange={(value) => setWorkspace(value as "project" | "worktree")}
                 data={[{ value: "project", label: "Current project folder" }, { value: "worktree", label: "New worktree (separate folder)" }]} />
               {workspace === "worktree" && <p className="hint">Starts from the latest local commit. Uncommitted changes and local-only files stay in the current folder; Claude may include files through its own .worktreeinclude. The new folder and its changes are kept after the task ends. At most two workers can run in one project.</p>}
@@ -1398,7 +1431,7 @@ export function App() {
                 setModel("");
               }}
               data={
-                taskProject?.roles.filter((r) => workers.some((h) => h.id === r.harness)).map((r) => ({ value: r.id, label: r.name })) ||
+                taskProject?.roles.filter((r) => r.peerId || workers.some((h) => h.id === r.harness)).map((r) => ({ value: r.id, label: r.name })) ||
                 []
               }
             />
@@ -1407,14 +1440,14 @@ export function App() {
               value={taskHarness}
               disabled={Boolean(selectedRole)}
               placeholder="No installed worker harness"
-              data={workers.map((h) => ({ value: h.id, label: h.name }))}
+              data={remoteRole ? ["codex", "claude", "muse", "opencode"].map((id) => ({ value: id, label: harnessName(id) })) : workers.map((h) => ({ value: h.id, label: h.name }))}
               onChange={(id) => {
                 setHarness(id || "codex");
                 setModel("");
               }}
             />
             {selectedRole && (
-              <p className="hint">The saved role chooses its harness.</p>
+              <p className="hint">The saved role chooses its harness{remoteRole ? ` on ${snapshot.peers?.find((p) => p.id === selectedRole.peerId)?.label || "the saved remote computer"}` : ""}. {remoteRole && "Its native accounts and permission rules apply; approvals are answered on that computer."}</p>
             )}
             {!taskWorker && (
               <Alert color="orange">
@@ -1424,7 +1457,7 @@ export function App() {
               </Alert>
             )}
             <Autocomplete
-              data={modelChoices(taskHarness, draftProjectId)}
+              data={remoteRole ? [] : modelChoices(taskHarness, draftProjectId)}
               label="Model (optional)"
               placeholder={
                 selectedRole?.model ||
@@ -1446,8 +1479,9 @@ export function App() {
             {taskHarness === "muse" && catalogBusy === draftProjectId && <p className="hint">Loading Muse model descriptions…</p>}
             {taskHarness === "muse" && catalogError?.projectId === draftProjectId && <Alert color="orange">Muse model descriptions are unavailable: {catalogError.message}</Alert>}
             {taskHarness === "opencode" && <p className="hint">OpenCode uses its own providers, sign-in and permissions. Its listed models show capabilities, not access or cost. Leave Model blank for its native default.</p>}
-            {taskHarness === "claude" && catalogs[draftProjectId]?.harnesses.find((entry) => entry.harness === "claude")?.auth?.status === "sign_in_required" &&
+            {!remoteRole && taskHarness === "claude" && catalogs[draftProjectId]?.harnesses.find((entry) => entry.harness === "claude")?.auth?.status === "sign_in_required" &&
               <Alert color="orange">{catalogs[draftProjectId]?.harnesses.find((entry) => entry.harness === "claude")?.auth?.message}</Alert>}
+            {remoteRole && <p className="hint">Remote work uses a separate worktree on the owner computer. Both projects need the same committed Git HEAD. Local changes are not copied. Model choice is checked by the owner at launch.</p>}
             <Checkbox
               label="Choose model automatically"
               checked={automaticRouting}
@@ -1489,6 +1523,7 @@ export function App() {
                   Checks model image support. Browser and tool access depend on
                   the native harness.
                 </p>
+                {remoteRole && <p className="hint">Model preview reads the owner computer's native catalog. Automatic choice is checked again there when you start.</p>}
                 <Button
                   variant="light"
                   loading={adviceBusy === adviceKey}
@@ -1572,7 +1607,7 @@ export function App() {
               }
             />
             <p className="hint">
-              Uses the saved project brief, decisions and next steps at launch.
+              Uses this project's saved brief, decisions and next steps at launch.
             </p>
             <Checkbox
               label="Read only"
@@ -1590,7 +1625,7 @@ export function App() {
             )}
             <p className="hint">
               Runs a native {harnessName(taskHarness)} worker in {taskProject?.name}
-              . Native permission requests appear in the task detail.
+              . Native permission requests appear {remoteRole ? "in AgentKlar on the owner computer" : "in the task detail"}.
             </p>
             <Button type="submit" loading={busy} disabled={!taskWorker || !taskProject || ((taskHarness === "muse" || taskHarness === "opencode") && readOnly)}>
               Start worker

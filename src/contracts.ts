@@ -5,6 +5,7 @@ export type Role = {
   name: string;
   harness: string;
   model?: string;
+  peerId?: string;
   responsibility: string;
 };
 export type Project = {
@@ -167,12 +168,18 @@ export type Harness = {
   reason: string;
 };
 export type Snapshot = {
+  device?: { id: string; label: string; platform: string };
+  peers?: { id: string; label: string; deviceId: string; projectId: string; remoteProjectId: string }[];
+  remoteDispatches?: RemoteDispatch[];
   projects: Project[];
   runs: Run[];
   approvals: Approval[];
   harnesses: Harness[];
   leads: Record<string, ProjectLead>;
 };
+export type RemoteDispatch = { id: string; prompt: string; createdAt: string; launchHash?: string; projectId: string; peerId: string; ownerDeviceId: string; ownerRunId?: string; lastKnownRun?: Run; lastObservedAt?: string; connection: "unknown" | "observed"; error?: string };
+export type NativeInstallation = { path: string; version: string | null; fingerprint: string };
+export type NativeInstallationStatus = { harness: string; selected: string | null; saved: string | null; restartRequired: boolean; installations: NativeInstallation[] };
 
 export type CatalogModel = {
   id: string;

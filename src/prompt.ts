@@ -1,6 +1,6 @@
 import type { Run } from "./contracts.ts";
 
-export function composeWorkerPrompt(run: Run): string {
+export function composeWorkerPrompt(run: Pick<Run, "prompt" | "roleSnapshot" | "contextSnapshot" | "followUpContext">): string {
   if (!run.roleSnapshot && !run.contextSnapshot && !run.followUpContext) return run.prompt;
   const data = {
     ...(run.roleSnapshot

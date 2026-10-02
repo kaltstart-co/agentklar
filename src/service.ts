@@ -1,3 +1,4 @@
+import { Peers, PeerError, type PeerTransport } from "./peers.ts";
 import { DatabaseSync } from "node:sqlite";
 import { Hono } from "hono";
 import { getCookie, setCookie } from "hono/cookie";
@@ -19,6 +20,8 @@ import {
 } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { homedir } from "node:os";
+import { deviceSettings } from "./devices.ts";
+import { composeWorkerPrompt } from "./prompt.ts";
 import { Store } from "./store.ts";
 import { harnesses, executable } from "./harnesses.ts";
 import { NativeWorker, type NativeCallbacks } from "./native.ts";
@@ -43,6 +46,7 @@ const role = z
     name: z.string().min(1).max(120),
     harness: z.string().min(1).max(80),
     model: z.string().min(1).max(120).optional(),
+    peerId: z.uuid().optional(),
     responsibility: z.string().max(4000),
   })
   .strict();
@@ -103,6 +107,7 @@ export const startSchema = z
     }).strict().optional(),
     followUp: z.object({ runId: z.uuid(), kind: z.enum(["review", "fix"]) }).strict().optional(),
     workspace: z.enum(["project", "worktree"]).optional(),
+    baseCommit: z.string().regex(/^[0-9a-f]{40,64}$/).optional(),
   })
   .strict();
 const leadActionSchema = z.discriminatedUnion("action", [
@@ -167,6 +172,7 @@ export function createService(
   museCommand: string | null = executable("muse"),
   leadOptions: { now?: () => number; wallNow?: () => number; leaseMs?: number } = {},
   opencodeCommand: string | null = executable("opencode"),
+  peerTransport?: PeerTransport,
 ) {
   const personalHome = realpathSync(skillOptions.userHome ?? homedir());
   const release = ownHome(home);
@@ -186,7 +192,21 @@ export function createService(
   const benchmarks = new BenchmarkCache((snapshot) => {
     store.db.prepare("INSERT INTO benchmark_cache(id,snapshot) VALUES(1,?) ON CONFLICT(id) DO UPDATE SET snapshot=excluded.snapshot").run(JSON.stringify(snapshot));
   }, cachedBenchmarks, benchmarkOptions.fetcher, benchmarkOptions.timeoutMs);
+  const devices = deviceSettings(store.db);
+  nativeCommand = devices.selected("codex", nativeCommand);
+  claudeCommand = devices.selected("claude", claudeCommand);
+  museCommand = devices.selected("muse", museCommand);
+  opencodeCommand = devices.selected("opencode", opencodeCommand);
+  const commands: Record<string, string | null> = { codex: nativeCommand, claude: claudeCommand, muse: museCommand, opencode: opencodeCommand };
+  const selectedHarnesses = () => harnesses().map((h) => Object.hasOwn(commands, h.id)
+    ? { ...h, executable: commands[h.id]!, available: !!commands[h.id], workerSupported: !!commands[h.id], hostSupported: !!commands[h.id] } : h);
   const app = new Hono();
+  const peers = new Peers(store, devices.device, async (path, method = "GET", body) => {
+    const response = await app.request(`http://127.0.0.1:${port}${path}`, { method,
+      headers: { Authorization: `Bearer ${bearer}`, "Content-Type": "application/json" },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+    return { status: response.status, body: await response.json() };
+  }, peerTransport);
   const instructions = new Instructions(store.db);
   const skills = new ProjectSkills(store.db, home, skillOptions);
   const personalSkills: Project = { id: "__personal_skills__", name: "Personal skills", path: personalHome, preference: "balanced", roles: [], createdAt: "" };
@@ -268,7 +288,7 @@ export function createService(
     !!a &&
     Buffer.byteLength(a) === Buffer.byteLength(b) &&
     timingSafeEqual(Buffer.from(a), Buffer.from(b));
-  app.onError((e, c) => c.json({ error: e.message }, e instanceof InstructionError || e instanceof SetupError || e instanceof SkillError ? e.status : 500));
+  app.onError((e, c) => c.json({ error: e.message }, e instanceof PeerError ? e.status as 400 : e instanceof InstructionError || e instanceof SetupError || e instanceof SkillError ? e.status : 500));
   app.use("*", async (c, next) => {
     const host = c.req.header("host") || new URL(c.req.url).host;
     if (![`127.0.0.1:${port}`, "127.0.0.1:5173"].includes(host))
@@ -296,10 +316,13 @@ export function createService(
         { error: operator ? "Run agentklar service open to open the local UI." : "Open the one-time setup URL printed by the local service." },
         401,
       );
+    if (c.req.path.startsWith("/api/peers/settings") && (!ui || mcp || (c.req.method !== "GET" && (!origin || !origins.has(origin)))))
+      return c.json({ error: "Only the trusted local UI may pair devices or change peer grants" }, 403);
     if (c.req.path.includes("/setup/") && (!ui || mcp || (c.req.method !== "GET" && (!origin || !origins.has(origin)))))
       return c.json({ error: "Only the trusted local UI may read or change native MCP setup" }, 403);
     if (
       (c.req.path.startsWith("/api/approvals/") ||
+        (c.req.path === "/api/native-installations" && c.req.method !== "GET") ||
         (c.req.path.includes("/instructions") && c.req.method !== "GET") ||
         (c.req.path.includes("/skills") && c.req.method !== "GET")) &&
       (!ui || !origin || !origins.has(origin) || mcp)
@@ -380,16 +403,23 @@ export function createService(
     if (!z.uuid().safeParse(projectId).success) return c.json({ error: "Invalid project ID" }, 400);
     if (!store.projects().some((p) => p.id === projectId)) return c.json({ error: "Project not found" }, 404);
     const params = new URL(c.req.url).searchParams;
-    if ([...params.keys()].some((key) => !["limit", "cursor"].includes(key)) ||
-        params.getAll("limit").length > 1 || params.getAll("cursor").length > 1)
+    if ([...params.keys()].some((key) => !["limit", "cursor", "remoteLimit", "remoteCursor"].includes(key)) ||
+        ["limit", "cursor", "remoteLimit", "remoteCursor"].some((key) => params.getAll(key).length > 1))
       return c.json({ error: "Invalid run list query" }, 400);
     const limitText = params.get("limit") ?? "20";
     const cursorText = params.get("cursor");
     const limit = Number(limitText);
     const before = cursorText === null ? Number.MAX_SAFE_INTEGER : Number(cursorText);
+    const remoteLimitText = params.get("remoteLimit") ?? "20";
+    const remoteCursorText = params.get("remoteCursor");
+    const remoteLimit = Number(remoteLimitText);
+    const remoteBefore = remoteCursorText === null ? Number.MAX_SAFE_INTEGER : Number(remoteCursorText);
     if (!/^[1-9]\d*$/.test(limitText) || !Number.isSafeInteger(limit) || limit > 20 ||
         (cursorText !== null && (!/^[1-9]\d*$/.test(cursorText) || !Number.isSafeInteger(before))))
       return c.json({ error: "limit must be 1–20 and cursor a positive integer" }, 400);
+    if (!/^[1-9]\d*$/.test(remoteLimitText) || !Number.isSafeInteger(remoteLimit) || remoteLimit > 20 ||
+        (remoteCursorText !== null && (!/^[1-9]\d*$/.test(remoteCursorText) || !Number.isSafeInteger(remoteBefore))))
+      return c.json({ error: "remoteLimit must be 1–20 and remoteCursor a positive integer" }, 400);
     const rows = store.projectRuns(projectId, before, limit + 1);
     const runs: ProjectRun[] = [];
     let nextCursor: string | null = null;
@@ -401,7 +431,18 @@ export function createService(
       nextCursor = String(row.rowid);
     }
     const hasMore = runs.length < rows.length;
-    return c.json({ projectId, runs, nextCursor: hasMore ? nextCursor : null, hasMore });
+    const remoteRows = peers.historyRows(projectId, remoteBefore, remoteLimit);
+    const remoteDispatches = [];
+    let remoteNextCursor: string | null = null;
+    for (const row of remoteRows.slice(0, remoteLimit)) {
+      const item = { ...row.dispatch, ...(row.dispatch.lastKnownRun ? { lastKnownRun: projectRun(row.dispatch.lastKnownRun) } : {}) };
+      if (remoteDispatches.length && JSON.stringify({ projectId, runs, nextCursor, hasMore, remoteDispatches: [...remoteDispatches, item], remoteNextCursor: String(row.rowid), remoteDispatchesHasMore: true }).length > 22000) break;
+      remoteDispatches.push(item);
+      remoteNextCursor = String(row.rowid);
+    }
+    const remoteDispatchesHasMore = remoteDispatches.length < remoteRows.length;
+    return c.json({ projectId, runs, nextCursor: hasMore ? nextCursor : null, hasMore,
+      ...(remoteRows.length || remoteCursorText !== null ? { remoteDispatches, remoteDispatchesHasMore, remoteNextCursor: remoteDispatchesHasMore ? remoteNextCursor : null } : {}) });
   });
   app.get("/api/projects/:id/lead", (c) => {
     c.header("Cache-Control", "no-store");
@@ -621,9 +662,17 @@ export function createService(
       );
     c.header("Cache-Control", "no-store");
     try {
+      if (selected?.peerId) {
+        peers.resolveMapping(project.id, selected.peerId);
+        const ownerCatalog = await peers.catalog(selected.peerId);
+        const available = (harness: string) => ownerCatalog.harnesses.some((entry) => entry.harness === harness && entry.modelsStatus === "available");
+        const installed = { codex: available("codex"), claude: available("claude"), muse: available("muse"), opencode: available("opencode") };
+        const advice = recommendWorker(project, parsed.data, ownerCatalog, installed, Date.now(), benchmarks.get());
+        return c.json({ ...advice, warnings: [...advice.warnings, "This advice uses the owning computer's native models and allowance. Start uses the saved device mapping."] });
+      }
       const catalog = withObservedMuseQuota(await catalogs.refresh(project), store.runs());
       return c.json(
-        recommendWorker(project, parsed.data, catalog, {
+        recommendWorker({ ...project, roles: project.roles.filter((item) => !item.peerId) }, parsed.data, catalog, {
           codex: !!nativeCommand,
           claude: !!claudeCommand,
           muse: !!museCommand,
@@ -676,14 +725,28 @@ export function createService(
           409,
         );
   });
-  app.get("/api/harnesses", (c) => c.json(harnesses()));
+  app.get("/api/harnesses", (c) => c.json(selectedHarnesses()));
+  app.get("/api/native-installations", (c) => {
+    c.header("Cache-Control", "no-store");
+    return c.json(devices.status(commands));
+  });
+  app.post("/api/native-installations", async (c) => {
+    const parsed = z.object({ harness: z.enum(["codex", "claude", "muse", "opencode"]), path: z.string().min(1).max(4096), fingerprint: z.string().regex(/^[a-f0-9]{64}$/) }).strict().safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: "Choose a listed native installation." }, 400);
+    if (stopping) return c.json({ error: "Local service is stopping." }, 503);
+    if (!devices.save(parsed.data.harness, parsed.data.path, parsed.data.fingerprint)) return c.json({ error: "Installation changed or is no longer available. Refresh installations and choose again." }, 409);
+    return c.json({ saved: true, restartRequired: commands[parsed.data.harness] !== parsed.data.path, activeRuns: activeRuns().length });
+  });
   app.get("/api/snapshot", (c) => {
     c.header("Cache-Control", "no-store");
     return c.json({
       projects: store.projects(),
       runs: store.runs().map(compactRun),
       approvals: store.approvals(),
-      harnesses: harnesses(),
+      device: devices.device,
+      peers: peers.settings().peers,
+      remoteDispatches: peers.list(),
+      harnesses: selectedHarnesses(),
       leads: Object.fromEntries(store.projects().flatMap((p) => {
         const lead = currentLead(p.id);
         return lead ? [[p.id, publicLead(lead)]] : [];
@@ -750,6 +813,7 @@ export function createService(
         },
         400,
       );
+    for (const chosen of parsed.data.roles ?? []) if (chosen.peerId) peers.resolveMapping(p.id, chosen.peerId);
     const updated = { ...p, ...parsed.data };
     store.saveProject(updated);
     return c.json(updated);
@@ -783,6 +847,24 @@ export function createService(
         );
       return c.json(compactRun(prior));
     }
+    const priorDispatch = peers.existing(p.id, data.idempotencyKey);
+    if (priorDispatch) {
+      if (priorDispatch.launchHash !== launchHash) return c.json({ error: "Idempotency key already used for a different task" }, 409);
+      return c.json(priorDispatch.connection === "unknown" ? await peers.status(priorDispatch.id) : priorDispatch);
+    }
+    const remoteRole = data.roleId ? p.roles.find((item) => item.id === data.roleId) : undefined;
+    if (remoteRole?.peerId) {
+      peers.resolveMapping(p.id, remoteRole.peerId);
+      if (data.harness && data.harness !== remoteRole.harness) return c.json({ error: "Task harness must match the selected role harness." }, 400);
+      if (data.followUp) return c.json({ error: "Linked remote review and fix must run on the owning computer." }, 409);
+      if (data.workspace === "project") return c.json({ error: "Remote tasks require a separate Git worktree." }, 400);
+      const base = gitBase(p.path);
+      if (data.baseCommit && data.baseCommit !== base.baseCommit) return c.json({ error: "Local project HEAD differs from the requested Git base." }, 409);
+      const prompt = composeWorkerPrompt({ prompt: data.prompt, roleSnapshot: remoteRole, ...(data.includeProjectContext ? { contextSnapshot: store.context(p.id) } : {}) });
+      if (prompt.length > 32000) return c.json({ error: "Remote task and project context exceed the supported prompt size. Shorten the task or omit project context." }, 400);
+      return c.json(await peers.start({ peerId: remoteRole.peerId, idempotencyKey: data.idempotencyKey, baseCommit: base.baseCommit,
+        task: { prompt, harness: remoteRole.harness, model: data.model || remoteRole.model, readOnly: data.readOnly, includeProjectContext: false, ...(data.routing ? { routing: data.routing } : {}) } }, launchHash, data.prompt), 202);
+    }
     if (data.followUp && data.readOnly !== (data.followUp.kind === "review"))
       return c.json({ error: "Reviews must be read only; fixes must allow workspace changes" }, 400);
     if (data.followUp) {
@@ -791,6 +873,7 @@ export function createService(
     }
     const linkedAtStart = data.followUp ? linkedSource(p.id, data.followUp).source : undefined;
     if (data.followUp && !linkedAtStart) return c.json({ error: "Linked run changed before launch" }, 409);
+    if (data.baseCommit && data.workspace !== "worktree") return c.json({ error: "An exact Git base requires a separate worktree." }, 400);
     const workspaceChoice = linkedAtStart ? (linkedAtStart.workspace?.kind || "project") : (data.workspace || "project");
     if (linkedAtStart && data.workspace && data.workspace !== workspaceChoice)
       return c.json({ error: "Linked work must use its original workspace." }, 409);
@@ -828,7 +911,7 @@ export function createService(
       let advice;
       try {
         const catalog = withObservedMuseQuota(await catalogs.refresh(p), store.runs());
-        advice = recommendWorker(p, {
+        advice = recommendWorker({ ...p, roles: p.roles.filter((item) => !item.peerId) }, {
           roleId: data.roleId,
           harness: data.harness,
           model: data.model,
@@ -935,6 +1018,7 @@ export function createService(
     else {
       try {
         const base = gitBase(p.path);
+        if (data.baseCommit && data.baseCommit !== base.baseCommit) return c.json({ error: "Project HEAD changed from the requested Git base." }, 409);
         workspace = { kind: "worktree", repoRoot: base.repoRoot, commonDir: base.commonDir,
           repoStamp: base.repoStamp, commonStamp: base.commonStamp, baseCommit: base.baseCommit,
           rootRunId: runId, ...(harness === "claude" ? {
@@ -1046,7 +1130,8 @@ export function createService(
     });
     return c.json(compactRun(r), 202);
   });
-  app.get("/api/runs/:id", (c) => {
+  app.get("/api/runs/:id", async (c) => {
+    if (peers.list().some((item) => item.id === c.req.param("id"))) return c.json(await peers.status(c.req.param("id")));
     const r = store.run(c.req.param("id"));
     return r ? c.json(compactRun(r)) : c.json({ error: "Run not found" }, 404);
   });
@@ -1055,7 +1140,7 @@ export function createService(
     if (!run) return c.json({ error: "Run not found" }, 404);
     c.header("Cache-Control", "no-store");
     const project = store.projects().find((p) => p.id === run.projectId);
-    const cli = run.harness === "codex" || run.harness === "claude" || run.harness === "muse" || run.harness === "opencode" ? executable(run.harness) : null;
+    const cli = commands[run.harness ?? "codex"] ?? null;
     return c.json(runHandoff(run, project,
       activeRuns().some((item) => sameWorkspace(item, run)), cli));
   });
@@ -1066,6 +1151,7 @@ export function createService(
       : c.json({ error: "Run not found" }, 404);
   });
   app.get("/api/runs/:id/tail", (c) => {
+    if (peers.list().some((item) => item.id === c.req.param("id"))) return c.json({ error: "Remote event tails are available on the owning computer. Use run_status here for current owner evidence." }, 409);
     if (!store.run(c.req.param("id")))
       return c.json({ error: "Run not found" }, 404);
     const after = Number(c.req.query("after") || 0);
@@ -1084,6 +1170,11 @@ export function createService(
     });
   });
   app.get("/api/runs/:id/result", (c) => {
+    const dispatch = peers.list().find((item) => item.id === c.req.param("id"));
+    if (dispatch) return c.json({ dispatchId: dispatch.id, ownerDeviceId: dispatch.ownerDeviceId, ownerRunId: dispatch.ownerRunId ?? null,
+      connection: dispatch.connection, lastObservedAt: dispatch.lastObservedAt ?? null, state: dispatch.lastKnownRun?.state ?? null,
+      result: dispatch.lastKnownRun?.result ?? "", resultTruncated: dispatch.lastKnownRun?.resultTruncated ?? false,
+      message: "Last observed owner result. Use run_status to refresh. Full result and native continuation are available on the owning computer." });
     const r = store.run(c.req.param("id"));
     return r
       ? c.json({
@@ -1104,7 +1195,8 @@ export function createService(
         })
       : c.json({ error: "Run not found" }, 404);
   });
-  app.post("/api/runs/:id/stop", (c) => {
+  app.post("/api/runs/:id/stop", async (c) => {
+    if (peers.list().some((item) => item.id === c.req.param("id"))) return c.json(await peers.cancel(c.req.param("id")));
     const r = store.run(c.req.param("id"));
     if (!r) return c.json({ error: "Run not found" }, 404);
     workers.get(r.id)?.stop();
@@ -1134,6 +1226,23 @@ export function createService(
     store.db.prepare("DELETE FROM approvals WHERE id=?").run(a.id);
     return c.json({ ok: true });
   });
+  app.get("/api/peers/settings", c => c.json(peers.settings()));
+  for (const [operation, handler] of [["grant", (v: unknown) => peers.grant(v)], ["revoke", (v: unknown) => peers.revoke(v)], ["save", (v: unknown) => peers.saveConnection(v)], ["test", (v: unknown) => peers.test(v)]] as const)
+    app.post(`/api/peers/settings/${operation}`, async c => {
+      try { return c.json(await handler(await c.req.json())); }
+      catch (e) { if (e instanceof z.ZodError) return c.json({ error: "Invalid peer settings." }, 400); throw e; }
+    });
+  app.post("/api/peer", async c => {
+    try { const reply = await peers.owner(await c.req.json()); return c.json(reply.body as object, reply.status as 200); }
+    catch (e) { if (e instanceof z.ZodError) return c.json({ error: "Invalid peer request." }, 400); throw e; }
+  });
+  app.get("/api/peers/dispatch", c => c.json({ dispatches: peers.list() }));
+  app.post("/api/peers/dispatch", async c => {
+    try { return c.json(await peers.start(await c.req.json())); }
+    catch (e) { if (e instanceof z.ZodError) return c.json({ error: "Invalid remote task." }, 400); throw e; }
+  });
+  app.post("/api/peers/dispatch/:id/status", async c => c.json(await peers.status(c.req.param("id"))));
+  app.post("/api/peers/dispatch/:id/cancel", async c => c.json(await peers.cancel(c.req.param("id"))));
   let closing: Promise<void> | undefined;
   return {
     app,
