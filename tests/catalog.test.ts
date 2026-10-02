@@ -461,6 +461,10 @@ test("Claude native auth probe keeps only status, bounds output and owns its chi
       const result = await readClaudeAuth(process.execPath, dir, new AbortController().signal, [file, mode, log], 2000);
       assert.equal(result.status, expected, mode);
       assert.equal(result.source, "claude-auth-status");
+      if (expected === "sign_in_required") {
+        assert.match(result.message, /does not check your Claude Desktop sign-in/);
+        assert.ok(result.message.includes(`'${process.execPath}' auth login`));
+      }
       assert.doesNotMatch(JSON.stringify(result), /SECRET|email|configDirectory|token/i);
       assertStopped(Number(readFileSync(log + ".pid", "utf8")), mode);
       assert.deepEqual(JSON.parse(readFileSync(log, "utf8").trim()), [mode, log]);

@@ -196,6 +196,7 @@ export type QuotaBucket = {
   spendControlReached: boolean | null;
 };
 export type AccountQuota = {
+  observedAt?: string;
   status: "available" | "unavailable";
   message: string | null;
   ordinaryUsageAllowed: boolean | null;

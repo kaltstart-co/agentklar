@@ -9,7 +9,7 @@ This is a fresh TypeScript rewrite. The old Go application is preserved in Git a
 Requires Node 24 and npm on macOS or Linux. Install this pinned GitHub beta package, then start the local service:
 
 ```sh
-npm install -g https://github.com/kaltstart-co/agentklar/releases/download/v0.1.0-beta.18/agentklar-0.1.0-beta.18.tgz
+npm install -g https://github.com/kaltstart-co/agentklar/releases/download/v0.1.0-beta.19/agentklar-0.1.0-beta.19.tgz
 agentklar start
 ```
 
@@ -158,6 +158,6 @@ npm test
 npm run smoke:package
 ```
 
-Tests use a fake native protocol process and the official MCP SDK on real stdio. They verify persistence, project isolation, idempotency, cancellation, restart state, exclusive service ownership, native event identity, role context, and approval boundaries. The package smoke builds a tarball, installs only production dependencies in a clean prefix, then checks the CLI, built UI, and generated MCP bridge from another working folder. It starts no model. The verified Codex smoke tests use separate temporary projects and explicitly pinned Sol models. Claude Code integration is in progress. The installed CLI was found, but native authentication was not active; a successful live Claude worker run has not been verified.
+Tests use a fake native protocol process and the official MCP SDK on real stdio. They verify persistence, project isolation, idempotency, cancellation, restart state, exclusive service ownership, native event identity, role context, and approval boundaries. The package smoke builds a tarball, installs only production dependencies in a clean prefix, then checks the CLI, built UI, and generated MCP bridge from another working folder. It starts no model. The verified Codex smoke tests use separate temporary projects and explicitly pinned Sol models. Claude Code integration is in progress. The discovered Claude Code CLI reported no sign-in in its current native profile; this does not check Claude Desktop sign-in. A successful live Claude worker run has not been verified.
 
 See [docs/VALIDATION.md](docs/VALIDATION.md) for local and real native evidence. See [BUILD_PLAN.md](BUILD_PLAN.md) for the staged roadmap and [FEATURE_CHECKLIST.md](FEATURE_CHECKLIST.md) for verified scope. MIT license.

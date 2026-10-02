@@ -9,7 +9,7 @@ import { createService, type WorkerFactory } from "../src/service.ts";
 const models = ["gpt-6-luna", "gpt-6.1-sol", "gpt-6-astra"];
 function snapshot(project: Project, options: { blocked?: boolean; images?: boolean } = {}): CatalogSnapshot {
   return {
-    projectId: project.id, checkedAt: "2026-10-01T00:00:00.000Z",
+    projectId: project.id, checkedAt: new Date().toISOString(),
     harnesses: [{
       harness: "codex", modelsStatus: "available", modelsMessage: null,
       modelsTruncated: false,
@@ -67,7 +67,7 @@ test("automatic launch saves the policy choice, preserves pins, and gives bounde
     assert.equal(run.model, "gpt-6-luna");
     assert.equal(run.routing?.preference, "economical");
     assert.equal(run.routing?.selected.basis, "policy");
-    assert.equal(run.routing?.catalogCheckedAt, "2026-10-01T00:00:00.000Z");
+    assert.ok(Date.now() - Date.parse(run.routing!.catalogCheckedAt) < 5000);
     assert.equal(JSON.stringify(run).includes("PRIVATE_"), false);
     assert.equal(t.launched.length, 1);
     const prior = await t.call("/api/tasks/start", base);

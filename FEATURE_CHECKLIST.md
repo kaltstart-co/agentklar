@@ -35,6 +35,8 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 - [x] Muse model discovery
 - [x] Muse delegation
 - [x] Muse quota snapshots
+- [x] Observed Muse allowance in Models and advice
+- [x] Fresh allowance checks for automatic routing
 - [x] OpenCode delegation
 - [x] OpenCode continuation
 - [x] Model advice

@@ -261,3 +261,10 @@ Browser checks on 2026-10-02 used the real bundled source and a successful publi
 An independent source comparison confirmed all 77 category scores across 11 mapped rows and both source hashes against the public CSV and category definitions.
 
 Final beta.5 local checks passed: `npm run check`, all 93 tests, `npm run build`, and `git diff --check`.
+
+
+## Allowance routing freshness (2026-10-02)
+
+Fixture checks cover fresh exhausted Codex windows, explicit pin preservation with an overage warning, old and future allowance observations, and saved Muse account observations. Saved Muse readings appear in Models and reach both advice and automatic task launch. Advice ignores readings older than five minutes and expired windows. The five-minute bound is a product rule. These checks do not prove a live Muse numeric balance, remaining task counts, subscription savings, or paid overage availability. Complete account quota coverage remains unfinished.
+
+Final beta.19 local checks passed: TypeScript, production build, all 149 tests, package smoke exposing 19 MCP tools, and diff whitespace. Claude login text names the selected CLI profile, gives its native login command, and makes no claim about Claude Desktop sign-in. No native inference calls were made for these changes.

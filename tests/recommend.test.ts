@@ -577,3 +577,37 @@ test("recommendation reads native discovery protocol through the service without
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+
+test("fresh exhausted allowance excludes automatic work but preserves an explicit pin", () => {
+  const c = catalog("codex", models, { buckets: [bucket(100)] });
+  assert.equal(advise({}, [c]).choice, null);
+  const pinned = advise({ model: "gpt-5.6-sol" }, [c]);
+  assert.equal(pinned.choice?.model, "gpt-5.6-sol");
+  assert.match(pinned.choice!.warnings.join(" "), /exhausted.*paid overage/);
+  c.quota.observedAt = new Date(now - 300_001).toISOString();
+  c.quota.ordinaryUsageAllowed = false;
+  const stale = advise({}, [c]);
+  assert.equal(stale.choice?.tier, "balanced");
+  assert.match(stale.choice!.warnings.join(" "), /older than five minutes/);
+  c.quota.observedAt = new Date(now + 1).toISOString();
+  assert.equal(advise({}, [c]).choice?.tier, "balanced");
+});
+
+test("observed Muse account windows reach pin advice without inventing access or model tiers", async () => {
+  const { withObservedMuseQuota } = await import("../src/catalog.ts");
+  const muse = { ...catalog(), harness: "muse" as const, models: [model("spark")] };
+  const snapshot = { projectId: p.id, checkedAt: new Date(now).toISOString(), harnesses: [muse] };
+  const usage = { observedAtMs: now - 1000, weekly: { usedPercent: 42, resetsAtMs: now + 10000 }, window: { usedPercent: 100, resetsAtMs: now + 10000, windowDurationMins: 300 } };
+  const runs = [{ harness: "muse", museSubscriptionUsage: usage }] as unknown as import("../src/contracts.ts").Run[];
+  const observed = withObservedMuseQuota(snapshot, runs);
+  assert.equal(snapshot.harnesses[0].quota.observedAt, undefined);
+  assert.equal(observed.harnesses[0].quota.ordinaryUsageAllowed, null);
+  const advice = recommendWorker(p, recommendationSchema.parse({ harness: "muse", model: "spark" }), observed, { codex: false, claude: false, muse: true }, now);
+  assert.equal(advice.choice?.tier, "unknown");
+  assert.match(advice.choice!.reasons.join(" "), /observed at.*not a live balance/);
+  assert.match(advice.choice!.warnings.join(" "), /exhausted/);
+  const old = withObservedMuseQuota(snapshot, [{ ...runs[0], museSubscriptionUsage: { ...usage, observedAtMs: now - 300_001 } }]);
+  const stale = recommendWorker(p, recommendationSchema.parse({ harness: "muse", model: "spark" }), old, { codex: false, claude: false, muse: true }, now);
+  assert.doesNotMatch(stale.choice!.warnings.join(" "), /exhausted/);
+});

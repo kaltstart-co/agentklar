@@ -26,7 +26,7 @@ import { ClaudeWorker } from "./claude.ts";
 import { MuseWorker } from "./muse.ts";
 import { OpenCodeWorker } from "./opencode.ts";
 import { captureOpenCodeScope } from "./opencode-scope.ts";
-import { CatalogCache, readCatalog, type CatalogReader } from "./catalog.ts";
+import { CatalogCache, readCatalog, withObservedMuseQuota, type CatalogReader } from "./catalog.ts";
 import { BenchmarkCache } from "./benchmarks.ts";
 import type { Run, Project, ProjectRun, ProjectLead, RoutingDecision, FollowUpContext } from "./contracts.ts";
 import { sourceFromHeader } from "./launch-source.ts";
@@ -572,7 +572,7 @@ export function createService(
     const id = c.req.param("id");
     c.header("Cache-Control", "no-store");
     return store.projects().some((p) => p.id === id)
-      ? c.json(catalogs.get(id))
+      ? c.json(catalogs.get(id) ? withObservedMuseQuota(catalogs.get(id)!, store.runs()) : null)
       : c.json({ error: "Project not found" }, 404);
   });
   app.post("/api/projects/:id/catalog", async (c) => {
@@ -580,7 +580,7 @@ export function createService(
     if (!project) return c.json({ error: "Project not found" }, 404);
     c.header("Cache-Control", "no-store");
     try {
-      return c.json(await catalogs.refresh(project));
+      return c.json(withObservedMuseQuota(await catalogs.refresh(project), store.runs()));
     } catch {
       return c.json({ error: "Native catalog could not be read." }, 503);
     }
@@ -621,7 +621,7 @@ export function createService(
       );
     c.header("Cache-Control", "no-store");
     try {
-      const catalog = await catalogs.refresh(project);
+      const catalog = withObservedMuseQuota(await catalogs.refresh(project), store.runs());
       return c.json(
         recommendWorker(project, parsed.data, catalog, {
           codex: !!nativeCommand,
@@ -827,7 +827,7 @@ export function createService(
     if (data.routing) {
       let advice;
       try {
-        const catalog = await catalogs.refresh(p);
+        const catalog = withObservedMuseQuota(await catalogs.refresh(p), store.runs());
         advice = recommendWorker(p, {
           roleId: data.roleId,
           harness: data.harness,

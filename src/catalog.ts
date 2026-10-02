@@ -7,6 +7,7 @@ import type {
   CatalogSnapshot,
   HarnessCatalog,
   Project,
+  Run,
   QuotaWindow,
 } from "./contracts.ts";
 
@@ -92,6 +93,24 @@ export function parseQuota(value: unknown): AccountQuota {
     buckets,
   };
 }
+/** Muse usage is account-wide and observed after a worker, never a live balance. */
+export function withObservedMuseQuota(snapshot: CatalogSnapshot, runs: Run[]): CatalogSnapshot {
+  const usage = runs.filter(r => r.harness === "muse" && r.museSubscriptionUsage)
+    .map(r => r.museSubscriptionUsage!).sort((a, b) => b.observedAtMs - a.observedAtMs)[0];
+  if (!usage) return snapshot;
+  return { ...snapshot, harnesses: snapshot.harnesses.map(c => c.harness !== "muse" ? c : {
+    ...c, quota: {
+      status: "available", observedAt: new Date(usage.observedAtMs).toISOString(),
+      message: "Observed after a Muse worker; refresh does not read a live balance. Routing ignores observations older than five minutes or past their reset.",
+      ordinaryUsageAllowed: null,
+      buckets: [{ id: "muse", name: "Observed Muse subscription usage", normalModel: null,
+        primary: { usedPercent: usage.window.usedPercent, windowDurationMins: usage.window.windowDurationMins, resetsAt: usage.window.resetsAtMs / 1000 },
+        secondary: { usedPercent: usage.weekly.usedPercent, windowDurationMins: 10080, resetsAt: usage.weekly.resetsAtMs / 1000 },
+        spendControlReached: null }],
+    },
+  }) };
+}
+
 function model(
   value: unknown,
   harness: "codex" | "claude" | "muse",
@@ -132,7 +151,7 @@ function empty(harness: HarnessCatalog["harness"]): HarnessCatalog {
 type ClaudeAuth = NonNullable<HarnessCatalog["auth"]>;
 const authMessage: Record<ClaudeAuth["status"], string> = {
   signed_in: "Claude Code reports that its native CLI is signed in. Model access is not verified.",
-  sign_in_required: "Claude Code worker sign-in is required. Sign in with the native Claude Code CLI, then refresh models.",
+  sign_in_required: "The selected Claude Code CLI reports no sign-in in its current native profile. This does not check your Claude Desktop sign-in.",
   unknown: "Claude Code worker sign-in could not be checked. Refresh models or check the native CLI.",
 };
 const authResult = (status: ClaudeAuth["status"]): ClaudeAuth => ({
@@ -175,8 +194,10 @@ export async function readClaudeAuth(
     const payload = record(JSON.parse(output));
     if (payload?.apiProvider !== "firstParty") return authResult("unknown");
     if (code === 0 && payload.loggedIn === true) return authResult("signed_in");
-    if (code === 1 && payload.loggedIn === false && payload.authMethod === "none")
-      return authResult("sign_in_required");
+    if (code === 1 && payload.loggedIn === false && payload.authMethod === "none") {
+      const login = `'${command.replaceAll("'", "'\"'\"'")}' auth login`;
+      return { ...authResult("sign_in_required"), message: `${authMessage.sign_in_required} Run ${login} in your terminal, then refresh Models.` };
+    }
   } catch {
   } finally {
     clearTimeout(timeout);

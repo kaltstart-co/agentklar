@@ -83,10 +83,11 @@ function quota(
   model: CatalogModel | undefined,
   id: string,
   now: number,
+  checkedAt: string,
 ) {
   const relevant = catalog.quota.buckets.filter(
     (b) =>
-      (b.id === "codex" && b.normalModel === null) ||
+      ((catalog.harness === "codex" && b.id === "codex" || catalog.harness === "muse" && b.id === "muse") && b.normalModel === null) ||
       b.normalModel === id ||
       (model != null && b.normalModel === model.id) ||
       (model?.resolvedModel != null && b.normalModel === model.resolvedModel),
@@ -94,7 +95,10 @@ function quota(
   const windows = relevant
     .flatMap((b) => [b.primary, b.secondary])
     .filter((w) => w !== null);
-  const remaining = windows.flatMap((w) =>
+  // Product freshness bound, not a prediction of consumption between reads.
+  const observed = Date.parse(catalog.quota.observedAt || checkedAt);
+  const fresh = Number.isFinite(observed) && observed <= now && now - observed <= 5 * 60_000;
+  const remaining = (fresh ? windows : []).flatMap((w) =>
     Number.isFinite(w.usedPercent) &&
     (w.resetsAt === null ||
       (Number.isFinite(w.resetsAt) && w.resetsAt * 1000 > now))
@@ -103,9 +107,11 @@ function quota(
   );
   return {
     blocked:
-      catalog.quota.ordinaryUsageAllowed === false ||
-      relevant.some((b) => b.spendControlReached === true),
-    allowed: catalog.quota.ordinaryUsageAllowed === true,
+      fresh && (catalog.quota.ordinaryUsageAllowed === false ||
+      relevant.some((b) => b.spendControlReached === true)),
+    allowed: fresh && catalog.quota.ordinaryUsageAllowed === true,
+    exhausted: remaining.some(r => r === 0),
+    old: !fresh,
     headroom: remaining.length ? Math.min(...remaining) : null,
     stale: windows.some((w) => w.resetsAt !== null && w.resetsAt * 1000 <= now),
   };
@@ -167,7 +173,7 @@ export function recommendWorker(
     warnings: [
       "Limited policy advice. Model access, coding quality and actual subscription cost are not verified.",
     ],
-    policyVersion: "2026-10-02.1",
+    policyVersion: "2026-10-02.2",
     confidence: "limited",
     sources: [...sources],
   };
@@ -182,7 +188,7 @@ export function recommendWorker(
     id: string,
     pinned: boolean,
   ) => {
-    const q = quota(catalog, model, id, now);
+    const q = quota(catalog, model, id, now, snapshot.checkedAt);
     const p = profile(catalog.harness, model, id);
     const warnings: string[] = [];
     const reasons: string[] = [];
@@ -197,6 +203,14 @@ export function recommendWorker(
       return reject(
         "native ordinary usage or a relevant spend control is blocked.",
       );
+    if (q.exhausted && !pinned)
+      return reject("an applicable fresh subscription window is exhausted; paid overage access is unknown.");
+    if (q.exhausted && pinned)
+      warnings.push("An applicable fresh subscription window is exhausted. Preserved your pin; native access or paid overage may be required.");
+    if (q.old)
+      warnings.push("Allowance observation is older than five minutes, invalid or in the future; it was ignored. Refresh native evidence.");
+    if (catalog.quota.observedAt)
+      reasons.push(`Subscription usage was observed at ${catalog.quota.observedAt}; this is not a live balance.`);
     if (catalog.harness === "opencode" && !model)
       return reject("connected OpenCode provider did not offer this exact text-and-tool model.");
     if (input.requiresImages && !model?.inputModalities?.includes("image"))
