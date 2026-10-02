@@ -1,3 +1,4 @@
+import { requestedTaskBody } from "./requested-task.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -295,7 +296,7 @@ test("OpenCode API rejects read-only and accepts a manual worker without changin
       queueMicrotask(() => { callbacks.update({ state: "completed" }); callbacks.done(); }); return { stop: () => {} }; },
     null, null, undefined, {}, undefined, {}, {}, null, {}, "/bin/true");
   const headers = { authorization: `Bearer ${service.bearer}`, "content-type": "application/json" };
-  const call = (path: string, body: unknown) => service.app.request("http://127.0.0.1:4317" + path, { method: "POST", headers, body: JSON.stringify(body) });
+  const call = (path: string, body: unknown) => service.app.request("http://127.0.0.1:4317" + path, { method: "POST", headers, body: JSON.stringify(requestedTaskBody(path, body)) });
   try {
     const project = await (await call("/api/projects", { name: "fixture", path: projectPath })).json();
     const task = { projectId: project.id, prompt: "test", harness: "opencode", idempotencyKey: randomUUID() };

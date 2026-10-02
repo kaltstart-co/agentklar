@@ -8,6 +8,7 @@ import { randomUUID } from "node:crypto";
 import { createService } from "../src/service.ts";
 import { Peers, PeerError, type PeerTransport } from "../src/peers.ts";
 import { deviceSettings } from "../src/devices.ts";
+import { requestedTaskBody } from "./requested-task.ts";
 
 test("independent owner grant survives coordinator handoff and lost acknowledgement without a second worker", { timeout: 15000 }, async () => {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "agentklar-control-review-")));
@@ -39,7 +40,7 @@ test("independent owner grant survives coordinator handoff and lost acknowledgem
     const cookie = ui ? (await service.app.request(service.setupUrl)).headers.get("set-cookie")!.split(";")[0] : undefined;
     const response = await service.app.request(`http://127.0.0.1:${port}${path}`, {
       method, headers: { "Content-Type": "application/json", ...(ui ? { Cookie: cookie!, Origin: `http://127.0.0.1:${port}` } : { Authorization: `Bearer ${service.bearer}`, "x-agentklar-bridge-id": bridge.repeat(64) }) },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      ...(body === undefined ? {} : { body: JSON.stringify(requestedTaskBody(path, body)) }),
     });
     return { status: response.status, body: await response.json() as any };
   };

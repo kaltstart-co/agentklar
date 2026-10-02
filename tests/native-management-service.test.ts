@@ -1,3 +1,4 @@
+import { requestedTaskBody } from "./requested-task.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -19,7 +20,7 @@ async function fixture(reader?: (project: Project) => Promise<CatalogSnapshot>) 
   const cookie = opened.headers.get("set-cookie")!.split(";")[0];
   const headers = { cookie, Origin: base, "Content-Type": "application/json" };
   const call = (path: string, body?: unknown, custom: Record<string, string> = headers) => service.app.request(base + path, {
-    method: body === undefined ? "GET" : "POST", headers: custom, ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    method: body === undefined ? "GET" : "POST", headers: custom, ...(body === undefined ? {} : { body: JSON.stringify(requestedTaskBody(path, body)) }),
   });
   const delayed = (path: string) => {
     let release!: (body: unknown) => void;

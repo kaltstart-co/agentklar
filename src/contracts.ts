@@ -3,6 +3,16 @@ import type { ToolEvidence, ToolCapability } from "./capabilities.ts";
 export const workerHarnesses = ["codex", "claude", "muse", "opencode", "gemini", "cursor-agent", "zcode"] as const;
 export type WorkerHarness = typeof workerHarnesses[number];
 export type Preference = "economical" | "balanced" | "best";
+export type RoutingTier = "efficient" | "balanced" | "capable";
+export type RoutingRules = {
+  routine: RoutingTier;
+  standard: RoutingTier;
+  hard: RoutingTier;
+  adjustToAllowance: boolean;
+  lowAllowancePercent: number;
+  highAllowancePercent: number;
+};
+export type RoutingPreset = { id: string; name: string; rules: RoutingRules };
 export type Role = {
   id: string;
   name: string;
@@ -16,6 +26,8 @@ export type Project = {
   name: string;
   path: string;
   preference: Preference;
+  routingPreset?: RoutingPreset;
+  delegationMode?: "manual" | "automatic";
   roles: Role[];
   createdAt: string;
 };
@@ -250,6 +262,7 @@ export type WorkerChoice = {
   warnings: string[];
 };
 export type WorkerAdvice = {
+  routingPreset?: Pick<RoutingPreset, "id" | "name">;
   requiresTools?: ToolCapability[];
   readOnly?: boolean;
   taskType?: TaskType;
@@ -271,6 +284,7 @@ export type WorkerAdvice = {
 
 // Saved with a run. Keep native catalog and quota details out of run polling.
 export type RoutingDecision = {
+  routingPreset?: Pick<RoutingPreset, "id" | "name">;
   requiresTools?: ToolCapability[];
   taskType?: TaskType;
   benchmarkMethod?: "reference-tie-break" | "policy-fallback" | "pin";

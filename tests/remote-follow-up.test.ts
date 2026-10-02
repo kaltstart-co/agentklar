@@ -1,3 +1,4 @@
+import { requestedTaskBody } from "./requested-task.ts";
 import { test } from "node:test";
 import { Client } from "@modelcontextprotocol/client";
 import { InMemoryTransport } from "@modelcontextprotocol/server";
@@ -25,7 +26,7 @@ test("remote build review fix review keeps owner worktree across main commits an
   queueMicrotask(()=>{if(!run.followUp){writeFileSync(join(path,"one.txt"),"built\n");writeFileSync(join(path,"new.txt"),"new\n");for(let i=0;i<11;i++)writeFileSync(join(path,`extra-${i}.txt`),`extra ${i}\n`);writeFileSync(join(path,"ignored.txt"),"excluded\n");}else if(run.followUp.kind==="fix")writeFileSync(join(path,"one.txt"),"fixed\n");callbacks.update({state:"completed",result:run.followUp?.kind==="review"?"Review findings":"Work complete",effectiveModel:run.model});callbacks.done();});
   return{stop(){},closed:Promise.resolve()};
  },process.execPath,process.execPath);
- const call=(service:typeof owner,port:number)=>async(path:string,method="GET",body?:unknown)=>{const r=await service.app.request(`http://127.0.0.1:${port}${path}`,{method,headers:{Authorization:`Bearer ${service.bearer}`,"Content-Type":"application/json"},...(body===undefined?{}:{body:JSON.stringify(body)})});return{status:r.status,body:await r.json()};};
+ const call=(service:typeof owner,port:number)=>async(path:string,method="GET",body?:unknown)=>{const r=await service.app.request(`http://127.0.0.1:${port}${path}`,{method,headers:{Authorization:`Bearer ${service.bearer}`,"Content-Type":"application/json"},...(body===undefined?{}:{body:JSON.stringify(requestedTaskBody(path, body))})});return{status:r.status,body:await r.json()};};
  const ownerDevice=deviceSettings(owner.store.db).device,ownerPeers=new Peers(owner.store,ownerDevice,call(owner,ownerPort));
  const transport:PeerTransport=async(_,request)=>{if(offline)throw new PeerError("Fixture offline",503);return ownerPeers.owner(request);};
  const coordinator=createService(join(dir,"coordinator"),sourcePort,()=>{localStarts++;throw new Error("No local fallback");},process.execPath,null,undefined,undefined,undefined,undefined,undefined,null,undefined,null,transport);
@@ -44,7 +45,7 @@ test("remote build review fix review keeps owner worktree across main commits an
   const api=call(coordinator,sourcePort);
   assert.equal((await api(`/api/projects/${sourceProject.id}`,"PATCH",{roles:[{id:"builder",name:"Builder",harness:"codex",model:"gpt-6.1-sol",peerId:mapping.id,responsibility:"Build carefully"},{id:"reviewer",name:"Reviewer",harness:"claude",model:"fixture-claude",peerId:duplicate.id,responsibility:"Review only"},{id:"local",name:"Local",harness:"codex",responsibility:"Local"},{id:"wrong",name:"Wrong",harness:"codex",peerId:wrong.id,responsibility:"Wrong"}]})).status,200);
   owner.store.saveContext({projectId:ownerProject.id,revision:1,brief:"UNRELATED OWNER CONTEXT",memory:"",handoff:"",updatedAt:"now",updatedVia:"ui"},0);
-  const start=async(input:object)=>{const response=await tool("task_start",{projectId:sourceProject.id,...input});assert.ok([200,202].includes(response.status),JSON.stringify(response.body));const dispatch=response.body as {id:string;ownerRunId:string};for(let i=0;i<200&&owner.store.run(dispatch.ownerRunId)?.state!=="completed";i++)await new Promise(r=>setTimeout(r,10));assert.equal(owner.store.run(dispatch.ownerRunId)?.state,"completed");return dispatch;};
+  const start=async(input:object)=>{const response=await tool("task_start",{projectId:sourceProject.id,delegation:"requested",...input});assert.ok([200,202].includes(response.status),JSON.stringify(response.body));const dispatch=response.body as {id:string;ownerRunId:string};for(let i=0;i<200&&owner.store.run(dispatch.ownerRunId)?.state!=="completed";i++)await new Promise(r=>setTimeout(r,10));assert.equal(owner.store.run(dispatch.ownerRunId)?.state,"completed");return dispatch;};
   const build=await start({prompt:"Build",idempotencyKey:"build",roleId:"builder",workspace:"worktree"});
   for(const path of[a,b]){writeFileSync(join(path,"main-only.txt"),"main advanced\n");git("-C",path,"add","main-only.txt");git("-C",path,"commit","-m","main advanced");}
   const buildRun=owner.store.run(build.ownerRunId)!;owner.store.saveRun({...buildRun,state:"running"});

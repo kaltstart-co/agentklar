@@ -5,14 +5,17 @@ struct TeamView: View {
     @ObservedObject var client: AgentKlarClient
     @State private var selectedRoleID: String?
     @State private var roles: [NativeRoleDraft] = []
-    @State private var preference = "balanced"
-    @State private var savedPreference = "balanced"
+    @State private var preset = NativeRoutingPreset.builtIns[1]
+    @State private var savedPreset = NativeRoutingPreset.builtIns[1]
+    @State private var presets = NativeRoutingPreset.builtIns
+    @State private var delegationMode = "manual"
+    @State private var savedDelegationMode = "manual"
     @State private var loadedProject = ""
     @State private var projectGeneration = UUID()
     @State private var saving = false
     @State private var message = ""
     @State private var failed = false
-    @State private var showingRoutingDetails = false
+    @State private var presetEditor: NativeRoutingEditorSession?
     private var workers: [JSON] { client.harnesses.filter { $0["available"].bool == true && $0["workerSupported"].bool == true } }
     private var peers: [JSON] { (client.snapshot["peers"].array ?? []).filter { $0["projectId"].string == client.projectID } }
     private let remoteHarnesses = ["codex", "claude", "muse", "opencode", "gemini", "cursor-agent", "zcode"]
@@ -30,15 +33,9 @@ struct TeamView: View {
                             Button("Add role", systemImage: "plus") { addRole() }.disabled((workers.isEmpty && peers.isEmpty) || roles.count >= 30)
                         }
                     } else {
-                        ViewThatFits(in: .horizontal) {
-                            HStack(alignment: .top, spacing: 24) {
-                                roster.frame(width: 220, height: 360)
-                                selectedEditor.frame(minWidth: 320, maxWidth: .infinity)
-                            }
-                            VStack(alignment: .leading, spacing: 16) {
-                                roster.frame(height: 160)
-                                selectedEditor
-                            }
+                        HStack(alignment: .top, spacing: 24) {
+                            roster.frame(width: 200, height: 360)
+                            selectedEditor.frame(minWidth: 280, maxWidth: .infinity)
                         }.frame(maxWidth: .infinity)
                     }
                 }.font(NativeStyle.body).padding(NativeStyle.pagePadding).disabled(saving || !client.connected)
@@ -46,111 +43,62 @@ struct TeamView: View {
             .task(id: client.projectID) {
                 loadedProject = client.projectID
                 projectGeneration = UUID()
-                preference = client.project["preference"].string ?? "balanced"
-                savedPreference = preference
+                presetEditor = nil
+                preset = NativeRoutingPreset.projectPreset(client.project)
+                savedPreset = preset
+                delegationMode = client.project["delegationMode"].string ?? "manual"
+                savedDelegationMode = delegationMode
+                presets = NativeRoutingPreset.builtIns
                 roles = (client.project["roles"].array ?? []).map(NativeRoleDraft.init)
                 selectedRoleID = roles.first?.id
                 message = ""
+                await loadPresets(projectID: loadedProject, generation: projectGeneration)
+            }
+            .sheet(item: $presetEditor) { session in
+                NativeRoutingPresetEditor(client: client, session: session,
+                    isCurrent: { ownsProject(session.projectID, session.generation) },
+                    onApplied: { applied, latest in
+                        guard ownsProject(session.projectID, session.generation) else { return }
+                        preset = applied; savedPreset = applied; presets = latest
+                        message = "Routing preset applied."; failed = false
+                    })
             }
         }
+    }
+    private var routingChanged: Bool { preset != savedPreset || delegationMode != savedDelegationMode }
+    private var presetChoices: [NativeRoutingPreset] {
+        var choices = presets.map { $0.id == preset.id ? preset : $0 }
+        if !choices.contains(where: { $0.id == preset.id }) { choices.append(preset) }
+        return choices
     }
     private var preferenceControls: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            NativeSectionTitle(title: "Routing preference", subtitle: "Choose how automatic routing selects a model for this project.")
-            HStack(alignment: .top, spacing: 12) { preferenceOptions }
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Rules for \(preferenceTitle)").font(NativeStyle.heading)
-                Text(preferenceRules).font(NativeStyle.caption).lineSpacing(3)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Text("Saved pins stay fixed. Blocked, unavailable or exhausted automatic choices are skipped. Allowance is stale after five minutes. No dollar budget is enforced.")
-                .font(NativeStyle.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 12) {
-                Button("Save preference") { Task { await save(preferenceOnly: true) } }
-                    .buttonStyle(.borderedProminent)
-                    .fixedSize()
-                    .disabled(loadedProject != client.projectID || preference == savedPreference)
-                Text(preference == savedPreference ? "Saved for this project." : "Unsaved preference.")
-                    .font(NativeStyle.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 0)
-                Button("Routing details") { showingRoutingDetails = true }.buttonStyle(.bordered)
+                Picker("Routing preset", selection: Binding(get: { preset.id }, set: { id in
+                    if let chosen = presets.first(where: { $0.id == id }) { preset = chosen }
+                })) {
+                    ForEach(presetChoices) { choice in Text(choice.name).tag(choice.id) }
+                }.frame(width: 250)
+                Text(preset.summary).font(NativeStyle.caption).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading).lineLimit(2)
+                Button("Edit presets…") {
+                    presetEditor = NativeRoutingEditorSession(projectID: loadedProject, generation: projectGeneration, preset: preset, presets: presets)
+                }.buttonStyle(.plain).foregroundStyle(Color.accentColor).disabled(loadedProject != client.projectID)
             }
-            Text("Save preference updates routing. Save team also saves your roles.")
-                .font(NativeStyle.caption).foregroundStyle(.secondary)
-        }
-        .sheet(isPresented: $showingRoutingDetails) { routingDetails }
-    }
-    @ViewBuilder private var preferenceOptions: some View {
-        preferenceOption("economical", title: "Economical", summary: "Uses efficient models for everyday work and stronger models for hard tasks.")
-        preferenceOption("balanced", title: "Balanced", summary: "Adjusts model strength to task difficulty and fresh remaining allowance.")
-        preferenceOption("best", title: "Best capability", summary: "Prefers the strongest reviewed tier, even when allowance is low.")
-    }
-    private func preferenceOption(_ value: String, title: String, summary: String) -> some View {
-        Button {
-            preference = value
-        } label: {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Text(title).font(NativeStyle.heading)
-                    Spacer(minLength: 8)
-                    Image(systemName: preference == value ? "checkmark.circle.fill" : "circle")
-                        .foregroundStyle(preference == value ? Color.accentColor : Color.secondary)
+            HStack(spacing: 12) {
+                Picker("Delegation", selection: $delegationMode) {
+                    Text("Only when asked").tag("manual")
+                    Text("Use team when helpful").tag("automatic")
+                }.frame(width: 250)
+                Text(delegationMode == "manual" ? "Delegate work when you ask." : "The lead may use saved roles when helpful.")
+                    .font(NativeStyle.caption).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading).lineLimit(2)
+                if routingChanged {
+                    Button("Apply policy") { Task { await applyRouting() } }
+                        .buttonStyle(.borderedProminent).disabled(loadedProject != client.projectID)
                 }
-                Text(summary).font(NativeStyle.body).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
             }
-            .frame(minWidth: 130, maxWidth: .infinity, alignment: .leading)
-            .frame(height: 96, alignment: .topLeading)
-            .padding(14)
-            .background(RoundedRectangle(cornerRadius: 10).fill(Color.accentColor.opacity(preference == value ? 0.09 : 0)))
-            .overlay(RoundedRectangle(cornerRadius: 10).stroke(preference == value ? Color.accentColor : Color.secondary.opacity(0.3), lineWidth: preference == value ? 2 : 1))
-            .contentShape(RoundedRectangle(cornerRadius: 10))
-        }
-        .buttonStyle(.plain).foregroundStyle(.primary)
-        .accessibilityLabel(title)
-        .accessibilityAddTraits(preference == value ? .isSelected : [])
-        .accessibilityValue(preference == value ? "Selected" : "Not selected")
-        .accessibilityHint(summary + " Select this preference, then choose Save preference or Save team.")
-    }
-    private var preferenceTitle: String {
-        switch preference {
-        case "economical": return "Economical"
-        case "best": return "Best capability"
-        default: return "Balanced"
-        }
-    }
-    private var preferenceRules: String {
-        switch preference {
-        case "economical":
-            return "Routine and standard tasks: efficient tier. Hard tasks: balanced tier.\nRemaining allowance does not change these targets."
-        case "best":
-            return "All task difficulties: capable tier.\nLow remaining allowance does not lower this target."
-        default:
-            return "Usual targets: routine = efficient; standard = balanced; hard = capable.\n20% or less remaining: efficient; hard tasks use balanced.\n50% or more remaining: capable; routine tasks use efficient."
-        }
-    }
-    private var routingDetails: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack {
-                Text("Routing details").font(NativeStyle.title)
-                Spacer()
-                Button("Done") { showingRoutingDetails = false }.keyboardShortcut(.defaultAction)
-            }
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    routingNote("Model groups", "Examples: efficient = Luna / Haiku; balanced = Sol / Sonnet; capable = Astra / Opus. These are reviewed policy groups. Actual quality and dollar cost are unverified. Routing uses the nearest suitable reviewed tier when its target is unavailable.")
-                    routingNote("Fresh allowance", "Balanced uses the lowest remaining percentage across a model's applicable native allowance windows. Data older than five minutes is ignored. If allowance is unknown, it uses the usual targets.")
-                    routingNote("Pins and recovery", "Task, role and computer pins stay fixed. Fresh blocked allowance stops a pinned choice. An exhausted allowance keeps the pin with a warning. A passed reset time does not confirm recovery; refresh native usage to check it.")
-                }.frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }.font(NativeStyle.body).padding(24).frame(width: 540, height: 380)
-    }
-    private func routingNote(_ title: String, _ text: String) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Text(title).font(NativeStyle.heading)
-            Text(text).font(NativeStyle.caption).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
+        }.buttonStyle(.bordered)
     }
     private var roster: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -216,34 +164,312 @@ struct TeamView: View {
     }
     @ViewBuilder private var teamActions: some View {
         Button("Add role", systemImage: "plus") { addRole() }.disabled((workers.isEmpty && peers.isEmpty) || roles.count >= 30)
-        Button("Save team") { Task { await save(preferenceOnly: false) } }.buttonStyle(.borderedProminent).disabled(loadedProject != client.projectID)
+        Button("Save team") { Task { await saveTeam() } }.buttonStyle(.borderedProminent).disabled(loadedProject != client.projectID)
     }
     private func addRole() {
         let id = UUID().uuidString
         roles.append(NativeRoleDraft(id: id, name: "", harness: workers.first?["id"].string ?? "", model: "", responsibility: "", peerID: nil))
         selectedRoleID = id
     }
-    private func save(preferenceOnly: Bool) async {
+    private func ownsProject(_ id: String, _ generation: UUID) -> Bool {
+        id == client.projectID && id == loadedProject && generation == projectGeneration
+    }
+    private func loadPresets(projectID: String, generation: UUID) async {
+        do {
+            let response = try await client.request("/routing-presets")
+            let latest = (response.array ?? []).compactMap(NativeRoutingPreset.init)
+            guard ownsProject(projectID, generation) else { return }
+            if !latest.isEmpty { presets = latest }
+        } catch {
+            guard ownsProject(projectID, generation) else { return }
+            failed = true; message = "Could not load routing presets. " + error.localizedDescription
+        }
+    }
+    private func saveTeam() async {
         guard !saving, loadedProject == client.projectID else { return }
         saving = true; failed = false; message = ""
-        let id = loadedProject
-        let generation = projectGeneration
-        let submittedPreference = preference
-        var body: [String: Any] = ["preference": submittedPreference]
-        if !preferenceOnly { body["roles"] = roles.map(\.body) }
+        let id = loadedProject, generation = projectGeneration
         do {
-            _ = try await client.request("/projects/\(id)", body: body, method: "PATCH")
+            _ = try await client.request("/projects/\(id)", body: ["roles": roles.map(\.body)], method: "PATCH")
             await client.refresh()
-            if id == client.projectID && generation == projectGeneration {
-                savedPreference = submittedPreference
-                message = preferenceOnly ? "Routing preference saved." : "Roles and routing preference saved."
-            }
+            if ownsProject(id, generation) { message = "Team saved." }
         } catch {
-            if id == client.projectID && generation == projectGeneration {
-                failed = true; message = error.localizedDescription
-            }
+            if ownsProject(id, generation) { failed = true; message = error.localizedDescription }
         }
         saving = false
+    }
+    private func applyRouting() async {
+        guard !saving, loadedProject == client.projectID else { return }
+        saving = true; failed = false; message = ""
+        let id = loadedProject, generation = projectGeneration
+        var body: [String: Any] = [:]
+        if preset != savedPreset { body["routingPresetId"] = preset.id }
+        if delegationMode != savedDelegationMode { body["delegationMode"] = delegationMode }
+        do {
+            let response = try await client.request("/projects/\(id)", body: body, method: "PATCH")
+            await client.refresh()
+            if ownsProject(id, generation) {
+                preset = NativeRoutingPreset.projectPreset(response); savedPreset = preset
+                delegationMode = response["delegationMode"].string ?? "manual"
+                savedDelegationMode = delegationMode
+                message = "Routing and delegation saved."
+            }
+        } catch {
+            if ownsProject(id, generation) { failed = true; message = error.localizedDescription }
+        }
+        saving = false
+    }
+}
+
+private struct NativeRoutingRules: Equatable {
+    var routine = "efficient"
+    var standard = "balanced"
+    var hard = "capable"
+    var adjustToAllowance = true
+    var lowAllowancePercent = 20.0
+    var highAllowancePercent = 50.0
+    init() {}
+    init(_ value: JSON) {
+        routine = value["routine"].string ?? "efficient"
+        standard = value["standard"].string ?? "balanced"
+        hard = value["hard"].string ?? "capable"
+        adjustToAllowance = value["adjustToAllowance"].bool ?? true
+        lowAllowancePercent = value["lowAllowancePercent"].number ?? 20
+        highAllowancePercent = value["highAllowancePercent"].number ?? 50
+    }
+    var valid: Bool {
+        lowAllowancePercent.isFinite && highAllowancePercent.isFinite &&
+        (0...100).contains(lowAllowancePercent) && (0...100).contains(highAllowancePercent) &&
+        lowAllowancePercent < highAllowancePercent
+    }
+    var body: [String: Any] {
+        ["routine": routine, "standard": standard, "hard": hard,
+         "adjustToAllowance": adjustToAllowance, "lowAllowancePercent": lowAllowancePercent,
+         "highAllowancePercent": highAllowancePercent]
+    }
+}
+
+private struct NativeRoutingPreset: Identifiable, Equatable {
+    var id: String
+    var name: String
+    var rules: NativeRoutingRules
+    var builtIn: Bool { ["economical", "balanced", "best"].contains(id) }
+    init(id: String, name: String, rules: NativeRoutingRules) {
+        self.id = id; self.name = name; self.rules = rules
+    }
+    init?(_ value: JSON) {
+        guard let id = value["id"].string, let name = value["name"].string,
+              value["rules"].objectValue != nil else { return nil }
+        self.init(id: id, name: name, rules: NativeRoutingRules(value["rules"]))
+    }
+    static let builtIns: [NativeRoutingPreset] = {
+        var economical = NativeRoutingRules(); economical.standard = "efficient"
+        economical.hard = "balanced"; economical.adjustToAllowance = false
+        var best = NativeRoutingRules(); best.routine = "capable"; best.standard = "capable"
+        best.adjustToAllowance = false
+        return [NativeRoutingPreset(id: "economical", name: "Economical", rules: economical),
+                NativeRoutingPreset(id: "balanced", name: "Balanced", rules: NativeRoutingRules()),
+                NativeRoutingPreset(id: "best", name: "Best", rules: best)]
+    }()
+    static func projectPreset(_ project: JSON) -> NativeRoutingPreset {
+        NativeRoutingPreset(project["routingPreset"]) ??
+        builtIns.first { $0.id == project["preference"].string } ?? builtIns[1]
+    }
+    var summary: String {
+        switch id {
+        case "economical": return "Efficient for everyday work; stronger for hard tasks."
+        case "balanced": return "Adjusts to task difficulty and remaining allowance."
+        case "best": return "Prefers strong models, even when allowance is low."
+        default: return rules.adjustToAllowance ? "Your saved model rules, adjusted to remaining allowance." : "Your saved model rules for each task difficulty."
+        }
+    }
+    var body: [String: Any] { ["name": name.trimmingCharacters(in: .whitespacesAndNewlines), "rules": rules.body] }
+}
+
+private struct NativeRoutingEditorSession: Identifiable {
+    let id = UUID()
+    let projectID: String
+    let generation: UUID
+    let preset: NativeRoutingPreset
+    let presets: [NativeRoutingPreset]
+}
+
+private struct NativeRoutingPresetEditor: View {
+    @ObservedObject var client: AgentKlarClient
+    let session: NativeRoutingEditorSession
+    let isCurrent: () -> Bool
+    let onApplied: (NativeRoutingPreset, [NativeRoutingPreset]) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var presets: [NativeRoutingPreset]
+    @State private var choice: String
+    @State private var draft: NativeRoutingPreset
+    @State private var lowInput: String
+    @State private var highInput: String
+    @State private var busy = false
+    @State private var message = ""
+    @State private var failed = false
+    init(client: AgentKlarClient, session: NativeRoutingEditorSession,
+         isCurrent: @escaping () -> Bool,
+         onApplied: @escaping (NativeRoutingPreset, [NativeRoutingPreset]) -> Void) {
+        self.client = client; self.session = session; self.isCurrent = isCurrent; self.onApplied = onApplied
+        _presets = State(initialValue: session.presets)
+        _choice = State(initialValue: session.preset.id)
+        _draft = State(initialValue: session.preset)
+        _lowInput = State(initialValue: Self.thresholdText(session.preset.rules.lowAllowancePercent))
+        _highInput = State(initialValue: Self.thresholdText(session.preset.rules.highAllowancePercent))
+    }
+    private var editingBuiltIn: Bool { draft.builtIn && choice != "new" }
+    private var latestPreset: NativeRoutingPreset? { presets.first { $0.id == choice } }
+    private var valid: Bool {
+        let name = draft.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !name.isEmpty && name.utf16.count <= 80 && draft.rules.valid &&
+            !name.unicodeScalars.contains { CharacterSet.controlCharacters.contains($0) || $0.properties.generalCategory == .format }
+    }
+    private var availablePresets: [NativeRoutingPreset] {
+        var choices = presets.map { $0.id == draft.id ? draft : $0 }
+        if choice != "new" && !choices.contains(where: { $0.id == draft.id }) { choices.append(draft) }
+        return choices
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack {
+                Text("Routing presets").font(NativeStyle.title)
+                Spacer()
+                Button("Cancel") { dismiss() }.disabled(busy).keyboardShortcut(.cancelAction)
+            }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    Form {
+                        Picker("Preset", selection: Binding(get: { choice }, set: { select($0) })) {
+                            ForEach(availablePresets) { preset in
+                                Text(preset.name + (preset.builtIn ? " · built-in" : "")).tag(preset.id)
+                            }
+                            Text("New preset").tag("new")
+                        }
+                        HStack {
+                            Text(editingBuiltIn ? "Built-in presets are read only." : "Save a named preset for future projects.")
+                                .font(NativeStyle.caption).foregroundStyle(.secondary)
+                            Spacer()
+                            if choice != "new" { Button("Make a copy") { makeCopy() } }
+                        }
+                        if let latest = latestPreset, latest != draft, choice == session.preset.id, draft == session.preset {
+                            Button("Load latest saved preset") { setDraft(latest) }
+                        }
+                        Group {
+                            TextField("Name", text: $draft.name, prompt: Text("My preset"))
+                            strengthPicker("Routine tasks", selection: $draft.rules.routine)
+                            strengthPicker("Standard tasks", selection: $draft.rules.standard)
+                            strengthPicker("Hard tasks", selection: $draft.rules.hard)
+                            Toggle("Adjust to remaining allowance", isOn: $draft.rules.adjustToAllowance)
+                            if draft.rules.adjustToAllowance {
+                                HStack {
+                                    TextField("Low (%)", text: $lowInput)
+                                        .onChange(of: lowInput) { _, value in draft.rules.lowAllowancePercent = Double(value.trimmingCharacters(in: .whitespaces)) ?? .nan }
+                                    TextField("High (%)", text: $highInput)
+                                        .onChange(of: highInput) { _, value in draft.rules.highAllowancePercent = Double(value.trimmingCharacters(in: .whitespaces)) ?? .nan }
+                                }
+                            }
+                        }.disabled(editingBuiltIn)
+                    }.formStyle(.columns)
+                    Text(allowanceSummary).font(NativeStyle.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if !draft.rules.valid {
+                        Text("Use percentages from 0 to 100. Low must be less than high.")
+                            .font(NativeStyle.caption).foregroundStyle(.red)
+                    }
+                    Text("Saved pins stay fixed. Automatic choices still need native access. Quality and dollar cost are unverified; no dollar budget is enforced.")
+                        .font(NativeStyle.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    if !message.isEmpty {
+                        Text(message).font(NativeStyle.caption).foregroundStyle(failed ? .red : .secondary)
+                            .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+                    }
+                }.frame(maxWidth: .infinity, alignment: .leading)
+            }
+            HStack {
+                Text("Applying changes only this project's preset. Other projects keep their saved copy.")
+                    .font(NativeStyle.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 12)
+                Button(editingBuiltIn ? "Use preset" : "Save and use") { Task { await saveAndUse() } }
+                    .buttonStyle(.borderedProminent).disabled(!valid || busy || !client.connected || !isCurrent())
+            }
+        }.font(NativeStyle.body).padding(24).frame(width: 580, height: 530)
+            .disabled(busy).interactiveDismissDisabled(busy)
+            .task { await reloadPresets() }
+    }
+    private func strengthPicker(_ title: String, selection: Binding<String>) -> some View {
+        Picker(title, selection: selection) {
+            Text("Efficient").tag("efficient")
+            Text("Balanced").tag("balanced")
+            Text("Strong").tag("capable")
+        }
+    }
+    private var allowanceSummary: String {
+        guard draft.rules.adjustToAllowance else { return "Uses your chosen strength for each task difficulty." }
+        guard draft.rules.valid else { return "Adjusts strengths using fresh native allowance." }
+        let low = draft.rules.lowAllowancePercent.formatted(), high = draft.rules.highAllowancePercent.formatted()
+        return "At \(low)% or less: Efficient; hard tasks use Balanced. At \(high)% or more: standard and hard tasks use Strong; routine keeps your choice. Allowance older than five minutes is ignored."
+    }
+    private func select(_ id: String) {
+        choice = id
+        message = ""; failed = false
+        if id == "new" {
+            setDraft(NativeRoutingPreset(id: "new", name: "", rules: NativeRoutingRules()))
+        } else if let selected = presets.first(where: { $0.id == id }) { setDraft(selected) }
+    }
+    private func makeCopy() {
+        let source = draft
+        choice = "new"
+        message = ""; failed = false
+        setDraft(NativeRoutingPreset(id: "new", name: source.name + " copy", rules: source.rules))
+    }
+    private static func thresholdText(_ value: Double) -> String {
+        value.isFinite && value.rounded() == value ? String(Int(value)) : String(value)
+    }
+    private func setDraft(_ value: NativeRoutingPreset) {
+        draft = value
+        lowInput = Self.thresholdText(value.rules.lowAllowancePercent)
+        highInput = Self.thresholdText(value.rules.highAllowancePercent)
+    }
+    private func reloadPresets() async {
+        do {
+            let response = try await client.request("/routing-presets")
+            guard isCurrent() else { return }
+            let latest = (response.array ?? []).compactMap(NativeRoutingPreset.init)
+            if !latest.isEmpty { presets = latest }
+        } catch {
+            guard isCurrent() else { return }
+            failed = true; message = "Could not refresh presets. " + error.localizedDescription
+        }
+    }
+    private func saveAndUse() async {
+        guard !busy, valid, isCurrent() else { return }
+        busy = true; failed = false; message = ""
+        defer { busy = false }
+        var savedToRegistry = false
+        do {
+            var chosen = draft
+            if !editingBuiltIn {
+                let path = choice == "new" ? "/routing-presets" : "/routing-presets/\(choice)"
+                let response = try await client.request(path, body: draft.body, method: choice == "new" ? "POST" : "PUT")
+                guard isCurrent() else { return }
+                guard let saved = NativeRoutingPreset(response) else { throw LocalError.message("The service returned an invalid routing preset.") }
+                chosen = saved
+                savedToRegistry = true
+                // Keep the saved ID so a failed project apply can be retried without creating another copy.
+                choice = saved.id; setDraft(saved)
+                presets.removeAll { $0.id == saved.id }; presets.append(saved)
+            }
+            guard isCurrent() else { return }
+            let project = try await client.request("/projects/\(session.projectID)", body: ["routingPresetId": chosen.id], method: "PATCH")
+            await client.refresh()
+            guard isCurrent() else { return }
+            onApplied(NativeRoutingPreset.projectPreset(project), presets)
+            dismiss()
+        } catch {
+            guard isCurrent() else { return }
+            failed = true
+            message = savedToRegistry ? "Preset saved. Could not apply it to this project: " + error.localizedDescription : error.localizedDescription
+        }
     }
 }
 

@@ -13,6 +13,7 @@ struct NativeSettingsView: View {
     @State private var working = false
     @State private var message = ""
     @State private var failure = ""
+    @State private var showingInstallations = false
     private let supported = ["codex", "claude", "muse", "opencode", "antigravity"]
     private var scope: String { client.projectID + ":" + harness }
     private var configured: Bool { status["status"].string == "configured" && status["change"]["state"].string != "interrupted" }
@@ -28,7 +29,7 @@ struct NativeSettingsView: View {
                                 Text(tab).font(.system(size: 14, weight: selectedTab == tab ? .semibold : .regular))
                                     .foregroundStyle(selectedTab == tab ? Color.primary : Color.secondary)
                                 Rectangle().fill(selectedTab == tab ? Color.accentColor : .clear).frame(height: 2)
-                            }
+                            }.contentShape(Rectangle())
                         }.buttonStyle(.plain).fixedSize(horizontal: true, vertical: false)
                             .accessibilityAddTraits(selectedTab == tab ? .isSelected : [])
                     }
@@ -84,33 +85,29 @@ struct NativeSettingsView: View {
                 HStack(spacing: 12) { connectionActions }.fixedSize(horizontal: true, vertical: false)
                 VStack(alignment: .leading, spacing: 12) { connectionActions }
             }.controlSize(.regular).disabled(working || !client.connected || client.projectID.isEmpty)
-            if configured {
-                Button("Use as main harness") { Task { await saveMain() } }.controlSize(.regular).disabled(working || !client.connected)
-            }
             NativeDetailButton("Connection details") {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(harness == "claude" ? "Local project scope. Only this project's Claude Code sessions." : "User scope. Available to this harness's projects.")
                     Text("Accounts, trust and permissions stay in your harness. A configured entry does not prove sign-in, tools or quota.")
                     if let text = status["message"].string { Text(text).fixedSize(horizontal: false, vertical: true).textSelection(.enabled) }
                 }.font(NativeStyle.caption).foregroundStyle(.secondary)
-            }
+            }.buttonStyle(.plain).foregroundStyle(.tint)
             if preview["id"].string != nil { previewSection }
             Divider()
             HStack {
                 Text("Installed harnesses").font(NativeStyle.heading)
                 Spacer()
-                Button("Find installations", systemImage: "arrow.clockwise") { Task { await loadInstallations() } }
-                    .controlSize(.regular).disabled(working || !client.connected)
             }
-            ForEach(installations, id: \.self) { entry in installationRow(entry) }
-            NativeDetailButton("Installation details") {
-                Text("Saving a CLI choice takes effect after a service restart. Version discovery does not prove protocol or tool support. Finish work before restarting.")
-                    .font(NativeStyle.caption).foregroundStyle(.secondary)
-            }
+            Text("\(client.harnesses.filter { $0["available"].bool == true }.count) found on this Mac. AgentKlar uses your existing installations.")
+                .foregroundStyle(.secondary)
+            Button("Manage installations…") { showingInstallations = true }
+                .buttonStyle(.plain).foregroundStyle(.tint).disabled(working || !client.connected)
             if !message.isEmpty { Label(message, systemImage: "checkmark.circle").fixedSize(horizontal: false, vertical: true).foregroundStyle(.secondary) }
             if !failure.isEmpty { Label(failure, systemImage: "exclamationmark.triangle").fixedSize(horizontal: false, vertical: true).foregroundStyle(.red).textSelection(.enabled) }
         }
+        .frame(maxWidth: 800, alignment: .leading)
         .disabled(client.busy)
+        .sheet(isPresented: $showingInstallations) { installationManager }
         .task(id: scope + ":" + String(client.connected)) {
             status = .null; preview = .null; message = ""; failure = ""
             while working { do { try await Task.sleep(for: .milliseconds(50)) } catch { return } }
@@ -119,9 +116,24 @@ struct NativeSettingsView: View {
     }
 
     @ViewBuilder private var connectionActions: some View {
-        Button("Refresh status") { Task { await loadStatus() } }
-        Button("Preview connection") { Task { await setup("preview") } }.disabled(status["status"].string != "missing")
-        if status["canUndo"].bool == true { Button("Undo managed connection") { Task { await setup("undo") } } }
+        if preview["id"].string == nil {
+            if status["status"].string == "missing" {
+                Button("Connect \(name(harness))…") { Task { await setup("preview") } }
+                    .buttonStyle(.borderedProminent)
+            } else if configured && (client.onboarding["projectId"].string != client.projectID || client.onboarding["mainHarness"].string != harness) {
+                Button("Use as main harness") { Task { await saveMain() } }.buttonStyle(.bordered)
+            }
+        }
+        Button { Task { await loadStatus() } } label: {
+            Image(systemName: "arrow.clockwise").frame(width: 28, height: 28).contentShape(Rectangle())
+        }.buttonStyle(.plain).foregroundStyle(.secondary)
+            .accessibilityLabel("Refresh connection status").help("Refresh connection status")
+        if status["canUndo"].bool == true {
+            Menu {
+                Button("Remove managed connection", role: .destructive) { Task { await setup("undo") } }
+            } label: { Image(systemName: "ellipsis") }
+                .menuStyle(.borderlessButton).fixedSize().help("Connection actions")
+        }
     }
 
     private var connectionState: String {
@@ -142,9 +154,30 @@ struct NativeSettingsView: View {
                 if let command = preview["command"].string { Text(command).font(.system(size: 12, design: .monospaced)).fixedSize(horizontal: false, vertical: true).textSelection(.enabled) }
                 Text(pretty(preview["entry"])).font(.system(size: 12, design: .monospaced)).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
                 Text("No account token is added.").font(NativeStyle.caption).foregroundStyle(.secondary)
-                Button("Apply reviewed connection") { Task { await setup("apply") } }.disabled(working || !client.connected)
+                HStack(spacing: 12) {
+                    Button("Apply connection") { Task { await setup("apply") } }
+                        .buttonStyle(.borderedProminent).disabled(working || !client.connected)
+                    Button("Cancel") { preview = .null }.buttonStyle(.plain).disabled(working)
+                }
             }.frame(maxWidth: .infinity, alignment: .leading).padding(16)
         }
+    }
+
+    private var installationManager: some View {
+        NativeDetailPage(title: "Harness installations") {
+            HStack {
+                Text("Choose which installed version AgentKlar uses.").foregroundStyle(.secondary)
+                Spacer()
+                Button { Task { await loadInstallations() } } label: { Image(systemName: "arrow.clockwise") }
+                    .buttonStyle(.plain).accessibilityLabel("Refresh installations").help("Refresh installations")
+            }
+            Text("Changes take effect after a restart. Finish active work first.")
+                .font(NativeStyle.caption).foregroundStyle(.secondary)
+            if installations.isEmpty { Text(working ? "Finding installations…" : "No installations found.").foregroundStyle(.secondary) }
+            ForEach(installations, id: \.self) { entry in installationRow(entry) }
+            if !message.isEmpty { Label(message, systemImage: "checkmark.circle").foregroundStyle(.secondary) }
+            if !failure.isEmpty { Label(failure, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
+        }.disabled(client.busy).task { await loadInstallations() }
     }
 
     private func installationRow(_ entry: JSON) -> some View {
@@ -170,7 +203,7 @@ struct NativeSettingsView: View {
                         if let version = entry["current"]["version"].string { Text("Found: \(version)") }
                         if entry["changed"].bool == true || entry["restartRequired"].bool == true { Text("Harness installation changed. Finish work, then restart the service to refresh its connection.") }
                     }.font(NativeStyle.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
-                }
+                }.buttonStyle(.plain).foregroundStyle(.tint)
             }.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 16)
             Divider()
         }

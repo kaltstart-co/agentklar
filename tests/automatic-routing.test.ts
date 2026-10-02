@@ -1,3 +1,4 @@
+import { requestedTaskBody } from "./requested-task.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
@@ -40,7 +41,7 @@ function fixture(reader: (project: Project) => Promise<CatalogSnapshot>, operato
     `http://127.0.0.1:4317${path}`, {
       method: body === undefined ? "GET" : "POST",
       headers: headers || { Authorization: `Bearer ${service.bearer}`, "Content-Type": "application/json" },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      ...(body === undefined ? {} : { body: JSON.stringify(requestedTaskBody(path, body)) }),
     });
   const register = async () => (await (await call("/api/projects", { name: "routing", path: projectPath })).json()) as Project;
   return {

@@ -17,7 +17,11 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 - [x] Model pins
 - [x] Routing preference
 - [x] Preference explanations
-- [x] Separate preference save
+- [x] Separate policy save
+- [x] Named routing presets
+- [x] Opt-in delegation
+- [x] Clear connection actions
+- [x] Full sidebar click area
 - [x] Harness discovery
 - [x] Native source inventory
 - [x] Device identity

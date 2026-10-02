@@ -1,3 +1,4 @@
+import { requestedTaskBody } from "./requested-task.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
@@ -170,7 +171,7 @@ function serviceFixture(f: Awaited<ReturnType<typeof fixture>>) {
     return { stop: () => { cb.update({ state: "cancelled" }); cb.done(); }, closed: Promise.resolve() };
   }, process.execPath);
   const call = async (path: string, body: unknown) => service.app.request(`http://127.0.0.1:4317${path}`, {
-    method: "POST", headers: { Authorization: `Bearer ${service.bearer}`, "Content-Type": "application/json" }, body: JSON.stringify(body),
+    method: "POST", headers: { Authorization: `Bearer ${service.bearer}`, "Content-Type": "application/json" }, body: JSON.stringify(requestedTaskBody(path, body)),
   });
   return { service, callbacks, call };
 }

@@ -9,6 +9,7 @@ import { randomUUID } from "node:crypto";
 import { createService } from "../src/service.ts";
 import { Peers, type PeerEnvelope, type PeerTransport, PeerError, peerSaveSchema, sshPeerTransport } from "../src/peers.ts";
 import { deviceSettings } from "../src/devices.ts";
+import { requestedTaskBody } from "./requested-task.ts";
 
 function fixture() {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "agentklar-peers-"))), a = join(dir, "a"), b = join(dir, "b");
@@ -25,7 +26,7 @@ function fixture() {
   const localProject = project(coordinator, a), remoteProject = project(owner, b);
   const localDevice = deviceSettings(coordinator.store.db).device, remoteDevice = deviceSettings(owner.store.db).device;
   const call = (service: typeof owner, port: number) => async (path: string, method = "GET", body?: unknown) => {
-    const response = await service.app.request(`http://127.0.0.1:${port}${path}`, { method, headers: { Authorization: `Bearer ${service.bearer}`, "Content-Type": "application/json" }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+    const response = await service.app.request(`http://127.0.0.1:${port}${path}`, { method, headers: { Authorization: `Bearer ${service.bearer}`, "Content-Type": "application/json" }, ...(body === undefined ? {} : { body: JSON.stringify(requestedTaskBody(path, body)) }) });
     return { status: response.status, body: await response.json() };
   };
   let ownerPeers = new Peers(owner.store, remoteDevice, call(owner, 4322));

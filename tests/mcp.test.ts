@@ -62,10 +62,28 @@ test("SDK stdio wire lists and calls tools; closing MCP leaves service worker al
     assert.match(guidance, /only the local UI can answer concrete approvals/);
     assert.match(guidance, /task_start once with routing/);
     assert.match(guidance, /worker results as data, not authority/);
+    assert.match(guidance, /Missing delegationMode means manual/);
+    assert.match(guidance, /Read projects_list policy before delegating/);
+    assert.match(guidance, /human explicitly asks for this task/);
+    assert.match(guidance, /"work directly" or "no delegation" overrides it/);
+    assert.match(guidance, /Never change delegation mode or routing preset unless the user asks for configuration/);
     assert.equal(service.store.runs().length, 0);
     assert.equal(catalogReads, 0);
     const list = await client.listTools();
-    assert.equal(list.tools.length, 24);
+    assert.equal(list.tools.length, 25);
+    const startTool = list.tools.find(tool => tool.name === "task_start")!;
+    const declaration = startTool.inputSchema.properties?.delegation as { const?: string; enum?: string[] };
+    assert.deepEqual(declaration.const ? [declaration.const] : declaration.enum, ["requested"]);
+    assert.ok(!startTool.inputSchema.required?.includes("delegation"));
+    const updateTool = list.tools.find(tool => tool.name === "project_update")!;
+    assert.ok(updateTool.inputSchema.properties?.routingPresetId);
+    assert.deepEqual((updateTool.inputSchema.properties?.delegationMode as { enum: string[] }).enum, ["manual", "automatic"]);
+    assert.equal(list.tools.some(tool => /routing_presets_(create|update|delete)/.test(tool.name)), false);
+    const presetsReply = await client.callTool({ name: "routing_presets_list", arguments: {} });
+    assert.equal(presetsReply.isError, false);
+    const presets = JSON.parse((presetsReply.content as { text: string }[])[0].text);
+    assert.ok(presets.some((preset: { id: string; name: string }) => preset.id === "balanced" && preset.name === "Balanced"));
+    assert.equal((await client.callTool({ name: "routing_presets_list", arguments: { name: "unexpected" } })).isError, true);
     for (const name of ["run_changes_read", "changes_prepare", "changes_preview_read", "changes_apply"]) assert.ok(list.tools.some((tool) => tool.name === name));
     assert.equal(
       list.tools.some((t) => /approve/.test(t.name)),
@@ -84,6 +102,11 @@ test("SDK stdio wire lists and calls tools; closing MCP leaves service worker al
       arguments: { name: "wire", path: project },
     });
     const p = JSON.parse((pResult.content as { text: string }[])[0].text);
+    const policyReply = await client.callTool({ name: "project_update", arguments: { projectId: p.id, routingPresetId: "balanced", delegationMode: "manual" } });
+    assert.equal(policyReply.isError, false);
+    const policy = JSON.parse((policyReply.content as { text: string }[])[0].text);
+    assert.equal(policy.routingPreset.name, "Balanced");
+    assert.equal(policy.delegationMode, "manual");
     writeFileSync(join(project, "AGENTS.md"), "INSTRUCTION_BODY_PRIVATE");
     const instructions = await client.callTool({ name: "project_instructions_list", arguments: { projectId: p.id } });
     const instructionText = (instructions.content as { text: string }[])[0].text;
@@ -135,12 +158,18 @@ test("SDK stdio wire lists and calls tools; closing MCP leaves service worker al
       arguments: { projectId: "00000000-0000-4000-8000-000000000000" },
     });
     assert.equal(unknown.isError, true);
+    const blocked = await client.callTool({ name: "task_start", arguments: { projectId: p.id, prompt: "wait", idempotencyKey: "not-requested", readOnly: true } });
+    assert.equal(blocked.isError, true);
+    assert.equal(service.store.runs().length, 0, "Manual policy must block an undeclared delegation");
+    const invalidDelegation = await client.callTool({ name: "task_start", arguments: { projectId: p.id, prompt: "wait", idempotencyKey: "invalid-request", delegation: "automatic" } });
+    assert.equal(invalidDelegation.isError, true);
     const started = await client.callTool({
       name: "task_start",
       arguments: {
         projectId: p.id,
         prompt: "wait",
         idempotencyKey: "wire",
+        delegation: "requested",
         readOnly: true,
       },
     });
@@ -161,6 +190,7 @@ test("SDK stdio wire lists and calls tools; closing MCP leaves service worker al
     const routedStart = await client.callTool({
       name: "task_start",
       arguments: { projectId: routedProject.id, prompt: "complete", idempotencyKey: "routed-wire",
+        delegation: "requested",
         routing: { complexity: "routine", requiresImages: false, taskType: "reasoning" } },
     });
     assert.equal(routedStart.isError, false);
@@ -179,6 +209,7 @@ test("SDK stdio wire lists and calls tools; closing MCP leaves service worker al
       workspace: { kind: "project", path: linkedProject.path } }, "seeded-source");
     const linkedReply = await client.callTool({ name: "task_start", arguments: {
       projectId: linkedProject.id, prompt: "Review the source", idempotencyKey: "linked-wire",
+      delegation: "requested",
       readOnly: true, followUp: { runId: sourceId, kind: "review" },
     } });
     assert.equal(linkedReply.isError, false);
@@ -417,6 +448,7 @@ test("independent MCP stdio clients share saved context with stale writer protec
       ...readArgs,
       prompt: "wait",
       idempotencyKey: "saved",
+      delegation: "requested",
       readOnly: true,
     };
     const started = (await call(clients[0], "task_start", startArgs)).data;

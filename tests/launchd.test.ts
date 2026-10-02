@@ -1,3 +1,4 @@
+import { requestedTaskBody } from "./requested-task.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -75,7 +76,7 @@ test("private operator opens fresh browser links and stops new work during shutd
   const base = "http://127.0.0.1:4317";
   const operator = { "x-agentklar-operator-key": "operator-secret", "x-agentklar-service-id": "managed-id" };
   const call = (path: string, method = "GET", body?: unknown, headers: Record<string, string> = operator) =>
-    service.app.request(base + path, { method, headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+    service.app.request(base + path, { method, headers, ...(body === undefined ? {} : { body: JSON.stringify(requestedTaskBody(path, body)) }) });
   try {
     const unauthenticated = await call("/api/projects", "GET", undefined, {});
     assert.equal(unauthenticated.status, 401);

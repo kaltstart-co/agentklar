@@ -1,3 +1,4 @@
+import { requestedTaskBody } from "./requested-task.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
@@ -23,7 +24,7 @@ test("completed work links review, fix, and review with frozen bounded source da
   const call = (path: string, body?: unknown) => service.app.request(`http://127.0.0.1:4317${path}`, {
     method: body === undefined ? "GET" : "POST",
     headers: { Authorization: `Bearer ${service.bearer}`, "Content-Type": "application/json" },
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    ...(body === undefined ? {} : { body: JSON.stringify(requestedTaskBody(path, body)) }),
   });
   try {
     const project = await (await call("/api/projects", { name: "one", path: dir })).json();
@@ -106,7 +107,7 @@ test("routing rechecks a linked source after native metadata returns", async () 
     process.execPath, null, async () => { entered(); return waiting; });
   const call = (path: string, body: unknown) => service.app.request(`http://127.0.0.1:4317${path}`, {
     method: "POST", headers: { Authorization: `Bearer ${service.bearer}`, "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+    body: JSON.stringify(requestedTaskBody(path, body)),
   });
   try {
     const project = await (await call("/api/projects", { name: "race", path: dir })).json();

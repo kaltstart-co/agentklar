@@ -55,6 +55,7 @@ import { NativeSettings, NativeChangeError, nativeSettingHarness, nativeSettingI
 import { runHandoff } from "./handoff.ts";
 import { createWorktree, gitBase, gitCheckout, plannedWorktree, verifyWorktree } from "./workspace.ts";
 import { projectRootIdentity } from "./project-root.ts";
+import { RoutingPresets, RoutingPresetError, presetPreference } from "./routing-presets.ts";
 const role = z
   .object({
     id: z.string().min(1).max(80),
@@ -110,6 +111,7 @@ export const startSchema = z
     projectId: z.uuid(),
     prompt: z.string().trim().min(1).max(32000),
     idempotencyKey: z.string().min(1).max(200),
+    delegation: z.literal("requested").optional(),
     roleId: z.string().optional(),
     harness: z.enum(workerHarnesses).optional(),
     model: z.string().min(1).max(120).optional(),
@@ -217,6 +219,7 @@ export function createService(
     store.db.prepare("INSERT INTO benchmark_cache(id,snapshot) VALUES(1,?) ON CONFLICT(id) DO UPDATE SET snapshot=excluded.snapshot").run(JSON.stringify(snapshot));
   }, cachedBenchmarks, benchmarkOptions.fetcher, benchmarkOptions.timeoutMs);
   const devices = deviceSettings(store.db);
+  const routingPresets = new RoutingPresets(store.db);
   nativeCommand = devices.selected("codex", nativeCommand);
   claudeCommand = devices.selected("claude", claudeCommand);
   museCommand = devices.selected("muse", museCommand);
@@ -351,6 +354,7 @@ export function createService(
     return { selected: { harness: choice.harness, model: choice.model, roleId: choice.roleId, basis: choice.basis, tier: choice.tier,
       ...(choice.device ? { device: choice.device } : {}), ...(choice.catalogCheckedAt ? { catalogCheckedAt: choice.catalogCheckedAt } : {}), ...(choice.benchmark ? { benchmark: choice.benchmark } : {}) },
       preference: advice.preference, complexity: advice.complexity, taskType: advice.taskType, benchmarkMethod: advice.benchmarkMethod, requiresImages: advice.requiresImages,
+      ...(advice.routingPreset ? { routingPreset: advice.routingPreset } : {}),
       ...(advice.requiresTools?.length ? { requiresTools: advice.requiresTools } : {}),
       catalogCheckedAt: choice.catalogCheckedAt || advice.catalogCheckedAt, policyVersion: advice.policyVersion,
       reasons: [...new Set([...choice.reasons,...advice.reasons])].slice(0,3), warnings: [...new Set([...choice.warnings,...advice.warnings])].slice(0,3) };
@@ -487,7 +491,7 @@ export function createService(
     !!a &&
     Buffer.byteLength(a) === Buffer.byteLength(b) &&
     timingSafeEqual(Buffer.from(a), Buffer.from(b));
-  app.onError((e, c) => c.json({ error: e.message }, e instanceof ControlError || e instanceof ApprovalError || e instanceof PeerError || e instanceof ChangeError ? e.status as 400 : e instanceof InstructionError || e instanceof SetupError || e instanceof SkillError || e instanceof NativeChangeError ? e.status : 500));
+  app.onError((e, c) => c.json({ error: e.message }, e instanceof ControlError || e instanceof ApprovalError || e instanceof PeerError || e instanceof ChangeError || e instanceof RoutingPresetError ? e.status as 400 : e instanceof InstructionError || e instanceof SetupError || e instanceof SkillError || e instanceof NativeChangeError ? e.status : 500));
   app.use("*", async (c, next) => {
     const host = c.req.header("host") || new URL(c.req.url).host;
     if (![`127.0.0.1:${port}`, "127.0.0.1:5173"].includes(host))
@@ -1254,12 +1258,25 @@ export function createService(
     const result = registerProject(parsed.data);
     return c.json(result.project, result.created ? 201 : 200);
   });
+  app.get("/api/routing-presets", c => c.json(routingPresets.list()));
+  app.post("/api/routing-presets", async c => {
+    const input = await c.req.json().catch(() => null);
+    if (quiesced || stopping) return c.json({ error: "Local service is stopping." }, 503);
+    return c.json(routingPresets.save(input), 201);
+  });
+  app.put("/api/routing-presets/:id", async c => {
+    const input = await c.req.json().catch(() => null);
+    if (quiesced || stopping) return c.json({ error: "Local service is stopping." }, 503);
+    return c.json(routingPresets.save(input, c.req.param("id")));
+  });
   app.patch("/api/projects/:id", async (c) => {
     const p = store.projects().find((p) => p.id === c.req.param("id"));
     if (!p) return c.json({ error: "Project not found" }, 404);
     const parsed = z
       .object({
         preference: z.enum(["economical", "balanced", "best"]).optional(),
+        routingPresetId: z.string().min(1).max(80).optional(),
+        delegationMode: z.enum(["manual", "automatic"]).optional(),
         roles: z
           .array(role)
           .max(30)
@@ -1270,7 +1287,9 @@ export function createService(
           .optional(),
       })
       .strict()
+      .refine(data => !(data.preference && data.routingPresetId), "Choose a routing preset or a legacy preference, not both.")
       .safeParse(await c.req.json().catch(() => null));
+    if (quiesced || stopping) return c.json({ error: "Local service is stopping." }, 503);
     if (!parsed.success)
       return c.json(
         {
@@ -1279,7 +1298,12 @@ export function createService(
         400,
       );
     for (const chosen of parsed.data.roles ?? []) if (chosen.peerId) peers.resolveMapping(p.id, chosen.peerId);
-    const updated = { ...p, ...parsed.data };
+    const { routingPresetId, ...settings } = parsed.data;
+    const updated: Project = { ...p, ...settings };
+    if (routingPresetId) {
+      updated.routingPreset = routingPresets.get(routingPresetId);
+      updated.preference = presetPreference(updated.routingPreset);
+    } else if (settings.preference !== undefined) delete updated.routingPreset;
     store.saveProject(updated);
     return c.json(updated);
   });
@@ -1296,7 +1320,8 @@ export function createService(
     if (data.routingEvidence && c.req.header("x-agentklar-peer-internal") !== peerInternal) return c.json({ error: "Routing evidence is accepted only from a scoped peer request." }, 400);
     const p = store.projects().find((p) => p.id === data.projectId);
     if (!p) return c.json({ error: "Project not found" }, 404);
-    const { includeProjectContext, ...originalInputs } = data;
+    // Request authorization is not part of the worker's execution identity.
+    const { includeProjectContext, delegation: _delegation, ...originalInputs } = data;
     if (originalInputs.routing?.deviceScope === "connected") { const { deviceScope, ...routing } = originalInputs.routing; originalInputs.routing = routing; }
     if (!data.followUp && originalInputs.routing?.requiresTools?.length === 0) { const { requiresTools, ...routing } = originalInputs.routing; originalInputs.routing = routing; }
     const launchHash = createHash("sha256")
@@ -1324,6 +1349,12 @@ export function createService(
       }
       return c.json(priorDispatch);
     }
+    // The marker declares the caller's human request; it is not an auth proof.
+    // Scoped peer calls have already passed the forwarding computer's policy.
+    if (c.req.header("authorization") === `Bearer ${bearer}` &&
+      c.req.header("x-agentklar-peer-internal") !== peerInternal &&
+      p.delegationMode !== "automatic" && data.delegation !== "requested")
+      return c.json({ error: "This project uses manual delegation. Start workers only for a human request with delegation: requested, or ask the human to choose automatic delegation in project settings." }, 403);
     const stamp = controlStamp(c,p.id);
     const remoteRole = data.roleId ? p.roles.find((item) => item.id === data.roleId) : undefined;
     if (data.roleId && !remoteRole) return c.json({ error: "Role not found" }, 400);
@@ -1390,6 +1421,7 @@ export function createService(
       control.check(p.id,stamp,currentLead(p.id));
       return c.json(await peers.start({ peerId: mappingId, idempotencyKey: data.idempotencyKey, baseCommit,
         task: { prompt, harness, model, readOnly: data.readOnly, includeProjectContext: false,
+          ...(data.delegation ? { delegation: data.delegation } : {}),
           ...(source && data.followUp ? { followUp: { runId: source.dispatch.ownerRunId!, kind: data.followUp.kind } } : {}),
           ...(automaticRouting ? { routingEvidence: automaticRouting } : data.routing ? { routing: { complexity: data.routing.complexity, requiresImages: data.routing.requiresImages, ...(data.routing.requiresTools !== undefined ? { requiresTools: data.routing.requiresTools } : {}), taskType: data.routing.taskType } } : {}) } }, launchHash, data.prompt), 202);
     }
@@ -1824,7 +1856,10 @@ export function createService(
   });
   app.get("/api/peers/dispatch", c => c.json({ dispatches: peers.list() }));
   app.post("/api/peers/dispatch", async c => {
-    try { const data = await c.req.json(); const mapping=peers.settings().peers.find(item=>item.id===data.peerId); if(!mapping)return c.json({error:"Peer mapping not found"},404); if(!peers.existing(mapping.projectId,data.idempotencyKey)){const stamp=controlStamp(c,mapping.projectId); control.check(mapping.projectId,stamp,currentLead(mapping.projectId));} return c.json(await peers.start(data)); }
+    try { const data = await c.req.json(); const mapping=peers.settings().peers.find(item=>item.id===data.peerId); if(!mapping)return c.json({error:"Peer mapping not found"},404); if(!peers.existing(mapping.projectId,data.idempotencyKey)){
+      const project = store.projects().find(project => project.id === mapping.projectId);
+      if (c.req.header("authorization") === `Bearer ${bearer}` && c.req.header("x-agentklar-peer-internal") !== peerInternal && project?.delegationMode !== "automatic" && data.task?.delegation !== "requested") return c.json({ error: "This project uses manual delegation. Start workers only for a human request with delegation: requested, or ask the human to choose automatic delegation in project settings." }, 403);
+      const stamp=controlStamp(c,mapping.projectId); control.check(mapping.projectId,stamp,currentLead(mapping.projectId));} return c.json(await peers.start(data)); }
     catch (e) { if (e instanceof z.ZodError) return c.json({ error: "Invalid remote task." }, 400); throw e; }
   });
   app.post("/api/peers/dispatch/:id/status", async c => c.json(await peers.status(c.req.param("id"))));

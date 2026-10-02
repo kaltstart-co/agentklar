@@ -1,3 +1,4 @@
+import { requestedTaskBody } from "./requested-task.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -18,7 +19,7 @@ test("normal task API routes role to exact owner, preserves context, reports dis
   let ownerStarts=0, localStarts=0, offline=false;
   const owner=createService(join(dir,"owner"),4322,(_,run,__,callbacks)=>{ownerStarts++;return {stop(){callbacks.update({state:"cancelled"});callbacks.done();},closed:Promise.resolve()};},process.execPath,null);
   const ownerDevice=deviceSettings(owner.store.db).device;
-  const call=(service:typeof owner,port:number)=>(path:string,method="GET",body?:unknown)=>Promise.resolve(service.app.request(`http://127.0.0.1:${port}${path}`,{method,headers:{Authorization:`Bearer ${service.bearer}`,"Content-Type":"application/json"},...(body===undefined?{}:{body:JSON.stringify(body)})})).then(async r=>({status:r.status,body:await r.json()}));
+  const call=(service:typeof owner,port:number)=>(path:string,method="GET",body?:unknown)=>Promise.resolve(service.app.request(`http://127.0.0.1:${port}${path}`,{method,headers:{Authorization:`Bearer ${service.bearer}`,"Content-Type":"application/json"},...(body===undefined?{}:{body:JSON.stringify(requestedTaskBody(path, body))})})).then(async r=>({status:r.status,body:await r.json()}));
   const ownerPeers=new Peers(owner.store,ownerDevice,call(owner,4322));
   const transport:PeerTransport=async(_,request)=>{if(offline)throw new PeerError("Fixture offline",503);return ownerPeers.owner(request);};
   const coordinator=createService(join(dir,"coordinator"),4321,()=>{localStarts++;throw new Error("must not run locally");},null,null,undefined,undefined,undefined,undefined,undefined,null,undefined,null,transport);

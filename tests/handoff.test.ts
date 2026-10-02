@@ -236,7 +236,7 @@ test("Claude launch records set versus unset config scope across restart", async
         service.store.saveProject(project);
         const response = await service.app.request("http://127.0.0.1:4317/api/tasks/start", {
           method: "POST", headers: { Authorization: `Bearer ${service.bearer}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ projectId: project.id, prompt: "test", idempotencyKey: mode, harness: "claude" }),
+          body: JSON.stringify({ projectId: project.id, prompt: "test", idempotencyKey: mode, harness: "claude", delegation: "requested" }),
         });
         assert.equal(response.status, 202);
         const started = await response.json();

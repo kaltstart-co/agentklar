@@ -35,8 +35,9 @@ struct MainView: View {
                                 Text(item.0).font(.system(size: 14, weight: page == item.0 ? .medium : .regular))
                                 Spacer(minLength: 0)
                             }.foregroundStyle(page == item.0 ? .primary : .secondary)
-                                .padding(.horizontal, 10).frame(height: 34)
+                                .padding(.horizontal, 10).frame(maxWidth: .infinity).frame(height: 34)
                                 .background(page == item.0 ? Color.primary.opacity(0.07) : .clear, in: RoundedRectangle(cornerRadius: 7))
+                                .contentShape(Rectangle())
                         }.buttonStyle(.plain).disabled(activeProject.isEmpty)
                             .accessibilityAddTraits(page == item.0 ? .isSelected : [])
                     }

@@ -1,3 +1,4 @@
+import { requestedTaskBody } from "./requested-task.ts";
 import {test} from "node:test";
 import assert from "node:assert/strict";
 import {Client} from "@modelcontextprotocol/client";
@@ -24,7 +25,7 @@ test("only separately paired trusted human UI can consume an exact remote native
  let answers=0,loseAck=false;
  const ownerFactory:Parameters<typeof createService>[2]=(_,run,path,cb)=>{const id=randomUUID();queueMicrotask(()=>{cb.update({state:"needs_attention"});cb.approval({id,runId:run.id,kind:"command",title:"Approve exact command",details:{command:run.prompt.endsWith("large")?"x".repeat(90000):"git status",cwd:path},decisions:["accept","decline","cancel"],createdAt:new Date().toISOString()},decision=>{answers++;if(run.prompt.endsWith("throw"))throw new Error("fixture callback failure");cb.update({state:"completed",result:`Decision ${decision}`});cb.done();});});return {stop(){},closed:Promise.resolve()};};
  let owner=createService(ownerHome,ownerPort,ownerFactory,process.execPath,null);
- const call=(s:typeof owner,port:number)=>async(path:string,method="GET",body?:unknown,headers?:Record<string,string>)=>{const r=await s.app.request(`http://127.0.0.1:${port}${path}`,{method,headers:headers||{Authorization:`Bearer ${s.bearer}`,"Content-Type":"application/json"},...(body===undefined?{}:{body:JSON.stringify(body)})});return{status:r.status,body:await r.json()};};
+ const call=(s:typeof owner,port:number)=>async(path:string,method="GET",body?:unknown,headers?:Record<string,string>)=>{const r=await s.app.request(`http://127.0.0.1:${port}${path}`,{method,headers:headers||{Authorization:`Bearer ${s.bearer}`,"Content-Type":"application/json"},...(body===undefined?{}:{body:JSON.stringify(requestedTaskBody(path, body))})});return{status:r.status,body:await r.json()};};
  const transport:PeerTransport=async(_,request)=>{const human="channel" in request;const result=await call(owner,ownerPort)(human?"/api/peer-human":"/api/peer","POST",request);if(human&&request.operation==="answer"&&loseAck){loseAck=false;throw new PeerError("fixture lost reply",503);}return result;};
  const makeSource=()=>createService(sourceHome,sourcePort,()=>{throw new Error("no local worker");},null,null,undefined,undefined,undefined,undefined,undefined,null,undefined,null,transport);
  let source=makeSource();
@@ -37,7 +38,7 @@ test("only separately paired trusted human UI can consume an exact remote native
  let closedWire=false;
  try{
  const tools=await client.listTools();assert.ok(!tools.tools.some(t=>/approval|human_grant|human_save/.test(t.name)));
- const reply=await client.callTool({name:"task_start",arguments:{projectId:lp.id,roleId:"worker",prompt:"first",idempotencyKey:"first",workspace:"worktree"}});assert.ok(!reply.isError);const first=JSON.parse((reply.content as {text:string}[])[0].text);await wait(()=>owner.store.approvals().some(x=>x.runId===first.ownerRunId));
+ const reply=await client.callTool({name:"task_start",arguments:{projectId:lp.id,delegation:"requested",roleId:"worker",prompt:"first",idempotencyKey:"first",workspace:"worktree"}});assert.ok(!reply.isError);const first=JSON.parse((reply.content as {text:string}[])[0].text);await wait(()=>owner.store.approvals().some(x=>x.runId===first.ownerRunId));
  const request=(path:string,body:unknown,headers:Record<string,string>=sourceUi)=>call(source,sourcePort)(path,"POST",body,headers);
  const listPath=`/api/remote-approvals/${first.id}/list`;
  const deniedHeaders:Record<string,string>[]=[{Authorization:`Bearer ${source.bearer}`,"Content-Type":"application/json"},{...sourceUi,Authorization:`Bearer ${source.bearer}`},{...sourceUi,Authorization:"Bearer invalid"},{Cookie:sourceUi.Cookie,"Content-Type":"application/json"},{...sourceUi,Origin:"https://evil.example"}];for(const headers of deniedHeaders)assert.equal((await request(listPath,{},headers)).status,403);

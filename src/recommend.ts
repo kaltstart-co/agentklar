@@ -2,6 +2,7 @@ import { workerHarnesses, type WorkerHarness } from "./contracts.ts";
 import { benchmarksFresh, evidenceForModel, benchmarkNotice, type BenchmarkSnapshot } from "./benchmarks.ts";
 import { z } from "zod";
 import { toolCapabilities, satisfiesRequiredTools } from "./capabilities.ts";
+import { projectRoutingRules } from "./routing-presets.ts";
 import type {
   CatalogModel,
   CatalogSnapshot,
@@ -128,18 +129,14 @@ function target(
   input: RecommendationInput,
   headroom: number | null,
 ) {
-  if (project.preference === "best") return "capable";
-  if (project.preference === "economical")
+  const rules = projectRoutingRules(project);
+  const base = rules[input.complexity];
+  if (!rules.adjustToAllowance || headroom === null) return base;
+  if (headroom <= rules.lowAllowancePercent)
     return input.complexity === "hard" ? "balanced" : "efficient";
-  if (headroom !== null && headroom <= 20)
-    return input.complexity === "hard" ? "balanced" : "efficient";
-  if (headroom !== null && headroom >= 50 && input.complexity !== "routine")
+  if (headroom >= rules.highAllowancePercent && input.complexity !== "routine")
     return "capable";
-  return input.complexity === "routine"
-    ? "efficient"
-    : input.complexity === "hard"
-      ? "capable"
-      : "balanced";
+  return base;
 }
 
 /** Pure advice. The caller supplies only service-read native metadata and installed commands. */
@@ -171,6 +168,7 @@ export function recommendWorkers(project: Project, input: RecommendationInput, s
     createdAt: new Date(now).toISOString(),
     catalogCheckedAt: sourcesInput[0]?.catalog.checkedAt || new Date(now).toISOString(),
     preference: project.preference,
+    ...(project.routingPreset ? { routingPreset: { id: project.routingPreset.id, name: project.routingPreset.name } } : {}),
     complexity: input.complexity,
     taskType: input.taskType,
     benchmarkMethod: pin ? "pin" : "policy-fallback",
@@ -256,7 +254,7 @@ export function recommendWorkers(project: Project, input: RecommendationInput, s
       return reject(
         "no reviewed policy tier is available for this native choice.",
       );
-    if (!pinned && input.complexity === "hard" && p.tier === "efficient")
+    if (!pinned && input.complexity === "hard" && p.tier === "efficient" && target(project, input, q.headroom) !== "efficient")
       return reject("hard tasks require at least the balanced policy tier.");
     if (!q.allowed)
       warnings.push(
@@ -268,9 +266,9 @@ export function recommendWorkers(project: Project, input: RecommendationInput, s
       );
     else {
       reasons.push(
-        `Applicable native windows have at least ${q.headroom}% remaining. The 20% and 50% thresholds are product rules; their effect on subscription units is unknown.`,
+        `Applicable native windows have at least ${q.headroom}% remaining. The ${projectRoutingRules(project).lowAllowancePercent}% and ${projectRoutingRules(project).highAllowancePercent}% thresholds are product rules; their effect on subscription units is unknown.`,
       );
-      if (q.headroom <= 20)
+      if (q.headroom <= projectRoutingRules(project).lowAllowancePercent)
         warnings.push(
           "Native headroom is low. This advice does not estimate remaining tasks or cost.",
         );
@@ -298,7 +296,7 @@ export function recommendWorkers(project: Project, input: RecommendationInput, s
       reasons.unshift(`Used the ${model?.isDefault ? "explicit native default" : "only offered native model"} after no reviewed candidate remained. Native ordinary usage is allowed; no cost or quality rank was inferred.`);
     else
       reasons.unshift(
-        `Saved ${project.preference} preference and ${input.complexity} complexity target the ${wanted} tier. This model is in the reviewed ${p.tier} tier.`,
+        `Saved ${project.routingPreset ? `${project.routingPreset.name} preset` : `${project.preference} preference`} and ${input.complexity} complexity target the ${wanted} tier. This model is in the reviewed ${p.tier} tier.`,
       );
     const tierIndex = tiers.indexOf(p.tier as Exclude<Tier, "unknown">);
     const targetIndex = tiers.indexOf(wanted);

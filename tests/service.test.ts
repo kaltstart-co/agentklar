@@ -1,3 +1,4 @@
+import { requestedTaskBody } from "./requested-task.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, rmSync, symlinkSync } from "node:fs";
@@ -41,7 +42,7 @@ function setup() {
     s.app.request("http://127.0.0.1:4317" + path, {
       method,
       headers,
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      ...(body === undefined ? {} : { body: JSON.stringify(requestedTaskBody(path, body)) }),
     });
   return {
     s,
@@ -244,7 +245,7 @@ test("advisory lead claims require exact ownership and expire without affecting 
   const call = (path: string, method = "GET", body?: unknown, headers?: Record<string, string>) =>
     s.app.request(`http://127.0.0.1:4317${path}`, { method,
       headers: headers || { Authorization: `Bearer ${s.bearer}`, "Content-Type": "application/json" },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+      ...(body === undefined ? {} : { body: JSON.stringify(requestedTaskBody(path, body)) }) });
   try {
     const p = await (await call("/api/projects", "POST", { name: "lead", path: project })).json();
     const route = `/api/projects/${p.id}/lead`;
@@ -568,6 +569,7 @@ test("possibly surviving owned group blocks a new worker after restart without k
           body: JSON.stringify({
             projectId: p.id,
             prompt: "new",
+            delegation: "requested",
             idempotencyKey: "new",
           }),
         },

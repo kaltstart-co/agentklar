@@ -1,3 +1,4 @@
+import { requestedTaskBody } from "./requested-task.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -45,7 +46,7 @@ test("two workspaces run at once; review and fix keep their original worktree", 
   const call = (path: string, body?: unknown) => service.app.request(`http://127.0.0.1:4317${path}`, {
     method: body === undefined ? "GET" : "POST",
     headers: { Authorization: `Bearer ${service.bearer}`, "Content-Type": "application/json" },
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    ...(body === undefined ? {} : { body: JSON.stringify(requestedTaskBody(path, body)) }),
   });
   const start = (projectId: string, prompt: string, workspace?: "project" | "worktree", followUp?: { runId: string; kind: "review" | "fix" }) =>
     call("/api/tasks/start", { projectId, prompt, idempotencyKey: prompt,
@@ -189,7 +190,7 @@ test("stopping during Git preparation keeps a durable record and starts no worke
   const service = createService(home, 4317, () => { launched++; return { stop() {}, closed: Promise.resolve() }; }, process.execPath);
   const call = (path: string, body: unknown) => service.app.request(`http://127.0.0.1:4317${path}`, {
     method: "POST", headers: { Authorization: `Bearer ${service.bearer}`, "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+    body: JSON.stringify(requestedTaskBody(path, body)),
   });
   try {
     const project = await (await call("/api/projects", { name: "repo", path: repo })).json();

@@ -1,3 +1,4 @@
+import { requestedTaskBody } from "./requested-task.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
@@ -30,7 +31,7 @@ async function request(
         ? { Cookie: ui, Origin: "http://127.0.0.1:4317" }
         : { Authorization: `Bearer ${service.bearer}` }),
     },
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    ...(body === undefined ? {} : { body: JSON.stringify(requestedTaskBody(path, body)) }),
   });
 }
 

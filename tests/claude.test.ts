@@ -1,3 +1,4 @@
+import { requestedTaskBody } from "./requested-task.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
@@ -460,7 +461,7 @@ test("service selects harness, binds idempotency and rejects role mismatch", asy
         Authorization: `Bearer ${service.bearer}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify(requestedTaskBody(path, body)),
     });
   try {
     const project = await (

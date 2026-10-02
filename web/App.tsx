@@ -12,6 +12,7 @@ import { NativePreferences } from "./NativePreferences.js";
 import { NativeInstallations } from "./NativeInstallations.js";
 import { GitChanges } from "./GitChanges.js";
 import { RemoteApprovals, type PendingHumanAnswer } from "./RemoteApprovals.js";
+import { TeamPolicy } from "./TeamPolicy.js";
 import { Devices } from "./Devices.js";
 import { InstructionsForm } from "./InstructionsForm.js";
 import { Benchmarks, BenchmarkDetail, BenchmarkEvidenceView } from "./Benchmarks.js";
@@ -38,7 +39,6 @@ import type {
   Run,
   RunEvent,
   Role,
-  Preference,
   ProjectContext,
   WorkerAdvice,
   RunHandoff,
@@ -169,7 +169,6 @@ export function App() {
   const [includeProjectContext, setIncludeProjectContext] = useState(true);
   const [workspace, setWorkspace] = useState<"project" | "worktree">("project");
   const [roles, setRoles] = useState<Role[]>([]);
-  const [preference, setPreference] = useState<Preference>("balanced");
   const project = snapshot.projects.find((p) => p.id === projectId);
   const showGuidedSetup = connected && (!project || setupOpen || (!setupDismissed && !(onboarding?.projectId === projectId && onboarding.mainHarness) && !snapshot.runs.some(r => r.projectId === projectId)));
   const lead = snapshot.leads?.[projectId];
@@ -213,7 +212,7 @@ export function App() {
   }, [taskModal, taskHarness, connected, draftProjectId]);
   const adviceKey = JSON.stringify([
     draftProjectId, roleId, taskHarness, model, selectedRole?.model,
-    taskProject?.preference, complexity, requiresImages, requiresTools, readOnly, taskType, taskModal, connected,
+    taskProject?.preference, taskProject?.routingPreset, complexity, requiresImages, requiresTools, readOnly, taskType, taskModal, connected,
     deviceScope, workspace, followUp, prompt, selectedRole?.peerId,
   ]);
   const currentAdviceKey = useRef(adviceKey);
@@ -349,7 +348,6 @@ export function App() {
   }, []);
   useEffect(() => {
     setRoles(project?.roles.map((r) => ({ ...r })) || []);
-    setPreference(project?.preference || "balanced");
   }, [project?.id]);
   useEffect(() => {
     setCatalogError(null);
@@ -754,7 +752,7 @@ export function App() {
                         {remoteRun.routing && <details>
                           <summary>Model choice at launch</summary>
                           <p className="hint">{harnessName(remoteRun.routing.selected.harness)} · {remoteRun.routing.selected.model}{remoteRun.routing.selected.device && ` · ${remoteRun.routing.selected.device.label}`}</p>
-                          <p className="hint">Native list checked {time(remoteRun.routing.catalogCheckedAt)}. Saved preference: {remoteRun.routing.preference}.</p>
+                          <p className="hint">Native list checked {time(remoteRun.routing.catalogCheckedAt)}. Routing preset: {remoteRun.routing.routingPreset?.name || remoteRun.routing.preference}.</p>
                           {remoteRun.routing.selected.benchmark && <BenchmarkEvidenceView evidence={remoteRun.routing.selected.benchmark} method={remoteRun.routing.benchmarkMethod} />}
                           <ul>{[...remoteRun.routing.reasons, ...remoteRun.routing.warnings].map((reason) => <li key={reason}>{reason}</li>)}</ul>
                         </details>}
@@ -863,7 +861,7 @@ export function App() {
                                   run.routing.selected.basis === "role-pin" ? " · Saved role model pin" : " · Policy choice"}
                               </p>
                               <p className="hint">
-                                Saved preference: {run.routing.preference}. Task: {run.routing.taskType || "coding"}, {run.routing.complexity}
+                                Routing preset: {run.routing.routingPreset?.name || run.routing.preference}. Task: {run.routing.taskType || "coding"}, {run.routing.complexity}
                                 {run.routing.requiresImages ? ", images needed" : ""}.
                                 Native list checked {time(run.routing.catalogCheckedAt)}. Policy {run.routing.policyVersion}.
                               </p>
@@ -1017,24 +1015,11 @@ export function App() {
             {view === "Team" &&
               (project ? (
                 <section className="content-panel">
+                  <TeamPolicy key={project.id} project={project} connected={connected} request={api} onSaved={refresh} />
                   <h2>Roles for {project.name}</h2>
                   <p className="muted">
                     Save who should do what. Your MCP host can choose a role.
                     Installed Codex, Claude Code, Muse and OpenCode harnesses can run workers.
-                  </p>
-                  <Select
-                    label="Cost preference"
-                    value={preference}
-                    onChange={(v) => setPreference(v as Preference)}
-                    data={[
-                      { value: "economical", label: "Economical" },
-                      { value: "balanced", label: "Balanced" },
-                      { value: "best", label: "Best capability" },
-                    ]}
-                  />
-                  <p className="hint">
-                    Automatic model choice uses this saved preference when you
-                    start a task with it enabled. It does not enforce a budget.
                   </p>
                   {roles.map((role, index) => (
                     <div className="role-card" key={role.id}>
@@ -1161,7 +1146,6 @@ export function App() {
                                 ...r,
                                 model: r.model?.trim() || undefined,
                               })),
-                              preference,
                             },
                             "PATCH",
                           );
@@ -1549,17 +1533,17 @@ export function App() {
             {automaticRouting && !selectedRole && !followUp && <p className="hint">{deviceScope === "local" ? "Automatic choice stays on this computer." : workspace === "project" ? "Using the project folder keeps this task on this computer. Choose a separate worktree to consider mapped computers." : "Mapped computers are checked at launch. Native approvals stay on the chosen owner computer."}</p>}
             <p className="hint">
               {automaticRouting
-                ? "Uses the saved cost preference and task needs when you select Start worker. Any chosen harness, role and model pin stay fixed."
+                ? "Uses the saved routing preset and task needs when you select Start worker. Any chosen harness, role and model pin stay fixed."
                 : "Uses the model above, or the native harness default if none is set."}
             </p>
             <details>
               <summary>Task needs and model preview</summary>
               <Stack gap="sm" mt="sm">
                 <p className="hint">
-                  Saved preference: {taskProject?.preference === "best"
+                  Routing preset: {taskProject?.routingPreset?.name || (taskProject?.preference === "best"
                     ? "Best capability"
-                    : taskProject?.preference === "economical" ? "Economical" : "Balanced"}.
-                  Change and save it in Team.
+                    : taskProject?.preference === "economical" ? "Economical" : "Balanced")}.
+                  Change and apply it in Team.
                 </p>
                 <Select
                   label="Task complexity"
@@ -1600,6 +1584,7 @@ export function App() {
                 )}
                 {currentAdvice && (
                   <div aria-live="polite">
+                    <p className="hint">Routing preset: {currentAdvice.routingPreset?.name || taskProject?.routingPreset?.name || currentAdvice.preference}.</p>
                     <strong>
                       {adviceChoice
                         ? `${harnessName(adviceChoice.harness)} · ${adviceChoice.model}${adviceChoice.device ? ` · ${adviceChoice.device.label}` : ""}`

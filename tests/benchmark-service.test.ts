@@ -1,3 +1,4 @@
+import { requestedTaskBody } from "./requested-task.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
@@ -22,7 +23,7 @@ test("benchmark API refresh is explicit, authenticated, fixed-source, durable an
       fetcher: async (url, options) => { calls++; assert.ok(Object.values(benchmarkSources).includes(String(url))); assert.equal(options?.body, undefined); assert.equal(options?.credentials, "omit"); if (fail) throw new Error("offline"); return new Response(String(url).endsWith(".csv") ? csv : JSON.stringify(categories)); },
     });
   let service = make();
-  const call = (route: string, body?: unknown, headers?: Record<string, string>) => service.app.request(`http://127.0.0.1:4317${route}`, { method: body === undefined ? "GET" : "POST", headers: headers || { Authorization: `Bearer ${service.bearer}`, "Content-Type": "application/json" }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+  const call = (route: string, body?: unknown, headers?: Record<string, string>) => service.app.request(`http://127.0.0.1:4317${route}`, { method: body === undefined ? "GET" : "POST", headers: headers || { Authorization: `Bearer ${service.bearer}`, "Content-Type": "application/json" }, ...(body === undefined ? {} : { body: JSON.stringify(requestedTaskBody(route, body)) }) });
   try {
     assert.equal((await call("/api/benchmarks", undefined, {})).status, 401);
     assert.equal((await call("/api/benchmarks?url=https://example.com")).status, 400);

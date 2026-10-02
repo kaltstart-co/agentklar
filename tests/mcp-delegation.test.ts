@@ -1,0 +1,82 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { Client } from "@modelcontextprotocol/client";
+import { InMemoryTransport } from "@modelcontextprotocol/server";
+import { serve } from "@hono/node-server";
+import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createMcp } from "../src/mcp.ts";
+import { createService } from "../src/service.ts";
+
+test("MCP exposes saved routing policy and requires a human request in manual mode", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "agentklar-mcp-delegation-"));
+  const path = join(dir, "project"); mkdirSync(path);
+  const port = 24000 + Math.floor(Math.random() * 10000);
+  let starts = 0;
+  const service = createService(join(dir, "home"), port, (_command, _run, _path, callbacks) => {
+    starts++;
+    queueMicrotask(() => { callbacks.update({ state: "completed", result: "fixture result" }); callbacks.done(); });
+    return { stop() {}, closed: Promise.resolve() };
+  }, process.execPath, null, undefined, {}, undefined, {}, {}, null, {}, null, undefined,
+  { gemini: null, "cursor-agent": null, zcode: null });
+  const http = serve({ fetch: service.app.fetch, hostname: "127.0.0.1", port });
+  const server = createMcp(`http://127.0.0.1:${port}`, service.bearer);
+  const client = new Client({ name: "delegation-test", version: "1" });
+  const [clientWire, serverWire] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverWire); await client.connect(clientWire);
+  const call = (name: string, args: Record<string, unknown>) => client.callTool({ name, arguments: args });
+  const data = (result: Awaited<ReturnType<typeof call>>) => JSON.parse((result.content as { text: string }[])[0].text);
+  try {
+    const guidance = client.getInstructions()!;
+    assert.ok(guidance.split(/\s+/).length <= 180);
+    assert.match(guidance, /Keep ordinary work in Claude Code or Codex/);
+    assert.match(guidance, /Read projects_list policy before delegating/);
+    assert.match(guidance, /Missing delegationMode means manual/);
+    assert.match(guidance, /pass delegation:"requested" only for that request/);
+    assert.match(guidance, /larger independent work/);
+    assert.match(guidance, /"work directly" or "no delegation" overrides it/);
+    assert.match(guidance, /Never change delegation mode or routing preset unless the user asks for configuration/);
+    const { tools } = await client.listTools();
+    const start = tools.find(tool => tool.name === "task_start")!;
+    const declaration = start.inputSchema.properties?.delegation as { const?: string; enum?: string[] };
+    assert.deepEqual(declaration.const ? [declaration.const] : declaration.enum, ["requested"]);
+    assert.ok(!start.inputSchema.required?.includes("delegation"));
+    const update = tools.find(tool => tool.name === "project_update")!;
+    assert.ok(update.inputSchema.properties?.routingPresetId);
+    assert.deepEqual((update.inputSchema.properties?.delegationMode as { enum: string[] }).enum, ["manual", "automatic"]);
+    assert.equal(tools.some(tool => /routing_presets_(create|update|delete)/.test(tool.name)), false);
+    const presets = await call("routing_presets_list", {});
+    assert.equal(presets.isError, false);
+    assert.ok(data(presets).some((preset: { id: string }) => preset.id === "balanced"));
+    assert.equal((await call("routing_presets_list", { unexpected: true })).isError, true);
+    const project = data(await call("project_register", { name: "Manual default", path }));
+    const listed = data(await call("projects_list", {}));
+    assert.equal(listed.find((item: { id: string }) => item.id === project.id).delegationMode ?? "manual", "manual");
+    const args = { projectId: project.id, prompt: "fixture work", idempotencyKey: "requested", readOnly: true };
+    const blocked = await call("task_start", args);
+    assert.equal(blocked.isError, true);
+    assert.match(data(blocked).error, /manual delegation/);
+    assert.equal(starts, 0);
+    assert.equal((await call("task_start", { ...args, delegation: "automatic" })).isError, true);
+    assert.equal(starts, 0);
+    const requested = await call("task_start", { ...args, delegation: "requested" });
+    assert.equal(requested.isError, false);
+    assert.equal(starts, 1);
+    const replay = await call("task_start", { ...args, delegation: "requested" });
+    assert.equal(replay.isError, false);
+    assert.equal(data(replay).id, data(requested).id);
+    assert.equal(starts, 1);
+    const configured = await call("project_update", { projectId: project.id, routingPresetId: "best", delegationMode: "automatic" });
+    assert.equal(configured.isError, false);
+    assert.equal(data(configured).routingPreset.name, "Best");
+    assert.equal(data(configured).delegationMode, "automatic");
+    const automatic = await call("task_start", { ...args, idempotencyKey: "automatic-policy" });
+    assert.equal(automatic.isError, false);
+    assert.equal(starts, 2);
+  } finally {
+    await client.close(); await server.close(); await service.close();
+    await new Promise<void>(resolve => http.close(() => resolve()));
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
