@@ -122,9 +122,10 @@ export function App() {
   const [path, setPath] = useState("");
   const [prompt, setPrompt] = useState("");
   const [roleId, setRoleId] = useState<string | null>(null);
-  const [harness, setHarness] = useState("codex");
+  const [harness, setHarness] = useState("automatic");
   const [model, setModel] = useState("");
   const [automaticRouting, setAutomaticRouting] = useState(true);
+  const [deviceScope, setDeviceScope] = useState<"connected" | "local">("connected");
   const [complexity, setComplexity] = useState<WorkerAdvice["complexity"]>("standard");
   const [taskType, setTaskType] = useState<TaskType>("coding");
   const [requiresImages, setRequiresImages] = useState(false);
@@ -156,7 +157,8 @@ export function App() {
   const remoteFollowUp = followUp ? snapshot.remoteDispatches?.find((item) => item.id === followUp.runId) : undefined;
   const remoteRole = Boolean(selectedRole?.peerId || remoteFollowUp);
   const followUpPeer = remoteFollowUp ? snapshot.peers?.find((p) => p.id === remoteFollowUp.peerId) : undefined;
-  const taskWorker = remoteRole || workers.find((h) => h.id === taskHarness);
+  const connectedRouting = automaticRouting && deviceScope === "connected" && workspace === "worktree" && !followUp && !selectedRole && snapshot.peers?.some((p) => p.projectId === draftProjectId);
+  const taskWorker = remoteRole || connectedRouting || (automaticRouting && taskHarness === "automatic" && workers.length > 0) || workers.find((h) => h.id === taskHarness);
   const museModels = catalogs[draftProjectId]?.harnesses.find((entry) => entry.harness === "muse")?.models || [];
   const museModel = taskHarness === "muse" ? museModels.find((item) => item.id === (model.trim() || selectedRole?.model)) ||
     (!model.trim() && !selectedRole?.model ? museModels.find((item) => item.isDefault) : undefined) : undefined;
@@ -177,12 +179,13 @@ export function App() {
   const adviceKey = JSON.stringify([
     draftProjectId, roleId, taskHarness, model, selectedRole?.model,
     taskProject?.preference, complexity, requiresImages, taskType, taskModal, connected,
+    deviceScope, workspace, followUp, prompt, selectedRole?.peerId,
   ]);
   const currentAdviceKey = useRef(adviceKey);
   currentAdviceKey.current = adviceKey;
   const currentAdvice = advice?.key === adviceKey ? advice.data : null;
   const adviceChoice = currentAdvice?.choice;
-  const canUseAdvice = Boolean(adviceChoice && connected &&
+  const canUseAdvice = Boolean(adviceChoice && !adviceChoice.device?.peerId && connected &&
     (remoteRole || workers.some((worker) => worker.id === adviceChoice.harness)) &&
     (!selectedRole || selectedRole.harness === adviceChoice.harness));
   useEffect(() => {
@@ -200,11 +203,12 @@ export function App() {
     try {
       const data = await api<WorkerAdvice>(`/projects/${draftProjectId}/recommend`, {
         roleId: roleId || undefined,
-        harness: taskHarness,
+        harness: taskHarness === "automatic" ? undefined : taskHarness,
         model: model.trim() || undefined,
         complexity,
         requiresImages,
         taskType,
+        deviceScope, workspace, followUp: followUp || undefined,
       });
       if (request === adviceRequest.current && key === currentAdviceKey.current)
         setAdvice({ key, data });
@@ -251,6 +255,8 @@ export function App() {
     setReadOnly(source ? kind === "review" : true);
     setWorkspace(source?.workspace?.kind || "project");
     setRoleId(null);
+    setHarness(source?.harness || "automatic");
+    setAutomaticRouting(true);
     setModel("");
     setTaskModal(true);
   }
@@ -358,7 +364,7 @@ export function App() {
     setModel("");
   }, [projectId]);
   useEffect(() => {
-    if (!remoteRole && workers.length && !workers.some((h) => h.id === harness)) {
+    if (!remoteRole && harness !== "automatic" && workers.length && !workers.some((h) => h.id === harness)) {
       setHarness(workers[0]!.id);
       setModel("");
     }
@@ -479,7 +485,7 @@ export function App() {
           : "This hosted page is a setup guide. Run the local app to see projects, workers and permission requests."}
       </p>
       <p className="hint">Requires Node 24 on macOS or Linux. Install the pinned beta package:</p>
-      <pre>npm install -g https://github.com/kaltstart-co/agentklar/releases/download/v0.1.0-beta.21/agentklar-0.1.0-beta.21.tgz{"\n"}agentklar start</pre>
+      <pre>npm install -g https://github.com/kaltstart-co/agentklar/releases/download/v0.1.0-beta.22/agentklar-0.1.0-beta.22.tgz{"\n"}agentklar start</pre>
       <p>
         Open the setup link from the terminal, then use{" "}
         <code>http://127.0.0.1:4317</code>.
@@ -715,6 +721,13 @@ export function App() {
                         <Badge color={remoteRun.connection === "unknown" ? "orange" : "blue"}>{remoteRun.connection === "unknown" ? "Connection unknown" : "Owner observed"}</Badge>
                         <p>Last known worker state: {remoteRun.lastKnownRun ? labels[remoteRun.lastKnownRun.state] : "Unknown"}</p>
                         {remoteRun.lastObservedAt && <p className="hint">Observed {time(remoteRun.lastObservedAt)}. This is saved evidence; the worker may have changed since then.</p>}
+                        {remoteRun.routing && <details>
+                          <summary>Model choice at launch</summary>
+                          <p className="hint">{harnessName(remoteRun.routing.selected.harness)} · {remoteRun.routing.selected.model}{remoteRun.routing.selected.device && ` · ${remoteRun.routing.selected.device.label}`}</p>
+                          <p className="hint">Native list checked {time(remoteRun.routing.catalogCheckedAt)}. Saved preference: {remoteRun.routing.preference}.</p>
+                          {remoteRun.routing.selected.benchmark && <BenchmarkEvidenceView evidence={remoteRun.routing.selected.benchmark} method={remoteRun.routing.benchmarkMethod} />}
+                          <ul>{[...remoteRun.routing.reasons, ...remoteRun.routing.warnings].map((reason) => <li key={reason}>{reason}</li>)}</ul>
+                        </details>}
                         {remoteRun.error && <Alert color="orange">{remoteRun.error}</Alert>}
                         <p className="hint">Native approval requests must be answered in AgentKlar on the owner computer. Lost contact does not stop its worker.</p>
                         <Group><Button variant="light" disabled={busy || !connected} onClick={() => void act(async () => { await api(`/runs/${remoteRun.id}`); })}>Check owner status</Button>
@@ -809,6 +822,7 @@ export function App() {
                               <summary>Model choice at launch</summary>
                               <p className="hint">
                                 {harnessName(run.routing.selected.harness)} · {run.routing.selected.model}
+                                {run.routing.selected.device && ` · ${run.routing.selected.device.label}`}
                                 {run.routing.selected.basis === "task-pin" ? " · Task model pin" :
                                   run.routing.selected.basis === "role-pin" ? " · Saved role model pin" : " · Policy choice"}
                               </p>
@@ -1402,9 +1416,9 @@ export function App() {
                 prompt,
                 idempotencyKey: crypto.randomUUID(),
                 roleId: roleId || undefined,
-                harness: taskHarness,
+                harness: taskHarness === "automatic" ? undefined : taskHarness,
                 model: model.trim() || undefined,
-                ...(automaticRouting ? { routing: { complexity, requiresImages, taskType } } : {}),
+                ...(automaticRouting ? { routing: { complexity, requiresImages, taskType, deviceScope } } : {}),
                 readOnly,
                 includeProjectContext,
                 ...(followUp ? { followUp } : {}),
@@ -1454,7 +1468,7 @@ export function App() {
               value={taskHarness}
               disabled={Boolean(selectedRole)}
               placeholder="No installed worker harness"
-              data={remoteRole ? ["codex", "claude", "muse", "opencode"].map((id) => ({ value: id, label: harnessName(id) })) : workers.map((h) => ({ value: h.id, label: h.name }))}
+              data={!selectedRole && !followUp && automaticRouting ? [{value:"automatic",label:"Automatic"}, ...["codex", "claude", "muse", "opencode"].map((id) => ({value:id,label:harnessName(id)}))] : remoteRole ? ["codex", "claude", "muse", "opencode"].map((id) => ({ value: id, label: harnessName(id) })) : workers.map((h) => ({ value: h.id, label: h.name }))}
               onChange={(id) => {
                 setHarness(id || "codex");
                 setModel("");
@@ -1499,11 +1513,15 @@ export function App() {
             <Checkbox
               label="Choose model automatically"
               checked={automaticRouting}
-              onChange={(e) => setAutomaticRouting(e.currentTarget.checked)}
+              onChange={(e) => { setAutomaticRouting(e.currentTarget.checked); if (!e.currentTarget.checked && harness === "automatic") setHarness(workers[0]?.id || "codex"); }}
             />
+            {automaticRouting && !selectedRole && !followUp && <Select label="Choose on" value={deviceScope} allowDeselect={false}
+              data={[{value:"connected",label:"Connected computers"},{value:"local",label:"This computer"}]}
+              onChange={(value) => setDeviceScope(value as "connected" | "local")} />}
+            {automaticRouting && !selectedRole && !followUp && <p className="hint">{deviceScope === "local" ? "Automatic choice stays on this computer." : workspace === "project" ? "Using the project folder keeps this task on this computer. Choose a separate worktree to consider mapped computers." : "Mapped computers are checked at launch. Native approvals stay on the chosen owner computer."}</p>}
             <p className="hint">
               {automaticRouting
-                ? "Uses the saved cost preference and task needs when you select Start worker. The worker harness and any model pin above stay fixed."
+                ? "Uses the saved cost preference and task needs when you select Start worker. Any chosen harness, role and model pin stay fixed."
                 : "Uses the model above, or the native harness default if none is set."}
             </p>
             <details>
@@ -1553,7 +1571,7 @@ export function App() {
                   <div aria-live="polite">
                     <strong>
                       {adviceChoice
-                        ? `${harnessName(adviceChoice.harness)} · ${adviceChoice.model}`
+                        ? `${harnessName(adviceChoice.harness)} · ${adviceChoice.model}${adviceChoice.device ? ` · ${adviceChoice.device.label}` : ""}`
                         : "No suitable model found"}
                     </strong>
                     {adviceChoice?.basis !== "policy" && adviceChoice && (
@@ -1566,13 +1584,10 @@ export function App() {
                         {currentAdvice.reasons.map((reason) => <li key={reason}>{reason}</li>)}
                       </ul>
                     )}
-                    {adviceChoice?.warnings.filter((warning) => warning.includes("headroom is low"))
+                    {adviceChoice?.warnings.filter((warning) => /headroom is low|usage credits|data-use|capability|exhausted/i.test(warning))
                       .map((warning) => <Alert color="orange" key={warning}>{warning}</Alert>)}
-                    <p className="hint">
-                      Native policy advice may use LiveBench reference scores to break ties. Subscription cost remains unknown.
-                    </p>
-                    {adviceChoice?.benchmark && <BenchmarkEvidenceView evidence={adviceChoice.benchmark} method={currentAdvice.benchmarkMethod} />}
-                    {adviceChoice && (
+                    {adviceChoice && <p className="hint">Checked again on Start.</p>}
+                    {adviceChoice && !adviceChoice.device?.peerId && (
                       <Button
                         size="xs"
                         variant="light"
@@ -1588,6 +1603,8 @@ export function App() {
                     )}
                     <details>
                       <summary>{adviceChoice ? "Why this suggestion" : "Details"}</summary>
+                      <p className="hint">Native policy advice may use LiveBench reference scores to break ties. Subscription cost remains unknown.</p>
+                      {adviceChoice?.benchmark && <BenchmarkEvidenceView evidence={adviceChoice.benchmark} method={currentAdvice.benchmarkMethod} />}
                       {adviceChoice && (
                         <ul>
                           {[...new Set([...currentAdvice.reasons, ...adviceChoice.reasons])]
@@ -1634,12 +1651,12 @@ export function App() {
               <p className="hint">
                 {taskHarness === "claude"
                   ? "Claude can use only Read, Glob and Grep tools. Your configured hooks can still run. This does not add an operating system sandbox."
-                  : "Codex uses its native read-only sandbox."}
+                  : taskHarness === "automatic" ? "The chosen worker uses its native read-only controls." : "Codex uses its native read-only sandbox."}
               </p>
             )}
             <p className="hint">
-              Runs a native {harnessName(taskHarness)} worker in {taskProject?.name}
-              . Native permission requests appear {remoteRole ? "in AgentKlar on the owner computer" : "in the task detail"}.
+              {taskHarness === "automatic" ? "Chooses a native worker" : `Runs a native ${harnessName(taskHarness)} worker`} in {taskProject?.name}
+              . Native permission requests appear {remoteRole || connectedRouting ? "in AgentKlar on the owner computer" : "in the task detail"}.
             </p>
             <Button type="submit" loading={busy} disabled={!taskWorker || !taskProject || ((taskHarness === "muse" || taskHarness === "opencode") && readOnly)}>
               Start worker

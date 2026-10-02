@@ -1,7 +1,8 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
-import type { Run, CatalogSnapshot } from "./contracts.ts";
+import type { Run, CatalogSnapshot, RoutingDecision } from "./contracts.ts";
+import type { RecommendationSource } from "./recommend.ts";
 import type { Store } from "./store.ts";
 import { changePacketSchema, type ChangePacket } from "./changes.ts";
 import { gitBase } from "./workspace.ts";
@@ -10,18 +11,22 @@ import { z } from "zod";
 const uuid = z.uuid();
 const nodePath = z.string().startsWith("/").max(1000).refine(value => !/[\0\r\n]/.test(value));
 const hash = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
-const task = z.object({ prompt: z.string().trim().min(1).max(32000), harness: z.enum(["codex", "claude", "muse", "opencode"]).optional(), model: z.string().min(1).max(120).optional(), readOnly: z.boolean().default(false), followUp: z.object({ runId: uuid, kind: z.enum(["review", "fix"]) }).strict().optional(), includeProjectContext: z.literal(false).optional(), routing: z.object({ complexity: z.enum(["routine", "standard", "hard"]).default("standard"), requiresImages: z.boolean().default(false), taskType: z.enum(["coding", "reasoning", "data-analysis", "language"]).default("coding") }).strict().optional() }).strict();
+export const routingEvidenceSchema = z.object({
+  selected:z.object({harness:z.enum(["codex","claude","muse","opencode"]),model:z.string().min(1).max(120),roleId:z.string().max(80).optional(),basis:z.enum(["task-pin","role-pin","policy"]),tier:z.enum(["efficient","balanced","capable","unknown"]),device:z.object({id:uuid,label:z.string().max(120),peerId:uuid.optional()}).strict().optional(),catalogCheckedAt:z.string().datetime().optional(),benchmark:z.object({provider:z.literal("LiveBench"),metric:z.string().max(120),score:z.number().finite(),release:z.string().max(120),checkedAt:z.string().datetime(),measuredEffort:z.literal("max"),sourceRow:z.string().max(200),sourceUrl:z.string().max(500),contentHash:z.string().max(128),referenceOnly:z.literal(true)}).strict().optional()}).strict(),
+  preference:z.enum(["economical","balanced","best"]),complexity:z.enum(["routine","standard","hard"]),requiresImages:z.boolean(),catalogCheckedAt:z.string().datetime(),policyVersion:z.string().max(80),reasons:z.array(z.string().max(1000)).max(12),warnings:z.array(z.string().max(1000)).max(12),taskType:z.enum(["coding","reasoning","data-analysis","language"]).optional(),benchmarkMethod:z.enum(["reference-tie-break","policy-fallback","pin"]).optional()
+}).strict();
+const task = z.object({ routingEvidence:routingEvidenceSchema.optional(), prompt: z.string().trim().min(1).max(32000), harness: z.enum(["codex", "claude", "muse", "opencode"]).optional(), model: z.string().min(1).max(120).optional(), readOnly: z.boolean().default(false), followUp: z.object({ runId: uuid, kind: z.enum(["review", "fix"]) }).strict().optional(), includeProjectContext: z.literal(false).optional(), routing: z.object({ complexity: z.enum(["routine", "standard", "hard"]).default("standard"), requiresImages: z.boolean().default(false), taskType: z.enum(["coding", "reasoning", "data-analysis", "language"]).default("coding") }).strict().optional() }).strict();
 const base = z.string().regex(/^[0-9a-f]{40,64}$/);
 export const peerSaveSchema = z.object({ label: z.string().trim().min(1).max(120), deviceId: uuid, sshHost: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_.@:-]{0,199}$/), command: z.string().regex(/^(?:agentklar|\/[a-zA-Z0-9_./ -]{1,500})$/), nodePath: nodePath.optional(), projectId: uuid, remoteProjectId: uuid, grantId: uuid, grantToken: z.string().regex(/^[0-9a-f]{64}$/) }).strict().refine(value => !value.nodePath || value.command.startsWith("/"), "A pinned Node executable requires an absolute AgentKlar script path.");
 export const peerDispatchSchema = z.object({ peerId: uuid, idempotencyKey: z.string().min(1).max(200), baseCommit: base, task }).strict();
-const envelope = z.object({ version: z.literal(1), sourceDeviceId: uuid, targetDeviceId: uuid, grantId: uuid, token: z.string().regex(/^[0-9a-f]{64}$/), operation: z.enum(["hello", "catalog", "start", "status", "cancel", "changes", "context"]), requestId: uuid.optional(), runId: uuid.optional(), baseCommit: base.optional(), task: task.optional() }).strict();
+const envelope = z.object({ version: z.literal(1), sourceDeviceId: uuid, targetDeviceId: uuid, grantId: uuid, token: z.string().regex(/^[0-9a-f]{64}$/), operation: z.enum(["hello", "catalog", "start", "status", "cancel", "changes", "context", "routing"]), requestId: uuid.optional(), runId: uuid.optional(), baseCommit: base.optional(), task: task.optional() }).strict();
 export type PeerEnvelope = z.infer<typeof envelope>;
 export type PeerConnection = z.infer<typeof peerSaveSchema> & { id: string; lastObservedAt?: string; lastError?: string };
 type Device = { id: string; label: string; platform: string };
 type Reply = { status: number; body: unknown };
 export type PeerTransport = (peer: PeerConnection, request: PeerEnvelope) => Promise<Reply>;
 type Dispatch = { id: string; launchHash?: string; prompt: string; createdAt: string; projectId: string; peerId: string; ownerDeviceId: string; key: string; digest: string; request: PeerEnvelope; ownerRunId?: string; lastObservedAt?: string; lastKnownRun?: Run; connection: "unknown" | "observed"; error?: string };
-export type RemoteDispatch = Omit<Dispatch, "request" | "digest" | "key">;
+export type RemoteDispatch = Omit<Dispatch, "request" | "digest" | "key"> & {routing?:RoutingDecision};
 export class PeerError extends Error { constructor(message: string, public status = 400) { super(message); } }
 const shellQuote = (s: string) => "'" + s.replaceAll("'", "'\\''") + "'";
 
@@ -102,6 +107,15 @@ export class Peers {
     if (snapshot?.projectId !== peer.remoteProjectId || !Array.isArray(snapshot.harnesses)) throw new PeerError("Catalog does not match the saved remote project.", 502);
     return snapshot;
   }
+  async routing(peerId: string, baseCommit: string): Promise<RecommendationSource> {
+    const peer = this.peer(uuid.parse(peerId));
+    const body = await this.send(peer, this.request(peer, "routing", {baseCommit: base.parse(baseCommit)})) as {deviceId: string; projectId: string; baseCommit: string; catalog: CatalogSnapshot; installed: RecommendationSource["installed"]};
+    if (body?.deviceId !== peer.deviceId || body.projectId !== peer.remoteProjectId || body.baseCommit !== baseCommit || body.catalog?.projectId !== peer.remoteProjectId || !Array.isArray(body.catalog.harnesses)) throw new PeerError("Routing metadata does not match the saved device, project and Git base.", 409);
+    const checked = Date.parse(body.catalog.checkedAt), now = Date.now();
+    if (!Number.isFinite(checked) || checked > now || now - checked > 5 * 60_000) throw new PeerError("Remote catalog is stale; refresh its native model evidence.", 409);
+    const installed = z.object({codex:z.boolean(),claude:z.boolean(),muse:z.boolean().optional(),opencode:z.boolean().optional()}).strict().parse(body.installed);
+    return {catalog:body.catalog, installed, device:{id:peer.deviceId,label:peer.label,peerId:peer.id}};
+  }
   async test(input: unknown) {
     const { peerId } = z.object({ peerId: uuid }).strict().parse(input), peer = this.peer(peerId);
     try {
@@ -119,6 +133,12 @@ export class Peers {
     if (!grant || grant.revoked || grant.sourceDeviceId !== request.sourceDeviceId || !timingSafeEqual(Buffer.from(grant.tokenHash), Buffer.from(supplied))) throw new PeerError("Peer grant is missing, revoked or does not match.", 403);
     if (request.operation === "hello") return { status: 200, body: { version: 1, device: this.device, projectId: grant.projectId } };
     if (request.operation === "catalog") return this.call(`/api/projects/${grant.projectId}/catalog`, "POST");
+    if (request.operation === "routing") {
+      if (!request.baseCommit || request.task || request.runId) throw new PeerError("Routing needs an exact Git base and no task or run payload.");
+      const project = this.store.projects().find(p => p.id === grant.projectId);
+      if (!project || gitBase(project.path).baseCommit !== request.baseCommit) throw new PeerError("Mapped owner project HEAD differs from the explicit Git base.", 409);
+      return this.call(`/api/projects/${grant.projectId}/routing-metadata`);
+    }
     if (request.operation === "start") {
       if (!request.requestId || !request.baseCommit || !request.task) throw new PeerError("Provide a request ID, exact Git base and task.");
       const key = `peer:${request.sourceDeviceId}:${request.requestId}`;
@@ -144,7 +164,7 @@ export class Peers {
     return this.call(`/api/runs/${run.id}${request.operation === "cancel" ? "/stop" : ""}`, request.operation === "cancel" ? "POST" : "GET");
   }
   private saveDispatch(d: Dispatch) { this.store.db.prepare("INSERT INTO peer_dispatches(id,projectId,key,data) VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data").run(d.id, d.projectId, d.key, JSON.stringify(d)); }
-  private publicDispatch({ request, digest, key, ...d }: Dispatch) { return d; }
+  private publicDispatch({ request, digest, key, ...d }: Dispatch) { return {...d,...(request.task?.routingEvidence ? {routing: request.task?.routingEvidence as RoutingDecision} : {})}; }
   private dispatch(id: string) { const d = this.rows<Dispatch>("peer_dispatches").find(d => d.id === id); if (!d) throw new PeerError("Dispatch not found", 404); return d; }
   existing(projectId: string, key: string) { const prior = this.rows<Dispatch>("peer_dispatches").find(d => d.projectId === projectId && d.key === key); return prior && this.publicDispatch(prior); }
   historyRows(projectId: string, before: number, limit: number) {

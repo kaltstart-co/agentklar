@@ -1,4 +1,4 @@
-import { Peers, PeerError, type PeerTransport } from "./peers.ts";
+import { Peers, PeerError, routingEvidenceSchema, type PeerTransport } from "./peers.ts";
 import { DatabaseSync } from "node:sqlite";
 import { Hono } from "hono";
 import { getCookie, setCookie } from "hono/cookie";
@@ -34,7 +34,7 @@ import { CatalogCache, readCatalog, withObservedMuseQuota, type CatalogReader } 
 import { BenchmarkCache } from "./benchmarks.ts";
 import type { Run, Project, ProjectRun, ProjectLead, RoutingDecision, FollowUpContext } from "./contracts.ts";
 import { sourceFromHeader } from "./launch-source.ts";
-import { recommendationSchema, recommendWorker } from "./recommend.ts";
+import { recommendationSchema, recommendWorker, recommendWorkers, type RecommendationSource, selectedWorkerEligibility } from "./recommend.ts";
 import { Instructions, InstructionError, instructionFileSchema, instructionPreviewSchema } from "./instructions.ts";
 import { NativeSetup, SetupError, type NativeSetupOptions } from "./setup.ts";
 import { ProjectSkills, SkillError, skillPreviewInput, skillIdInput, skillRemoveInput } from "./skills.ts";
@@ -105,7 +105,9 @@ export const startSchema = z
       complexity: z.enum(["routine", "standard", "hard"]).default("standard"),
       requiresImages: z.boolean().default(false),
       taskType: z.enum(["coding", "reasoning", "data-analysis", "language"]).default("coding"),
+      deviceScope: z.enum(["local", "connected"]).optional(),
     }).strict().optional(),
+    routingEvidence: routingEvidenceSchema.optional(),
     followUp: z.object({ runId: z.uuid(), kind: z.enum(["review", "fix"]) }).strict().optional(),
     workspace: z.enum(["project", "worktree"]).optional(),
     baseCommit: z.string().regex(/^[0-9a-f]{40,64}$/).optional(),
@@ -202,9 +204,10 @@ export function createService(
   const selectedHarnesses = () => harnesses().map((h) => Object.hasOwn(commands, h.id)
     ? { ...h, executable: commands[h.id]!, available: !!commands[h.id], workerSupported: !!commands[h.id], hostSupported: !!commands[h.id] } : h);
   const app = new Hono();
+  const peerInternal = randomBytes(32).toString("hex");
   const peers = new Peers(store, devices.device, async (path, method = "GET", body) => {
     const response = await app.request(`http://127.0.0.1:${port}${path}`, { method,
-      headers: { Authorization: `Bearer ${bearer}`, "Content-Type": "application/json" },
+      headers: { Authorization: `Bearer ${bearer}`, "Content-Type": "application/json", "x-agentklar-peer-internal": peerInternal },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
     return { status: response.status, body: await response.json() };
   }, peerTransport);
@@ -261,6 +264,74 @@ export function createService(
     claude: claudeCommand,
     muse: museCommand,
     opencode: opencodeCommand,
+  });
+  const installedWorkers = () => ({ codex: !!nativeCommand, claude: !!claudeCommand, muse: !!museCommand, opencode: !!opencodeCommand });
+  const adviceSchema = recommendationSchema.extend({
+    deviceScope: z.enum(["local", "connected"]).default("connected"),
+    workspace: z.enum(["project", "worktree"]).optional(),
+    followUp: z.object({ runId: z.uuid(), kind: z.enum(["review", "fix"]) }).strict().optional(),
+  }).strict();
+  function decisionFor(advice: ReturnType<typeof recommendWorker>): RoutingDecision {
+    const choice = advice.choice!;
+    return { selected: { harness: choice.harness, model: choice.model, roleId: choice.roleId, basis: choice.basis, tier: choice.tier,
+      ...(choice.device ? { device: choice.device } : {}), ...(choice.catalogCheckedAt ? { catalogCheckedAt: choice.catalogCheckedAt } : {}), ...(choice.benchmark ? { benchmark: choice.benchmark } : {}) },
+      preference: advice.preference, complexity: advice.complexity, taskType: advice.taskType, benchmarkMethod: advice.benchmarkMethod, requiresImages: advice.requiresImages,
+      catalogCheckedAt: choice.catalogCheckedAt || advice.catalogCheckedAt, policyVersion: advice.policyVersion,
+      reasons: [...new Set([...choice.reasons,...advice.reasons])].slice(0,3), warnings: [...new Set([...choice.warnings,...advice.warnings])].slice(0,3) };
+  }
+  async function deviceAdvice(project: Project, input: z.infer<typeof adviceSchema>) {
+    const warnings: string[] = [];
+    const sources: RecommendationSource[] = [];
+    const role = input.roleId ? project.roles.find(r => r.id === input.roleId) : undefined;
+    const linked = input.followUp ? peers.list().find(d => d.id === input.followUp!.runId && d.projectId === project.id) : undefined;
+    const peerId = role?.peerId ?? linked?.peerId;
+    if (peerId) {
+      const mapping = peers.resolveMapping(project.id, peerId);
+      const catalog = await peers.catalog(peerId);
+      const available = (harness: string) => catalog.harnesses.some(h => h.harness === harness && h.modelsStatus === "available");
+      sources.push({ catalog, installed: { codex: available("codex"), claude: available("claude"), muse: available("muse"), opencode: available("opencode") }, device: { id: mapping.deviceId, label: mapping.label, peerId } });
+    } else {
+      const connected = !role && !input.followUp && input.deviceScope !== "local" && input.workspace === "worktree";
+      let baseCommit: string | undefined;
+      if (connected) try { baseCommit = gitBase(project.path).baseCommit; } catch { warnings.push("Connected computers excluded: this project has no committed Git base."); }
+      const mappings = connected && baseCommit ? peers.settings().peers.filter(p => p.projectId === project.id).slice(0,4) : [];
+      if (connected && peers.settings().peers.filter(p => p.projectId === project.id).length > 4) warnings.push("Only the first four saved computer mappings were checked.");
+      const bounded = async <T,>(promise: Promise<T>): Promise<T> => {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        try { return await Promise.race([promise, new Promise<never>((_,reject) => { timer=setTimeout(() => reject(new Error("Native discovery timed out")),8000); })]); }
+        finally { if(timer) clearTimeout(timer); }
+      };
+      const localCapacity = !role && !input.followUp && input.workspace === "worktree" && activeRuns(project.id).length >= 2;
+      if (localCapacity) warnings.push("This computer is excluded because this project already has two active workers.");
+      const reads: Promise<RecommendationSource>[] = [bounded(catalogs.refresh(project)).then(catalog => ({ catalog: withObservedMuseQuota(catalog,store.runs()), installed: localCapacity ? { codex: false, claude: false, muse: false, opencode: false } : installedWorkers(), device: {id:devices.device.id,label:devices.device.label} })),
+        ...mappings.map(mapping => bounded(peers.routing(mapping.id,baseCommit!)).then(source => {
+          if (JSON.stringify(peers.resolveMapping(project.id,mapping.id)) !== JSON.stringify(mapping)) throw new Error("Saved mapping changed during discovery");
+          return source;
+        }))];
+      const results = await Promise.allSettled(reads);
+      for (let i=0;i<results.length;i++) {
+        const result=results[i]!;
+        if(result.status === "fulfilled") sources.push(result.value);
+        else warnings.push(`${i===0 ? devices.device.label : mappings[i-1]!.label}: excluded because native routing metadata or the matching Git base is unavailable.`);
+      }
+      if(baseCommit && gitBase(project.path).baseCommit !== baseCommit) throw new PeerError("Source Git HEAD changed during device selection. Start again.",409);
+      if (!role && !input.followUp && input.workspace !== "worktree" && input.deviceScope !== "local") warnings.push("Current project folder work stays on this computer. Choose a separate worktree to compare connected computers.");
+    }
+
+    const advice = recommendWorkers(project, input, sources, Date.now(), benchmarks.get());
+    advice.warnings = [...advice.warnings, ...warnings].slice(0, 12);
+    return advice;
+  }
+  app.get("/api/projects/:id/routing-metadata", async c => {
+    const project = store.projects().find(p => p.id === c.req.param("id"));
+    if (!project) return c.json({ error: "Project not found" }, 404);
+    if (activeRuns(project.id).length >= 2) return c.json({ error: "Mapped project already has two active workers." }, 409);
+    const baseCommit = gitBase(project.path).baseCommit;
+    const catalog = withObservedMuseQuota(await catalogs.refresh(project), store.runs());
+    if (quiesced || stopping) return c.json({ error: "Local service is stopping." }, 503);
+    if (gitBase(project.path).baseCommit !== baseCommit) return c.json({ error: "Project Git HEAD changed during discovery." }, 409);
+    if (activeRuns(project.id).length >= 2) return c.json({ error: "Mapped project already has two active workers." }, 409);
+    return c.json({ deviceId: devices.device.id, projectId: project.id, baseCommit, catalog, installed: installedWorkers() });
   });
   function linkedSource(projectId: string, link: { runId: string; kind: "review" | "fix" }) {
     const source = store.run(link.runId);
@@ -674,7 +745,7 @@ export function createService(
   app.post("/api/projects/:id/recommend", async (c) => {
     const project = store.projects().find((p) => p.id === c.req.param("id"));
     if (!project) return c.json({ error: "Project not found" }, 404);
-    const parsed = recommendationSchema.safeParse(
+    const parsed = adviceSchema.safeParse(
       await c.req.json().catch(() => null),
     );
     if (!parsed.success)
@@ -707,24 +778,9 @@ export function createService(
       );
     c.header("Cache-Control", "no-store");
     try {
-      if (selected?.peerId) {
-        peers.resolveMapping(project.id, selected.peerId);
-        const ownerCatalog = await peers.catalog(selected.peerId);
-        const available = (harness: string) => ownerCatalog.harnesses.some((entry) => entry.harness === harness && entry.modelsStatus === "available");
-        const installed = { codex: available("codex"), claude: available("claude"), muse: available("muse"), opencode: available("opencode") };
-        const advice = recommendWorker(project, parsed.data, ownerCatalog, installed, Date.now(), benchmarks.get());
-        return c.json({ ...advice, warnings: [...advice.warnings, "This advice uses the owning computer's native models and allowance. Start uses the saved device mapping."] });
-      }
-      const catalog = withObservedMuseQuota(await catalogs.refresh(project), store.runs());
-      return c.json(
-        recommendWorker({ ...project, roles: project.roles.filter((item) => !item.peerId) }, parsed.data, catalog, {
-          codex: !!nativeCommand,
-          claude: !!claudeCommand,
-          muse: !!museCommand,
-          opencode: !!opencodeCommand,
-        }, Date.now(), benchmarks.get()),
-      );
-    } catch {
+      return c.json(await deviceAdvice(project, parsed.data));
+    } catch (error) {
+      if (error instanceof PeerError) return c.json({ error: error.message }, error.status as 400 | 409 | 503);
       return c.json(
         { error: "Native advice evidence could not be read." },
         503,
@@ -872,9 +928,11 @@ export function createService(
         400,
       );
     const data = parsed.data;
+    if (data.routingEvidence && c.req.header("x-agentklar-peer-internal") !== peerInternal) return c.json({ error: "Routing evidence is accepted only from a scoped peer request." }, 400);
     const p = store.projects().find((p) => p.id === data.projectId);
     if (!p) return c.json({ error: "Project not found" }, 404);
     const { includeProjectContext, ...originalInputs } = data;
+    if (originalInputs.routing?.deviceScope === "connected") { const { deviceScope, ...routing } = originalInputs.routing; originalInputs.routing = routing; }
     const launchHash = createHash("sha256")
       .update(
         JSON.stringify({
@@ -895,7 +953,10 @@ export function createService(
     const priorDispatch = peers.existing(p.id, data.idempotencyKey);
     if (priorDispatch) {
       if (priorDispatch.launchHash !== launchHash) return c.json({ error: "Idempotency key already used for a different task" }, 409);
-      return c.json(priorDispatch.connection === "unknown" ? await peers.status(priorDispatch.id) : priorDispatch);
+      if (priorDispatch.connection === "unknown") {
+        try { return c.json(await peers.status(priorDispatch.id)); } catch { return c.json({ ...priorDispatch, error: "Saved owner mapping is unavailable. Restore it to query this existing dispatch; no replacement was started." }); }
+      }
+      return c.json(priorDispatch);
     }
     const remoteRole = data.roleId ? p.roles.find((item) => item.id === data.roleId) : undefined;
     if (data.roleId && !remoteRole) return c.json({ error: "Role not found" }, 400);
@@ -905,31 +966,58 @@ export function createService(
     if (remoteSource && remoteSource.projectId !== p.id) return c.json({ error: "Linked dispatch not found in this project" }, 404);
     if (remoteSource && remoteRole && !remoteRole.peerId)
       return c.json({ error: "Linked remote work must stay on its owning computer. Prepare and apply a changes handoff before continuing locally." }, 409);
-    if (remoteRole?.peerId || remoteSource) {
+    const recheck = () => {
+      if (quiesced || stopping) throw new PeerError("Local service is stopping.", 503);
+      const local = store.existing(p.id, data.idempotencyKey);
+      const remote = peers.existing(p.id, data.idempotencyKey);
+      const existing = local || remote;
+      if (existing && existing.launchHash !== launchHash) throw new PeerError("Idempotency key already used for a different task", 409);
+      if (existing) return local ? compactRun(local) : remote;
+      const latest = store.projects().find(project => project.id === p.id);
+      if (!latest || JSON.stringify(latest) !== JSON.stringify(p)) throw new PeerError("Project settings changed during selection. Start again.", 409);
+    };
+    let automaticAdvice: ReturnType<typeof recommendWorker> | undefined;
+    let automaticRouting: RoutingDecision | undefined;
+    let automaticPeer: string | undefined;
+    let automaticBase: string | undefined;
+    if (data.routing && !data.roleId && !data.followUp && !data.routingEvidence) {
+      if (data.workspace === "worktree") automaticBase = gitBase(p.path).baseCommit;
+      const mappings = JSON.stringify(peers.settings().peers);
+      automaticAdvice = await deviceAdvice(p, adviceSchema.parse({ harness: data.harness, model: data.model, ...data.routing, workspace: data.workspace || "project", ...(c.req.header("x-agentklar-peer-internal") === peerInternal ? { deviceScope: "local" } : {}) }));
+      const replay = recheck(); if (replay) return c.json(replay);
+      if (mappings !== JSON.stringify(peers.settings().peers)) return c.json({ error: "Saved computer mappings changed during selection. Start again." }, 409);
+      if (automaticBase && gitBase(p.path).baseCommit !== automaticBase) return c.json({ error: "Source Git HEAD changed during selection. Start again." }, 409);
+      const choice = automaticAdvice.choice;
+      if (!choice) return c.json({ error: "No suitable model found.", reasons: automaticAdvice.reasons.slice(0,4), warnings: automaticAdvice.warnings.slice(0,8) }, 409);
+      automaticRouting = decisionFor(automaticAdvice);
+      automaticPeer = choice.device?.peerId;
+    }
+    if (remoteRole?.peerId || remoteSource || automaticPeer) {
       if (data.followUp && !remoteSource) return c.json({ error: "Linked local work cannot continue on another computer. Prepare and apply a changes handoff first." }, 409);
       const source = remoteSource ? await peers.followUpSource(p.id, remoteSource.id) : undefined;
+      const replay = recheck(); if (replay) return c.json(replay);
       if (source && source.dispatch.lastKnownRun?.state !== "completed")
         return c.json({ error: "Linked source must be completed on its owning computer." }, 409);
       if (source && data.followUp?.kind === "fix" && source.dispatch.lastKnownRun?.followUp?.kind !== "review")
         return c.json({ error: "A fix must follow a completed review on the owning computer." }, 409);
       if (source && data.followUp?.kind === "review" && source.dispatch.lastKnownRun?.followUp?.kind === "review")
         return c.json({ error: "A review must follow implementation or a fix on the owning computer." }, 409);
-      const mappingId = remoteRole?.peerId ?? remoteSource!.peerId;
+      const mappingId = remoteRole?.peerId ?? automaticPeer ?? remoteSource!.peerId;
       const mapping = peers.resolveMapping(p.id, mappingId);
       if (source && (mapping.deviceId !== source.mapping.deviceId || mapping.remoteProjectId !== source.mapping.remoteProjectId))
         return c.json({ error: "Linked work must use the same owning computer and project. Use a changes handoff for another owner." }, 409);
       if (remoteRole && data.harness && data.harness !== remoteRole.harness) return c.json({ error: "Task harness must match the selected role harness." }, 400);
       if (data.workspace === "project") return c.json({ error: "Remote tasks require their separate Git worktree." }, 400);
-      const baseCommit = source?.baseCommit ?? gitBase(p.path).baseCommit;
+      const baseCommit = source?.baseCommit ?? automaticBase ?? gitBase(p.path).baseCommit;
       if (data.baseCommit && data.baseCommit !== baseCommit) return c.json({ error: "Requested Git base differs from the linked source or local HEAD." }, 409);
-      const harness = remoteRole?.harness ?? data.harness ?? source?.dispatch.lastKnownRun?.harness ?? "codex";
-      const model = data.model ?? remoteRole?.model ?? (!remoteRole ? source?.dispatch.lastKnownRun?.effectiveModel ?? source?.dispatch.lastKnownRun?.model : undefined);
+      const harness = automaticRouting?.selected.harness ?? remoteRole?.harness ?? data.harness ?? source?.dispatch.lastKnownRun?.harness ?? "codex";
+      const model = automaticRouting?.selected.model ?? data.model ?? remoteRole?.model ?? (!remoteRole ? source?.dispatch.lastKnownRun?.effectiveModel ?? source?.dispatch.lastKnownRun?.model : undefined);
       const prompt = composeWorkerPrompt({ prompt: data.prompt, ...(remoteRole ? { roleSnapshot: remoteRole } : {}), ...(data.includeProjectContext ? { contextSnapshot: store.context(p.id) } : {}) });
       if (prompt.length > 32000) return c.json({ error: "Remote task and project context exceed the supported prompt size. Shorten the task or omit project context." }, 400);
       return c.json(await peers.start({ peerId: mappingId, idempotencyKey: data.idempotencyKey, baseCommit,
         task: { prompt, harness, model, readOnly: data.readOnly, includeProjectContext: false,
           ...(source && data.followUp ? { followUp: { runId: source.dispatch.ownerRunId!, kind: data.followUp.kind } } : {}),
-          ...(data.routing ? { routing: data.routing } : {}) } }, launchHash, data.prompt), 202);
+          ...(automaticRouting ? { routingEvidence: automaticRouting } : data.routing ? { routing: { complexity: data.routing.complexity, requiresImages: data.routing.requiresImages, taskType: data.routing.taskType } } : {}) } }, launchHash, data.prompt), 202);
     }
     if (data.followUp) {
       const linked = linkedSource(p.id, data.followUp);
@@ -970,23 +1058,18 @@ export function createService(
     if ((harness === "muse" || harness === "opencode") && data.readOnly)
       return c.json({ error: `${harness === "muse" ? "Muse" : "OpenCode"} cannot enforce read-only work. Choose Codex or Claude Code for a review.` }, 400);
     let model = data.model || selected?.model;
-    let routing: RoutingDecision | undefined;
-    if (data.routing) {
+    let routing: RoutingDecision | undefined = data.routingEvidence;
+    if (data.routing && !data.routingEvidence) {
       let advice;
       try {
-        const catalog = withObservedMuseQuota(await catalogs.refresh(p), store.runs());
-        advice = recommendWorker({ ...p, roles: p.roles.filter((item) => !item.peerId) }, {
-          roleId: data.roleId,
-          harness: data.harness,
-          model: data.model,
-          ...data.routing,
-        }, catalog, { codex: !!nativeCommand, claude: !!claudeCommand, muse: !!museCommand, opencode: !!opencodeCommand }, Date.now(), benchmarks.get());
+        advice = automaticAdvice ?? await deviceAdvice(p, adviceSchema.parse({ roleId: data.roleId, harness: data.harness, model: data.model, ...data.routing, workspace: workspaceChoice, followUp: data.followUp }));
       } catch {
         if (quiesced || stopping) return c.json({ error: "Local service is stopping." }, 503);
         return c.json({ error: "Native routing evidence could not be read. Retry or choose a model manually." }, 503);
       }
       // Metadata discovery awaits. Recheck every condition that can change before insert.
       if (quiesced || stopping) return c.json({ error: "Local service is stopping." }, 503);
+      const remoteReplay = recheck(); if (remoteReplay) return c.json(remoteReplay);
       const existing = store.existing(p.id, data.idempotencyKey);
       if (existing) return existing.launchHash === launchHash
         ? c.json(compactRun(existing))
@@ -1012,22 +1095,17 @@ export function createService(
       model = choice.model;
       if ((harness === "muse" || harness === "opencode") && data.readOnly)
         return c.json({ error: `${harness === "muse" ? "Muse" : "OpenCode"} cannot enforce read-only work. Choose Codex or Claude Code for a review.` }, 400);
-      routing = {
-        selected: {
-          harness: choice.harness, model: choice.model, roleId: choice.roleId,
-          basis: choice.basis, tier: choice.tier,
-          ...(choice.benchmark ? { benchmark: choice.benchmark } : {}),
-        },
-        preference: advice.preference,
-        complexity: advice.complexity,
-        taskType: advice.taskType,
-        benchmarkMethod: advice.benchmarkMethod,
-        requiresImages: advice.requiresImages,
-        catalogCheckedAt: advice.catalogCheckedAt,
-        policyVersion: advice.policyVersion,
-        reasons: [...new Set([...choice.reasons, ...advice.reasons])].slice(0, 3),
-        warnings: [...new Set([...choice.warnings, ...advice.warnings])].slice(0, 3),
-      };
+      routing = decisionFor(advice);
+    }
+    if (data.routingEvidence) {
+      const evidence = data.routingEvidence;
+      if (evidence.selected.harness !== harness || evidence.selected.model !== model || evidence.selected.device?.id !== devices.device.id)
+        return c.json({ error: "Selected remote model or owner differs from the scoped routing evidence." }, 409);
+      const catalog = withObservedMuseQuota(await catalogs.refresh(p), store.runs());
+      const replay = recheck(); if (replay) return c.json(replay);
+      const eligible = selectedWorkerEligibility({ harness: harness as RoutingDecision["selected"]["harness"], model: model! }, { catalog, installed: installedWorkers() }, evidence.requiresImages, Date.now(), evidence.selected.basis);
+      if (!eligible.eligible) return c.json({ error: `Selected remote worker is no longer eligible: ${eligible.reason}. No replacement was started.` }, 409);
+      const busy = busyError(); if (busy) return c.json({ error: busy }, 409);
     }
     const command = harness === "claude" ? claudeCommand : harness === "muse" ? museCommand : harness === "opencode" ? opencodeCommand : nativeCommand;
     if (!command)

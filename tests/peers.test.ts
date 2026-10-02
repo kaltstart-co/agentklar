@@ -183,3 +183,18 @@ let input = ''; for await (const chunk of process.stdin) input += chunk; const r
     assert.equal(peerSaveSchema.safeParse({ ...save, command: "agentklar" }).success, false);
   } finally { process.env.PATH = originalPath; rmSync(dir, { recursive: true, force: true }); }
 });
+
+
+test("routing metadata is scoped to saved device/project/base and rejects stale evidence", async () => {
+ const f=fixture();
+ try {
+  let body:any={deviceId:f.remoteDevice.id,projectId:f.remoteProject.id,baseCommit:f.baseCommit,catalog:{projectId:f.remoteProject.id,checkedAt:new Date().toISOString(),harnesses:[]},installed:{codex:true,claude:false}};
+  const peers=new Peers(f.coordinator.store,f.localDevice,async()=>({status:200,body:{}}),async(_peer,request)=>{assert.equal(request.operation,"routing");assert.equal(request.baseCommit,f.baseCommit);return {status:200,body};});
+  assert.equal((await peers.routing(f.peer.id,f.baseCommit)).device?.peerId,f.peer.id);
+  body={...body,deviceId:randomUUID()};await assert.rejects(peers.routing(f.peer.id,f.baseCommit),/saved device/);
+  body={...body,deviceId:f.remoteDevice.id,catalog:{...body.catalog,checkedAt:new Date(Date.now()-6*60_000).toISOString()}};
+  await assert.rejects(peers.routing(f.peer.id,f.baseCommit),/stale/);
+  const request:PeerEnvelope={version:1,sourceDeviceId:f.localDevice.id,targetDeviceId:f.remoteDevice.id,grantId:f.grant.id,token:f.grant.token,operation:"routing",baseCommit:"0".repeat(40)};
+  await assert.rejects(f.ownerPeers.owner(request),/HEAD differs/);
+ } finally {await f.coordinator.close();await f.owner.close();rmSync(f.dir,{recursive:true,force:true});}
+});

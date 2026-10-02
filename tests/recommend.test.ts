@@ -12,7 +12,7 @@ import type {
   Project,
   QuotaBucket,
 } from "../src/contracts.ts";
-import { recommendationSchema, recommendWorker } from "../src/recommend.ts";
+import { recommendationSchema, recommendWorker, recommendWorkers, selectedWorkerEligibility } from "../src/recommend.ts";
 import { createService } from "../src/service.ts";
 
 const now = Date.parse("2026-10-01T04:00:00Z");
@@ -610,4 +610,59 @@ test("observed Muse account windows reach pin advice without inventing access or
   const old = withObservedMuseQuota(snapshot, [{ ...runs[0], museSubscriptionUsage: { ...usage, observedAtMs: now - 300_001 } }]);
   const stale = recommendWorker(p, recommendationSchema.parse({ harness: "muse", model: "spark" }), old, { codex: false, claude: false, muse: true }, now);
   assert.doesNotMatch(stale.choice!.warnings.join(" "), /exhausted/);
+});
+
+
+test("multi-device ranks all candidates, preserves device identity and role ownership", () => {
+  const source = (ids:string[], peerId?:string, quota:Partial<AccountQuota>={}) => ({catalog:{projectId:p.id,checkedAt:new Date(now).toISOString(),harnesses:[catalog("codex",ids,quota)]},installed:{codex:true,claude:false},device:{id:peerId || "local",label:peerId || "Local",...(peerId ? {peerId} : {})}});
+  const input = recommendationSchema.parse({model:"gpt-5.6-sol"});
+  const local = source(["gpt-5.6-sol"]), remote = source(["gpt-5.6-sol"],"remote");
+  const tied = recommendWorkers(p,input,[remote,local],now);
+  assert.equal(tied.choice?.device?.id,"local");
+  assert.equal(tied.alternatives.length,0); // Exact model pins do not suggest replacements.
+  const empty = source(["gpt-5.6-sol"],undefined,{buckets:[bucket(100)]});
+  assert.equal(recommendWorkers(p,input,[empty,remote],now).choice?.device?.peerId,"remote");
+  const exhausted = recommendWorkers(p,input,[empty,source(["gpt-5.6-sol"],"remote",{buckets:[bucket(100)]})],now);
+  assert.equal(exhausted.choice?.model,"gpt-5.6-sol");
+  assert.ok(exhausted.choice?.warnings.some(w => w.includes("exhausted")));
+  assert.equal(recommendWorkers(p,input,[source(["gpt-6-astra"],"remote")],now).choice,null);
+  assert.equal(recommendWorkers(p,input,[source(["gpt-6-astra"])],now).choice?.model,"gpt-5.6-sol");
+  const roleProject = {...p,roles:[{id:"worker",name:"Worker",responsibility:"Code",harness:"codex" as const,model:"gpt-5.6-sol",peerId:"remote"}]};
+  assert.equal(recommendWorkers(roleProject,recommendationSchema.parse({roleId:"worker"}),[local],now).choice,null);
+  assert.equal(recommendWorkers(roleProject,recommendationSchema.parse({roleId:"worker"}),[local,remote],now).choice?.device?.peerId,"remote");
+  const automatic = recommendWorkers(p,recommendationSchema.parse({}),[source(["gpt-5.6-sol"],"remote"),local],now);
+  assert.equal(automatic.choice?.device?.id,"local");
+  assert.equal(automatic.alternatives[0]?.device?.peerId,"remote");
+  assert.equal(automatic.choice?.catalogCheckedAt,new Date(now).toISOString());
+});
+
+
+test("owner eligibility checks selected exact native model without a replacement", () => {
+ const source = {catalog:{projectId:p.id,checkedAt:new Date(now).toISOString(),harnesses:[catalog("codex",["gpt-5.6-sol"],{buckets:[bucket(100)]})]},installed:{codex:true,claude:false}};
+ const choice={harness:"codex" as const,model:"gpt-5.6-sol"};
+ assert.equal(selectedWorkerEligibility(choice,source,false,now).eligible,false);
+ assert.equal(selectedWorkerEligibility(choice,source,false,now,"task-pin").eligible,true);
+ source.catalog.harnesses[0].quota.ordinaryUsageAllowed=false;
+ assert.equal(selectedWorkerEligibility(choice,source,false,now,"task-pin").eligible,false);
+ source.catalog.harnesses[0].quota.ordinaryUsageAllowed=true;
+ source.catalog.checkedAt=new Date(now-6*60_000).toISOString();
+ assert.equal(selectedWorkerEligibility(choice,source,false,now).eligible,true);
+ assert.equal(selectedWorkerEligibility({...choice,model:"absent"},source,false,now).eligible,false);
+ source.catalog.harnesses[0].models[0].inputModalities=["text"];
+ assert.equal(selectedWorkerEligibility(choice,source,true,now).eligible,false);
+});
+
+
+test("peer Claude competes with local Codex at the same policy tier using its own allowance", () => {
+ const make=(h:"codex"|"claude",ids:string[],allowed:boolean,peerId?:string)=>({catalog:{projectId:p.id,checkedAt:new Date(now).toISOString(),harnesses:[catalog(h,ids,{ordinaryUsageAllowed:allowed ? true : null})]},installed:{codex:h==="codex",claude:h==="claude"},device:{id:peerId || "local",label:peerId || "Local",...(peerId ? {peerId} : {})}});
+ const local=make("codex",["gpt-6.1-sol"],false);
+ const remote=make("claude",["claude-sonnet-5-5"],true,"peer-claude");
+ const advice=recommendWorkers(p,recommendationSchema.parse({}),[local,remote],now);
+ assert.equal(advice.choice?.harness,"claude");
+ assert.equal(advice.choice?.tier,"balanced");
+ assert.equal(advice.choice?.device?.peerId,"peer-claude");
+ assert.equal(advice.alternatives[0]?.harness,"codex");
+ assert.equal(advice.alternatives[0]?.device?.id,"local");
+ assert.equal(advice.benchmarkMethod,"policy-fallback");
+ assert.equal(advice.policyVersion,"2026-10-02.3");
 });

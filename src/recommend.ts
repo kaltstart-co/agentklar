@@ -27,6 +27,7 @@ type Candidate = {
   choice: WorkerChoice;
   distance: number;
   allowed: boolean;
+  exhausted: boolean;
   order: number;
   benchmarkModel: string;
 };
@@ -136,14 +137,15 @@ function target(
 }
 
 /** Pure advice. The caller supplies only service-read native metadata and installed commands. */
-export function recommendWorker(
-  project: Project,
-  input: RecommendationInput,
-  snapshot: CatalogSnapshot,
-  installed: Record<"codex" | "claude", boolean> & Partial<Record<"muse" | "opencode", boolean>>,
-  now = Date.now(),
-  benchmarks?: BenchmarkSnapshot,
-): WorkerAdvice {
+export type RecommendationSource = {
+  catalog: CatalogSnapshot;
+  installed: Record<"codex" | "claude", boolean> & Partial<Record<"muse" | "opencode", boolean>>;
+  device?: { id: string; label: string; peerId?: string };
+};
+export function recommendWorker(project: Project, input: RecommendationInput, snapshot: CatalogSnapshot, installed: RecommendationSource["installed"], now = Date.now(), benchmarks?: BenchmarkSnapshot): WorkerAdvice {
+  return recommendWorkers(project, input, [{catalog: snapshot, installed}], now, benchmarks);
+}
+export function recommendWorkers(project: Project, input: RecommendationInput, sourcesInput: RecommendationSource[], now = Date.now(), benchmarks?: BenchmarkSnapshot): WorkerAdvice {
   const role = input.roleId
     ? project.roles.find((r) => r.id === input.roleId)
     : undefined;
@@ -161,7 +163,7 @@ export function recommendWorker(
   const advice: WorkerAdvice = {
     projectId: project.id,
     createdAt: new Date(now).toISOString(),
-    catalogCheckedAt: snapshot.checkedAt,
+    catalogCheckedAt: sourcesInput[0]?.catalog.checkedAt || new Date(now).toISOString(),
     preference: project.preference,
     complexity: input.complexity,
     taskType: input.taskType,
@@ -173,7 +175,7 @@ export function recommendWorker(
     warnings: [
       "Limited policy advice. Model access, coding quality and actual subscription cost are not verified.",
     ],
-    policyVersion: "2026-10-02.2",
+    policyVersion: "2026-10-02.3",
     confidence: "limited",
     sources: [...sources],
   };
@@ -187,8 +189,9 @@ export function recommendWorker(
     model: CatalogModel | undefined,
     id: string,
     pinned: boolean,
+    source: RecommendationSource,
   ) => {
-    const q = quota(catalog, model, id, now, snapshot.checkedAt);
+    const q = quota(catalog, model, id, now, source.catalog.checkedAt);
     const p = profile(catalog.harness, model, id);
     const warnings: string[] = [];
     const reasons: string[] = [];
@@ -211,6 +214,9 @@ export function recommendWorker(
       warnings.push("Allowance observation is older than five minutes, invalid or in the future; it was ignored. Refresh native evidence.");
     if (catalog.quota.observedAt)
       reasons.push(`Subscription usage was observed at ${catalog.quota.observedAt}; this is not a live balance.`);
+    const sourceChecked = Date.parse(source.catalog.checkedAt);
+    if (pinned && !role && source.device?.peerId && (!model || catalog.modelsStatus !== "available" || !Number.isFinite(sourceChecked) || sourceChecked > now || now - sourceChecked > 5 * 60_000))
+      return reject("fresh mapped native catalog evidence did not offer this exact model.");
     if (catalog.harness === "opencode" && !model)
       return reject("connected OpenCode provider did not offer this exact text-and-tool model.");
     if (input.requiresImages && !model?.inputModalities?.includes("image"))
@@ -284,6 +290,8 @@ export function recommendWorker(
         `No exact target is selected here; this is the nearest available reviewed tier (${p.tier}).`,
       );
     const choice: WorkerChoice = {
+      ...(source.device ? { device: source.device } : {}),
+      catalogCheckedAt: source.catalog.checkedAt,
       harness: catalog.harness,
       model:
         !pinned && catalog.harness === "claude"
@@ -299,6 +307,7 @@ export function recommendWorker(
       choice,
       distance: p.tier === "unknown" ? 99 : Math.abs(tierIndex - targetIndex),
       allowed: q.allowed,
+      exhausted: q.exhausted,
       order: p.order,
       benchmarkModel: catalog.harness === "claude" ? model?.resolvedModel || id : id,
     });
@@ -306,6 +315,10 @@ export function recommendWorker(
   const allowedHarnesses: Harness[] = harness ? [harness] : ["codex", "claude"];
   if ((harness === "muse" || harness === "opencode") && !pin)
     advice.reasons.push(`Choose a specific ${harness} model to get pin advice, or start it manually with its native default. It has no reviewed cost or quality tier.`);
+  const eligibleSources = sourcesInput.filter(source => !role || (role.peerId ? source.device?.peerId === role.peerId : !source.device?.peerId));
+  if (role && !eligibleSources.length) advice.reasons.push("Pinned role device is unavailable. No replacement was selected.");
+  for (const source of eligibleSources) {
+  const {catalog: snapshot, installed} = source;
   for (const h of allowedHarnesses) {
     if (!installed[h]) {
       const message = `${h} worker is not installed or available.`;
@@ -341,27 +354,31 @@ export function recommendWorker(
         catalog.models.find((m) => m.id === pin || m.resolvedModel === pin),
         pin,
         true,
+        source,
       );
     else if (catalog.modelsStatus === "available") {
       for (const model of catalog.models)
-        evaluate(catalog, model, model.id, false);
+        evaluate(catalog, model, model.id, false, source);
     } else warn(`${h}: native models could not be read.`);
+  }
   }
   candidates.sort(
     (a, b) =>
       a.distance - b.distance ||
+      Number(a.exhausted) - Number(b.exhausted) ||
       Number(b.allowed) - Number(a.allowed) ||
       a.order - b.order ||
       a.choice.harness.localeCompare(b.choice.harness) ||
-      a.choice.model.localeCompare(b.choice.model),
+      a.choice.model.localeCompare(b.choice.model) ||
+      Number(Boolean(a.choice.device?.peerId)) - Number(Boolean(b.choice.device?.peerId)),
   );
   // Native aliases can resolve to the same model; rank that identity once.
-  candidates.splice(0, candidates.length, ...candidates.filter((c, i) => candidates.findIndex(other => other.choice.harness === c.choice.harness && other.choice.model === c.choice.model) === i));
+  candidates.splice(0, candidates.length, ...candidates.filter((c, i) => candidates.findIndex(other => other.choice.device?.id === c.choice.device?.id && other.choice.device?.peerId === c.choice.device?.peerId && other.choice.harness === c.choice.harness && other.choice.model === c.choice.model) === i));
   // Compare whole groups only: mixing scored and unknown pairs breaks sort consistency.
   if (!pin && benchmarks && benchmarksFresh(benchmarks, now)) {
     for (let start = 0; start < candidates.length;) {
       let end = start + 1;
-      while (end < candidates.length && candidates[end].distance === candidates[start].distance && candidates[end].allowed === candidates[start].allowed) end++;
+      while (end < candidates.length && candidates[end].distance === candidates[start].distance && candidates[end].allowed === candidates[start].allowed && candidates[end].exhausted === candidates[start].exhausted) end++;
       const group = candidates.slice(start, end);
       const evidence = group.map(c => c.choice.harness === "muse" || c.choice.harness === "opencode" ? undefined : evidenceForModel(benchmarks, c.choice.harness, c.benchmarkModel, input.taskType));
       if (group.length > 1 && evidence.every(e => e !== undefined)) {
@@ -374,6 +391,7 @@ export function recommendWorker(
   }
   const unique = candidates;
   advice.choice = unique[0]?.choice || null;
+  if (advice.choice?.catalogCheckedAt) advice.catalogCheckedAt = advice.choice.catalogCheckedAt;
   if (advice.choice?.benchmark) {
     advice.benchmarkMethod = "reference-tie-break";
     advice.reasons.push(`Fresh LiveBench ${advice.choice.benchmark.metric} reference scores break this equal policy fit after native included usage priority.`);
@@ -399,4 +417,18 @@ export function recommendWorker(
       : "No supported choice has enough evidence for this request. Inspect native settings or change the request explicitly.",
   );
   return advice;
+}
+
+
+/** Recheck one selected native candidate; never rank replacements on its owner. */
+export function selectedWorkerEligibility(choice: Pick<WorkerChoice,"harness"|"model">, source: RecommendationSource, requiresImages: boolean, now = Date.now(), basis: WorkerChoice["basis"] = "policy"): {eligible:boolean;reason?:string} {
+  if (!source.installed[choice.harness]) return {eligible:false,reason:"Selected native worker is unavailable."};
+  const catalog = source.catalog.harnesses.find(c => c.harness === choice.harness);
+  const model = catalog?.models.find(m => m.id === choice.model || m.resolvedModel === choice.model);
+  if (!catalog || catalog.modelsStatus !== "available" || !model) return {eligible:false,reason:"Selected exact model is absent from the current native catalog."};
+  if (catalog.auth?.status === "sign_in_required") return {eligible:false,reason:"Selected worker requires native sign-in."};
+  if (requiresImages && !model.inputModalities?.includes("image")) return {eligible:false,reason:"Selected native model image support is unavailable."};
+  const q = quota(catalog,model,choice.model,now,source.catalog.checkedAt);
+  if (q.blocked || (q.exhausted && basis === "policy")) return {eligible:false,reason:"Selected native usage is blocked or its applicable fresh window is exhausted."};
+  return {eligible:true};
 }

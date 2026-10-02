@@ -289,3 +289,13 @@ Isolated browser QA verified the file preview and full diff, new text file inclu
 Final beta.21 checks passed: TypeScript, production build, all 166 tests, installed-package smoke exposing 23 MCP tools, and diff whitespace. Evidence: `/tmp/agentklar-beta21-release/`.
 
 Focused narrow UI check: handoff detail/full diff and remote Review modal had viewport width 320 and document scroll width 320; modal width was 288. Patch and command content stayed inside their containers. Screenshots: `/tmp/agentklar-changes-ui-qa/mobile-applied.jpg` and `mobile-review.jpg`. Temporary viewport and service were reset/stopped.
+
+## Connected-computer routing — beta.22
+
+Automatic separate-worktree tasks compare this computer and up to four saved mapped computers using each native catalog and applicable fresh allowance. Default or current-folder tasks stay local. This computer scope, role pins, explicit harness/model pins and linked owner boundaries are preserved. Discovery is bounded, excludes unavailable/ineligible sources, and keeps unknown accounts and subscription percentages separate. Selection records the owner and exact native observation time. A lost acknowledgment preserves its durable dispatch without fallback.
+
+Isolated integration checks cover exact Git HEAD, exhausted allowance, missing local CLI, capacity, discovery failure, changed settings, concurrent replay, owner HEAD races, local follow-ups, client routing-evidence rejection, official MCP recommend/start/status, and exact beta.21 input-hash compatibility. Pure policy checks cover cross-harness native evidence and stable benchmark ordering. No real SSH, inference or native configuration changes occurred.
+
+Browser fixtures verified Automatic harness, connected/local scope, remote-only exact model pins, scope preview reset, human owner labels, saved remote routing evidence and compact result details. Desktop and 320px screenshots are under `/tmp/agentklar-routing-ui-qa/`; document width stayed 320 and modal width was 288. Fixtures were stopped and browser viewport reset. Real two-computer setup, shared remote approvals and Windows remain unverified. Antigravity is discovery only; the hosted dashboard cannot execute local agents.
+
+Final beta.22 checks passed: TypeScript, production build, all 171 tests, installed-package smoke exposing 23 MCP tools, and diff whitespace. Evidence: `/tmp/agentklar-beta22-release/`.

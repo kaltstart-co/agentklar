@@ -15,6 +15,7 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 - [x] Antigravity CLI discovery
 - [x] Device pairing UI
 - [x] Remote role pins
+- [x] Automatic cross-device candidates
 - [x] Remote status and history
 - [x] Linked remote review and fix
 - [x] Explicit Git handoff
@@ -67,8 +68,8 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 - [ ] Control transfer
 - [ ] Gemini and Cursor workers
 - [ ] ZCode worker
+- [ ] Antigravity worker
 - [ ] Plugin bundles
 - [ ] Wider config preview and rollback
 - [ ] Real two-computer setup
 - [ ] Shared remote approval UI
-- [ ] Automatic cross-device candidates

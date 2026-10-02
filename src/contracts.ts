@@ -177,7 +177,7 @@ export type Snapshot = {
   harnesses: Harness[];
   leads: Record<string, ProjectLead>;
 };
-export type RemoteDispatch = { id: string; prompt: string; createdAt: string; launchHash?: string; projectId: string; peerId: string; ownerDeviceId: string; ownerRunId?: string; lastKnownRun?: Run; lastObservedAt?: string; connection: "unknown" | "observed"; error?: string };
+export type RemoteDispatch = { routing?:RoutingDecision; id: string; prompt: string; createdAt: string; launchHash?: string; projectId: string; peerId: string; ownerDeviceId: string; ownerRunId?: string; lastKnownRun?: Run; lastObservedAt?: string; connection: "unknown" | "observed"; error?: string };
 export type ChangeContinuation = { harness: string; cwd: string; display: string; freshSession: true };
 export type NativeInstallation = { path: string; version: string | null; fingerprint: string };
 export type NativeInstallationStatus = { harness: string; selected: string | null; saved: string | null; restartRequired: boolean; installations: NativeInstallation[] };
@@ -231,6 +231,8 @@ export type CatalogSnapshot = {
 
 export type TaskComplexity = "routine" | "standard" | "hard";
 export type WorkerChoice = {
+  device?: {id: string; label: string; peerId?: string};
+  catalogCheckedAt?: string;
   benchmark?: BenchmarkEvidence;
   harness: "codex" | "claude" | "muse" | "opencode";
   model: string;
@@ -262,7 +264,7 @@ export type WorkerAdvice = {
 export type RoutingDecision = {
   taskType?: TaskType;
   benchmarkMethod?: "reference-tie-break" | "policy-fallback" | "pin";
-  selected: Pick<WorkerChoice, "harness" | "model" | "roleId" | "basis" | "tier" | "benchmark">;
+  selected: Pick<WorkerChoice, "harness" | "model" | "roleId" | "basis" | "tier" | "benchmark" | "device" | "catalogCheckedAt">;
   preference: Preference;
   complexity: TaskComplexity;
   requiresImages: boolean;
