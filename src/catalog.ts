@@ -1,6 +1,8 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { readOpenCodeCatalog } from "./opencode.ts";
+import { readAntigravityCatalog } from "./antigravity.ts";
+import { workerHarnesses, type WorkerHarness } from "./contracts.ts";
 import type {
   AccountQuota,
   CatalogModel,
@@ -184,7 +186,7 @@ function empty(harness: HarnessCatalog["harness"]): HarnessCatalog {
     modelsMessage: modelFailure,
     modelsTruncated: false,
     quota: unavailableQuota(
-      harness === "claude" ? claudeQuota : harness === "muse" ? museQuota : harness === "opencode" ? opencodeQuota : quotaFailure,
+      harness === "claude" ? claudeQuota : harness === "muse" ? museQuota : harness === "opencode" ? opencodeQuota : harness === "codex" ? quotaFailure : `${harness} account limits are not available through its native metadata adapter. Check limits in the native harness.`,
     ),
   };
 }
@@ -611,9 +613,10 @@ export async function readClaudeCatalog(
   return result;
 }
 
+export type CatalogCommands = { codex: string | null; claude: string | null } & Partial<Record<Exclude<WorkerHarness, "codex" | "claude"> | "antigravity", string | null>>;
 export type CatalogReader = (
   project: Project,
-  commands: { codex: string | null; claude: string | null; muse?: string | null; opencode?: string | null },
+  commands: CatalogCommands,
   signal: AbortSignal,
 ) => Promise<CatalogSnapshot>;
 export const readCatalog: CatalogReader = async (
@@ -624,8 +627,11 @@ export const readCatalog: CatalogReader = async (
   projectId: project.id,
   checkedAt: new Date().toISOString(),
   harnesses: await Promise.all(
-    (["codex", "claude", "muse", "opencode"] as const).map(async (harness) => {
+    ([...workerHarnesses, "antigravity"] as const).map(async (harness) => {
       const command = commands[harness];
+      if (harness === "gemini" || harness === "cursor-agent" || harness === "zcode") return {
+        ...empty(harness), modelsMessage: command ? "Choose this harness explicitly to use its native default. Model pins are checked against the native session before a task starts. Automatic ranking is unavailable." : `${harness} CLI was not found. Its desktop app sign-in does not establish CLI sign-in.`,
+      };
       if (!command)
         return {
           ...empty(harness),
@@ -642,6 +648,7 @@ export const readCatalog: CatalogReader = async (
               return { ...catalog, auth };
             })()
           : harness === "muse" ? readMuseCatalog(command, project.path, signal)
+          : harness === "antigravity" ? readAntigravityCatalog(command, project.path, signal)
           : readOpenCodeCatalog(command, project.path, signal);
     }),
   ),
@@ -656,12 +663,7 @@ export class CatalogCache {
   private abort = new AbortController();
   constructor(
     private reader: CatalogReader,
-    private commands: {
-      codex: string | null;
-      claude: string | null;
-      muse?: string | null;
-      opencode?: string | null;
-    },
+    private commands: CatalogCommands,
     private now = Date.now,
   ) {}
   get(id: string) {

@@ -6,6 +6,7 @@ import type { Approval, CatalogModel, HarnessCatalog, Run } from "./contracts.ts
 import type { NativeCallbacks } from "./native.ts";
 import { composeWorkerPrompt } from "./prompt.ts";
 import { verifiedOpenCodeScope } from "./opencode-scope.ts";
+import { normalizeToolEvidence } from "./capabilities.ts";
 
 const object = (v: unknown): Record<string, any> | null => v && typeof v === "object" && !Array.isArray(v) ? v as Record<string, any> : null;
 const clean = (v: unknown, max: number) => typeof v === "string" && v.length <= max &&
@@ -145,6 +146,17 @@ export async function readOpenCodeCatalog(command: string, cwd: string, signal: 
     if (signal.aborted) return unavailable("OpenCode model refresh was cancelled.");
     const result = await Promise.race([host.client.provider.list({ directory: cwd }), timeout(8000, "OpenCode model refresh timed out")]);
     const models = openCodeModels(data(result));
+    // This endpoint has no agent/session scope. Show advertised names, keep
+    // effective worker support unknown, and never use it to satisfy routing.
+    if (typeof host.client.tool?.list === "function") {
+      for (let offset = 0; offset < Math.min(models.length, 12) && !signal.aborted; offset += 4) {
+        await Promise.allSettled(models.slice(offset, offset + 4).map(async model => {
+          const slash = model.id.indexOf("/");
+          const listed = await Promise.race([host.client.tool.list({ directory: cwd, provider: model.id.slice(0, slash), model: model.id.slice(slash + 1) }), timeout(1500, "Native tool metadata timed out")]);
+          model.toolEvidence = normalizeToolEvidence({ harness: "opencode", modelId: model.id, tools: data(listed), source: "native-model-metadata", checkedAt: new Date().toISOString(), complete: false });
+        }));
+      }
+    }
     return { ...unavailable(models.length ? "Native OpenCode models from connected providers. Access and billing are not verified." : "No connected text-and-tool OpenCode models were confirmed."),
       models, modelsStatus: models.length ? "available" : "unavailable", modelsTruncated: models.length >= 100 };
   } catch { return unavailable("OpenCode native model list could not be read. Check its CLI and provider setup."); }

@@ -1,7 +1,7 @@
 import { accessSync, constants, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join } from "node:path";
-import type { Project, Run, RunHandoff } from "./contracts.ts";
+import { workerHarnesses, type Project, type Run, type RunHandoff } from "./contracts.ts";
 import { verifyWorktree } from "./workspace.ts";
 import { openCodePathKeys, openCodeUnsetKeys, safeNativePath } from "./opencode-scope.ts";
 
@@ -11,13 +11,15 @@ const safePath = (value: string) => isAbsolute(value) && value.length <= 4096 &&
 const quote = (value: string) => `'${value.replaceAll("'", "'\"'\"'")}'`;
 
 export function runHandoff(run: Run, project: Project | undefined, busy: boolean, cli: string | null): RunHandoff {
-  const harness = run.harness === "codex" || run.harness === "claude" || run.harness === "muse" || run.harness === "opencode" ? run.harness : null;
+  const harness = run.harness && workerHarnesses.includes(run.harness) ? run.harness : null;
   const packet: RunHandoff = { runId: run.id, available: false, reason: null, harness,
     nativeSessionId: typeof run.threadId === "string" &&
       (harness === "opencode" ? openCodeSession : uuid).test(run.threadId) ? run.threadId : null,
     command: null, notes: [] };
   const unavailable = (reason: string) => ({ ...packet, reason });
   if (!harness) return unavailable("This run has no supported native harness.");
+  if (harness === "gemini" || harness === "cursor-agent") return unavailable("This ACP session has no verified native CLI resume command. Continue in its native harness.");
+  if (harness === "zcode") return unavailable("This ZCode session has no verified native CLI resume command. Continue in ZCode.");
   if (["running", "needs_attention"].includes(run.state)) return unavailable("The worker is still active.");
   if (!["completed", "failed", "cancelled", "interrupted"].includes(run.state))
     return unavailable("The run is not in a finished state.");

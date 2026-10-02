@@ -147,7 +147,7 @@ export async function install(p: ReturnType<typeof paths>, control: typeof launc
 async function operator(p: ReturnType<typeof paths>, entry: Install, route: string, body?: unknown) {
   const response = await fetch(`http://127.0.0.1:${entry.port}/api/operator/${route}`, {
     method: body === undefined ? "GET" : "POST",
-    headers: { "x-agentklar-operator-key": operatorKey(p.home), "x-agentklar-service-id": entry.id,
+    headers: { "connection": "close", "x-agentklar-operator-key": operatorKey(p.home), "x-agentklar-service-id": entry.id,
       ...(body === undefined ? {} : { "content-type": "application/json" }) },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     signal: AbortSignal.timeout(2500),

@@ -1,3 +1,4 @@
+import { workerHarnesses, type WorkerHarness } from "./contracts.ts";
 import { readUpdateMaintenance } from "./launchd.ts";
 import { currentVersion, checkUpdate, updateStatus } from "./update.ts";
 import { nativeInventory } from "./inventory.ts";
@@ -34,15 +35,20 @@ import { NativeWorker, type NativeCallbacks } from "./native.ts";
 import { ClaudeWorker } from "./claude.ts";
 import { MuseWorker } from "./muse.ts";
 import { OpenCodeWorker } from "./opencode.ts";
+import { AcpWorker } from "./acp.ts";
 import { captureOpenCodeScope } from "./opencode-scope.ts";
 import { CatalogCache, readCatalog, withObservedMuseQuota, type CatalogReader } from "./catalog.ts";
 import { BenchmarkCache } from "./benchmarks.ts";
 import type { Run, Project, ProjectRun, ProjectLead, RoutingDecision, FollowUpContext } from "./contracts.ts";
 import { sourceFromHeader } from "./launch-source.ts";
 import { recommendationSchema, recommendWorker, recommendWorkers, type RecommendationSource, selectedWorkerEligibility } from "./recommend.ts";
+import { toolCapabilities } from "./capabilities.ts";
+import { ZCodeWorker } from "./zcode.ts";
 import { Instructions, InstructionError, instructionFileSchema, instructionPreviewSchema } from "./instructions.ts";
 import { NativeSetup, SetupError, type NativeSetupOptions } from "./setup.ts";
 import { ProjectSkills, SkillError, skillPreviewInput, skillIdInput, skillRemoveInput } from "./skills.ts";
+import { NativePlugins, pluginPreviewInput } from "./plugins.ts";
+import { NativeSettings, NativeChangeError, nativeSettingHarness, nativeSettingInput, nativePreviewId, nativeChangeId } from "./native-settings.ts";
 import { runHandoff } from "./handoff.ts";
 import { createWorktree, gitBase, gitCheckout, plannedWorktree, verifyWorktree } from "./workspace.ts";
 import { projectRootIdentity } from "./project-root.ts";
@@ -102,13 +108,14 @@ export const startSchema = z
     prompt: z.string().trim().min(1).max(32000),
     idempotencyKey: z.string().min(1).max(200),
     roleId: z.string().optional(),
-    harness: z.enum(["codex", "claude", "muse", "opencode"]).optional(),
+    harness: z.enum(workerHarnesses).optional(),
     model: z.string().min(1).max(120).optional(),
     readOnly: z.boolean().default(false),
     includeProjectContext: z.boolean().default(true),
     routing: z.object({
       complexity: z.enum(["routine", "standard", "hard"]).default("standard"),
       requiresImages: z.boolean().default(false),
+      requiresTools: z.array(z.enum(toolCapabilities)).max(2).optional(),
       taskType: z.enum(["coding", "reasoning", "data-analysis", "language"]).default("coding"),
       deviceScope: z.enum(["local", "connected"]).optional(),
     }).strict().optional(),
@@ -169,6 +176,10 @@ export function createService(
       ? new MuseWorker(command, run, path, callbacks)
       : run.harness === "opencode"
       ? new OpenCodeWorker(command, run, path, callbacks, undefined, nativeEnv)
+      : run.harness === "gemini" || run.harness === "cursor-agent"
+      ? new AcpWorker(command, run, path, callbacks, run.harness)
+      : run.harness === "zcode"
+      ? new ZCodeWorker(command.endsWith(".cjs") ? process.execPath : command, run, path, callbacks, command.endsWith(".cjs") ? { args: [command, "app-server", "--stdio"] } : {})
       : new NativeWorker(command, run, path, callbacks),
   nativeCommand: string | null = executable("codex"),
   claudeCommand: string | null = executable("claude"),
@@ -181,6 +192,7 @@ export function createService(
   leadOptions: { now?: () => number; wallNow?: () => number; leaseMs?: number } = {},
   opencodeCommand: string | null = executable("opencode"),
   peerTransport?: PeerTransport,
+  acpCommands: Partial<Record<"gemini" | "cursor-agent" | "zcode", string | null>> = {},
 ) {
   const startupMaintenance = readUpdateMaintenance(home, operator?.id);
   const personalHome = realpathSync(skillOptions.userHome ?? homedir());
@@ -206,9 +218,13 @@ export function createService(
   claudeCommand = devices.selected("claude", claudeCommand);
   museCommand = devices.selected("muse", museCommand);
   opencodeCommand = devices.selected("opencode", opencodeCommand);
-  const commands: Record<string, string | null> = { codex: nativeCommand, claude: claudeCommand, muse: museCommand, opencode: opencodeCommand };
+  const commands: Record<WorkerHarness, string | null> = { codex: nativeCommand, claude: claudeCommand, muse: museCommand, opencode: opencodeCommand,
+    gemini: devices.selected("gemini", acpCommands.gemini === undefined ? executable("gemini") : acpCommands.gemini),
+    zcode: devices.selected("zcode", acpCommands.zcode === undefined ? executable("zcode") : acpCommands.zcode),
+    "cursor-agent": devices.selected("cursor-agent", acpCommands["cursor-agent"] === undefined ? executable("cursor-agent") : acpCommands["cursor-agent"]),
+  };
   const selectedHarnesses = () => harnesses().map((h) => Object.hasOwn(commands, h.id)
-    ? { ...h, executable: commands[h.id]!, available: !!commands[h.id], workerSupported: !!commands[h.id], hostSupported: !!commands[h.id] } : h);
+    ? { ...h, executable: commands[h.id as WorkerHarness]!, available: !!commands[h.id as WorkerHarness], workerSupported: !!commands[h.id as WorkerHarness], hostSupported: !!commands[h.id as WorkerHarness] } : h);
   const app = new Hono();
   const peerInternal = randomBytes(32).toString("hex");
   const peers = new Peers(store, devices.device, async (path, method = "GET", body) => {
@@ -231,7 +247,7 @@ export function createService(
   function appliedView(applied: ChangeApply) {
     const quote = (value: string) => `'${value.replaceAll("'", "'\"'\"'")}'`;
     const continuations = ["codex", "claude"].flatMap((harness) => {
-      const command = commands[harness];
+      const command = commands[harness as WorkerHarness];
       if (!command || !applied.workspace.path) return [];
       const variable = harness === "codex" ? "CODEX_HOME" : "CLAUDE_CONFIG_DIR";
       const profile = process.env[variable];
@@ -273,15 +289,24 @@ export function createService(
   }
   const instructions = new Instructions(store.db);
   const skills = new ProjectSkills(store.db, home, skillOptions);
+  const nativeDefaults = new NativeSettings(store.db, { codex: nativeCommand, claude: claudeCommand }, { env: setupOptions.env });
+  const nativePlugins = new NativePlugins(store.db, home, claudeCommand, { env: setupOptions.env });
+  const nativeOperations = new Set<Promise<unknown>>();
+  let nativeWrites = 0;
+  async function nativeOperation<T>(action: () => Promise<T>, write = false): Promise<T> {
+    if (quiesced || stopping) throw new NativeChangeError("Local service is stopping.", 503);
+    if (write) {
+      if (activeRuns().length || nativeWrites) throw new NativeChangeError("Wait for active workers and native changes to finish before changing native settings or plugins.", 409);
+      nativeWrites++;
+    }
+    const promise = Promise.resolve().then(action);
+    nativeOperations.add(promise);
+    try { return await promise; } finally { nativeOperations.delete(promise); if (write) nativeWrites--; }
+  }
   const personalSkills: Project = { id: "__personal_skills__", name: "Personal skills", path: personalHome, preference: "balanced", roles: [], createdAt: "" };
   const nativeSetup = new NativeSetup(store.db, home, port, { codex: nativeCommand, claude: claudeCommand, muse: museCommand, opencode: opencodeCommand, antigravity: executable("agy") }, setupOptions);
-  const catalogs = new CatalogCache(catalogReader, {
-    codex: nativeCommand,
-    claude: claudeCommand,
-    muse: museCommand,
-    opencode: opencodeCommand,
-  });
-  const installedWorkers = () => ({ codex: !!nativeCommand, claude: !!claudeCommand, muse: !!museCommand, opencode: !!opencodeCommand });
+  const catalogs = new CatalogCache(catalogReader, { ...commands, antigravity: executable("agy") });
+  const installedWorkers = () => Object.fromEntries(workerHarnesses.map(h => [h, !!commands[h]])) as Record<WorkerHarness, boolean>;
   const adviceSchema = recommendationSchema.extend({
     deviceScope: z.enum(["local", "connected"]).default("connected"),
     workspace: z.enum(["project", "worktree"]).optional(),
@@ -292,6 +317,7 @@ export function createService(
     return { selected: { harness: choice.harness, model: choice.model, roleId: choice.roleId, basis: choice.basis, tier: choice.tier,
       ...(choice.device ? { device: choice.device } : {}), ...(choice.catalogCheckedAt ? { catalogCheckedAt: choice.catalogCheckedAt } : {}), ...(choice.benchmark ? { benchmark: choice.benchmark } : {}) },
       preference: advice.preference, complexity: advice.complexity, taskType: advice.taskType, benchmarkMethod: advice.benchmarkMethod, requiresImages: advice.requiresImages,
+      ...(advice.requiresTools?.length ? { requiresTools: advice.requiresTools } : {}),
       catalogCheckedAt: choice.catalogCheckedAt || advice.catalogCheckedAt, policyVersion: advice.policyVersion,
       reasons: [...new Set([...choice.reasons,...advice.reasons])].slice(0,3), warnings: [...new Set([...choice.warnings,...advice.warnings])].slice(0,3) };
   }
@@ -425,7 +451,7 @@ export function createService(
     !!a &&
     Buffer.byteLength(a) === Buffer.byteLength(b) &&
     timingSafeEqual(Buffer.from(a), Buffer.from(b));
-  app.onError((e, c) => c.json({ error: e.message }, e instanceof ControlError || e instanceof ApprovalError || e instanceof PeerError || e instanceof ChangeError ? e.status as 400 : e instanceof InstructionError || e instanceof SetupError || e instanceof SkillError ? e.status : 500));
+  app.onError((e, c) => c.json({ error: e.message }, e instanceof ControlError || e instanceof ApprovalError || e instanceof PeerError || e instanceof ChangeError ? e.status as 400 : e instanceof InstructionError || e instanceof SetupError || e instanceof SkillError || e instanceof NativeChangeError ? e.status : 500));
   app.use("*", async (c, next) => {
     const host = c.req.header("host") || new URL(c.req.url).host;
     if (![`127.0.0.1:${port}`, "127.0.0.1:5173"].includes(host))
@@ -465,6 +491,8 @@ export function createService(
       return c.json({ error: "Only the trusted local UI may check AgentKlar updates" }, 403);
     if (c.req.path.includes("/setup/") && (!ui || mcp || (c.req.method !== "GET" && (!origin || !origins.has(origin)))))
       return c.json({ error: "Only the trusted local UI may read or change native MCP setup" }, 403);
+    if (/^\/api\/projects\/[^/]+\/(?:native-settings|plugins)(?:\/|$)/.test(c.req.path) && (!ui || mcp || (c.req.method !== "GET" && (!origin || !origins.has(origin)))))
+      return c.json({ error: "Only the trusted local UI may manage native defaults and plugins" }, 403);
     if (
       (c.req.path.startsWith("/api/approvals/") ||
         (c.req.path === "/api/native-installations" && c.req.method !== "GET") ||
@@ -567,6 +595,35 @@ export function createService(
     catch { return c.json({ error: "Public benchmark refresh failed. The last good scores are still available." }, 503); }
   });
   app.get("/api/projects", (c) => c.json(store.projects()));
+  for (const kind of ["native-settings", "plugins"] as const) {
+    app.use(`/api/projects/:id/${kind}/*`, async (c, next) => {
+      if (!z.uuid().safeParse(c.req.param("id")).success || new URL(c.req.url).search) return c.json({ error: "Invalid native management request" }, 400);
+      if (!store.projects().some(p => p.id === c.req.param("id"))) return c.json({ error: "Project not found" }, 404);
+      if (c.req.method !== "GET" && activeRuns().length) return c.json({ error: "Wait for active workers to finish before changing native settings or plugins." }, 409);
+      c.header("Cache-Control", "no-store");
+      return next();
+    });
+    for (const operation of ["preview", "apply", "undo"] as const) app.post(`/api/projects/:id/${kind}/${operation}`, async c => {
+      const schema = operation === "preview" ? (kind === "plugins" ? pluginPreviewInput : nativeSettingInput) : operation === "apply" ? nativePreviewId : nativeChangeId;
+      const input = schema.safeParse(await c.req.json().catch(() => null));
+      if (!input.success) return c.json({ error: "Invalid native change request" }, 400);
+      const project = store.projects().find(p => p.id === c.req.param("id"))!;
+      return c.json(await nativeOperation(async () => {
+        if (kind === "plugins") return operation === "preview" ? nativePlugins.preview(project) : operation === "apply" ? nativePlugins.apply(project, nativePreviewId.parse(input.data).previewId) : nativePlugins.undo(project, nativeChangeId.parse(input.data).changeId);
+        return operation === "preview" ? nativeDefaults.preview(project, nativeSettingInput.parse(input.data)) : operation === "apply" ? nativeDefaults.apply(project, nativePreviewId.parse(input.data).previewId) : nativeDefaults.undo(project, nativeChangeId.parse(input.data).changeId);
+      }, operation !== "preview"));
+    });
+  }
+  app.get("/api/projects/:id/plugins", async c => {
+    const project = store.projects().find(p => p.id === c.req.param("id"));
+    if (!project || new URL(c.req.url).search) return c.json({ error: "Project not found or invalid query" }, 404);
+    c.header("Cache-Control", "no-store"); return c.json(await nativeOperation(() => nativePlugins.status(project)));
+  });
+  app.get("/api/projects/:id/native-settings/:harness", async c => {
+    const harness = nativeSettingHarness.safeParse(c.req.param("harness"));
+    if (!harness.success) return c.json({ error: "Unsupported native settings harness" }, 400);
+    return c.json(await nativeOperation(() => nativeDefaults.read(store.projects().find(p => p.id === c.req.param("id"))!, harness.data)));
+  });
   app.get("/api/projects/:id/runs", (c) => {
     c.header("Cache-Control", "no-store");
     const projectId = c.req.param("id");
@@ -1020,7 +1077,7 @@ export function createService(
         { error: "Task harness must match the selected role harness." },
         400,
       );
-    if (selected && !["codex", "claude", "muse", "opencode"].includes(selected.harness))
+    if (selected && !(workerHarnesses as readonly string[]).includes(selected.harness))
       return c.json(
         { error: "This role harness has no worker adapter yet." },
         400,
@@ -1083,7 +1140,7 @@ export function createService(
     return c.json(devices.status(commands));
   });
   app.post("/api/native-installations", async (c) => {
-    const parsed = z.object({ harness: z.enum(["codex", "claude", "muse", "opencode"]), path: z.string().min(1).max(4096), fingerprint: z.string().regex(/^[a-f0-9]{64}$/) }).strict().safeParse(await c.req.json().catch(() => null));
+    const parsed = z.object({ harness: z.enum(workerHarnesses), path: z.string().min(1).max(4096), fingerprint: z.string().regex(/^[a-f0-9]{64}$/) }).strict().safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: "Choose a listed native installation." }, 400);
     if (stopping) return c.json({ error: "Local service is stopping." }, 503);
     if (!devices.save(parsed.data.harness, parsed.data.path, parsed.data.fingerprint)) return c.json({ error: "Installation changed or is no longer available. Refresh installations and choose again." }, 409);
@@ -1172,6 +1229,7 @@ export function createService(
     return c.json(updated);
   });
   app.post("/api/tasks/start", async (c) => {
+    if (nativeWrites) return c.json({ error: "A native settings or plugin change is still running. Retry after it finishes." }, 409);
     const parsed = startSchema.safeParse(await c.req.json().catch(() => null));
     if (quiesced || stopping) return c.json({ error: "Local service is stopping." }, 503);
     if (!parsed.success)
@@ -1185,6 +1243,7 @@ export function createService(
     if (!p) return c.json({ error: "Project not found" }, 404);
     const { includeProjectContext, ...originalInputs } = data;
     if (originalInputs.routing?.deviceScope === "connected") { const { deviceScope, ...routing } = originalInputs.routing; originalInputs.routing = routing; }
+    if (!data.followUp && originalInputs.routing?.requiresTools?.length === 0) { const { requiresTools, ...routing } = originalInputs.routing; originalInputs.routing = routing; }
     const launchHash = createHash("sha256")
       .update(
         JSON.stringify({
@@ -1216,11 +1275,16 @@ export function createService(
     if (data.followUp && data.readOnly !== (data.followUp.kind === "review"))
       return c.json({ error: "Reviews must be read only; fixes must allow workspace changes" }, 400);
     const remoteSource = data.followUp ? peers.list().find((item) => item.id === data.followUp!.runId) : undefined;
+    const sourceNeeds = remoteSource?.lastKnownRun?.routing ?? (data.followUp ? store.run(data.followUp.runId)?.routing : undefined);
+    if (data.followUp && sourceNeeds?.requiresTools?.length && data.routing?.requiresTools === undefined) {
+      data.routing = { complexity: data.routing?.complexity ?? "standard", taskType: data.routing?.taskType ?? "coding", requiresImages: data.routing?.requiresImages ?? sourceNeeds.requiresImages, ...data.routing, requiresTools: sourceNeeds.requiresTools };
+    }
     if (remoteSource && remoteSource.projectId !== p.id) return c.json({ error: "Linked dispatch not found in this project" }, 404);
     if (remoteSource && remoteRole && !remoteRole.peerId)
       return c.json({ error: "Linked remote work must stay on its owning computer. Prepare and apply a changes handoff before continuing locally." }, 409);
     const recheck = () => {
       if (quiesced || stopping) throw new PeerError("Local service is stopping.", 503);
+      if (nativeWrites) throw new PeerError("A native settings or plugin change is still running. Retry after it finishes.", 409);
       const local = store.existing(p.id, data.idempotencyKey);
       const remote = peers.existing(p.id, data.idempotencyKey);
       const existing = local || remote;
@@ -1237,7 +1301,7 @@ export function createService(
     if (data.routing && !data.roleId && !data.followUp && !data.routingEvidence) {
       if (data.workspace === "worktree") automaticBase = gitBase(p.path).baseCommit;
       const mappings = JSON.stringify(peers.settings().peers);
-      automaticAdvice = await deviceAdvice(p, adviceSchema.parse({ harness: data.harness, model: data.model, ...data.routing, workspace: data.workspace || "project", ...(c.req.header("x-agentklar-peer-internal") === peerInternal ? { deviceScope: "local" } : {}) }));
+      automaticAdvice = await deviceAdvice(p, adviceSchema.parse({ harness: data.harness, model: data.model, ...data.routing, readOnly: data.readOnly, workspace: data.workspace || "project", ...(c.req.header("x-agentklar-peer-internal") === peerInternal ? { deviceScope: "local" } : {}) }));
       const replay = recheck(); if (replay) return c.json(replay);
       if (mappings !== JSON.stringify(peers.settings().peers)) return c.json({ error: "Saved computer mappings changed during selection. Start again." }, 409);
       if (automaticBase && gitBase(p.path).baseCommit !== automaticBase) return c.json({ error: "Source Git HEAD changed during selection. Start again." }, 409);
@@ -1272,7 +1336,7 @@ export function createService(
       return c.json(await peers.start({ peerId: mappingId, idempotencyKey: data.idempotencyKey, baseCommit,
         task: { prompt, harness, model, readOnly: data.readOnly, includeProjectContext: false,
           ...(source && data.followUp ? { followUp: { runId: source.dispatch.ownerRunId!, kind: data.followUp.kind } } : {}),
-          ...(automaticRouting ? { routingEvidence: automaticRouting } : data.routing ? { routing: { complexity: data.routing.complexity, requiresImages: data.routing.requiresImages, taskType: data.routing.taskType } } : {}) } }, launchHash, data.prompt), 202);
+          ...(automaticRouting ? { routingEvidence: automaticRouting } : data.routing ? { routing: { complexity: data.routing.complexity, requiresImages: data.routing.requiresImages, ...(data.routing.requiresTools !== undefined ? { requiresTools: data.routing.requiresTools } : {}), taskType: data.routing.taskType } } : {}) } }, launchHash, data.prompt), 202);
     }
     if (data.followUp) {
       const linked = linkedSource(p.id, data.followUp);
@@ -1288,6 +1352,7 @@ export function createService(
       projectId: p.id, workspace: { kind: "project", path: p.path },
     } as Run : null);
     const busyError = () => {
+      if (nativeWrites) return "A native settings or plugin change is still running. Retry after it finishes.";
       if (activeRuns(p.id).length >= 2) return "Project already has two active workers.";
       if (target && activeRuns().some((r) => sameWorkspace(r, target)))
         return workspaceChoice === "project"
@@ -1308,16 +1373,16 @@ export function createService(
         400,
       );
     let harness = data.harness || selected?.harness || "codex";
-    if (!["codex", "claude", "muse", "opencode"].includes(harness))
+    if (!(workerHarnesses as readonly string[]).includes(harness))
       return c.json({ error: "This harness has no worker adapter yet." }, 400);
-    if ((harness === "muse" || harness === "opencode") && data.readOnly)
-      return c.json({ error: `${harness === "muse" ? "Muse" : "OpenCode"} cannot enforce read-only work. Choose Codex or Claude Code for a review.` }, 400);
+    if (harness !== "codex" && harness !== "claude" && data.readOnly)
+      return c.json({ error: `${harness} cannot enforce read-only work. Choose Codex or Claude Code for a review.` }, 400);
     let model = data.model || selected?.model;
     let routing: RoutingDecision | undefined = data.routingEvidence;
     if (data.routing && !data.routingEvidence) {
       let advice;
       try {
-        advice = automaticAdvice ?? await deviceAdvice(p, adviceSchema.parse({ roleId: data.roleId, harness: data.harness, model: data.model, ...data.routing, workspace: workspaceChoice, followUp: data.followUp }));
+        advice = automaticAdvice ?? await deviceAdvice(p, adviceSchema.parse({ roleId: data.roleId, harness: data.harness, model: data.model, ...data.routing, readOnly: data.readOnly, workspace: workspaceChoice, followUp: data.followUp }));
       } catch {
         if (quiesced || stopping) return c.json({ error: "Local service is stopping." }, 503);
         return c.json({ error: "Native routing evidence could not be read. Retry or choose a model manually." }, 503);
@@ -1348,8 +1413,8 @@ export function createService(
       const choice = advice.choice;
       harness = choice.harness;
       model = choice.model;
-      if ((harness === "muse" || harness === "opencode") && data.readOnly)
-        return c.json({ error: `${harness === "muse" ? "Muse" : "OpenCode"} cannot enforce read-only work. Choose Codex or Claude Code for a review.` }, 400);
+      if (harness !== "codex" && harness !== "claude" && data.readOnly)
+        return c.json({ error: `${harness} cannot enforce read-only work. Choose Codex or Claude Code for a review.` }, 400);
       routing = decisionFor(advice);
     }
     if (data.routingEvidence) {
@@ -1358,15 +1423,17 @@ export function createService(
         return c.json({ error: "Selected remote model or owner differs from the scoped routing evidence." }, 409);
       const catalog = withObservedMuseQuota(await catalogs.refresh(p), store.runs());
       const replay = recheck(); if (replay) return c.json(replay);
-      const eligible = selectedWorkerEligibility({ harness: harness as RoutingDecision["selected"]["harness"], model: model! }, { catalog, installed: installedWorkers() }, evidence.requiresImages, Date.now(), evidence.selected.basis);
+      const eligible = selectedWorkerEligibility({ harness: harness as RoutingDecision["selected"]["harness"], model: model! }, { catalog, installed: installedWorkers() }, evidence.requiresImages || Boolean(data.routing?.requiresImages), Date.now(), evidence.selected.basis, { requiresTools: [...new Set([...(evidence.requiresTools || []), ...(data.routing?.requiresTools || [])])], readOnly: data.readOnly });
       if (!eligible.eligible) return c.json({ error: `Selected remote worker is no longer eligible: ${eligible.reason}. No replacement was started.` }, 409);
+      const required = [...new Set([...(evidence.requiresTools || []), ...(data.routing?.requiresTools || [])])];
+      routing = { ...evidence, requiresImages: evidence.requiresImages || Boolean(data.routing?.requiresImages), ...(required.length ? { requiresTools: required } : {}) };
       const busy = busyError(); if (busy) return c.json({ error: busy }, 409);
     }
-    const command = harness === "claude" ? claudeCommand : harness === "muse" ? museCommand : harness === "opencode" ? opencodeCommand : nativeCommand;
+    const command = commands[harness as WorkerHarness];
     if (!command)
       return c.json(
         {
-          error: `Install ${harness === "claude" ? "Claude Code" : harness === "muse" ? "Muse" : harness === "opencode" ? "OpenCode" : "Codex"} and set up its native CLI first.`,
+          error: `Install ${harnesses().find(h => h.id === harness)?.name || harness} and set up its native CLI first.`,
         },
         409,
       );
@@ -1426,7 +1493,7 @@ export function createService(
     }
     const r: Run = {
       id: runId,
-      harness: harness as "codex" | "claude" | "muse" | "opencode",
+      harness: harness as WorkerHarness,
       projectId: p.id,
       roleId: data.roleId,
       prompt: data.prompt,
@@ -1455,13 +1522,15 @@ export function createService(
       updatedAt: now,
       launchHash,
     };
+    const finalBusy = busyError();
+    if (finalBusy) return c.json({ error: finalBusy }, 409);
     store.insertRun(r, data.idempotencyKey);
     store.event(
       r.id,
       "started",
       workspace.kind === "worktree" && !workspace.verified && !workspace.nativeName
         ? "Preparing separate Git worktree."
-        : `${harness === "claude" ? "Claude Code" : harness === "muse" ? "Muse" : harness === "opencode" ? "OpenCode" : "Codex"} worker started.`,
+        : `${harnesses().find(h => h.id === harness)?.name || harness} worker started.`,
     );
     queueMicrotask(() => {
       const callbacks: NativeCallbacks = {
@@ -1700,6 +1769,7 @@ export function createService(
       quiesced = true;
       leads.clear();
       return closing ??= (async () => {
+        await Promise.allSettled([...nativeOperations]);
         await skills.close();
         await nativeSetup.close();
         await catalogs.close();

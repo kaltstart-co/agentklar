@@ -4,9 +4,9 @@ import { hostname } from "node:os";
 import { spawnSync } from "node:child_process";
 import type { DatabaseSync } from "node:sqlite";
 import { executables } from "./harnesses.ts";
-import type { NativeInstallation, NativeInstallationStatus } from "./contracts.ts";
+import { workerHarnesses, type NativeInstallation, type NativeInstallationStatus } from "./contracts.ts";
 
-export const workerHarnesses = ["codex", "claude", "muse", "opencode"] as const;
+export { workerHarnesses };
 const versions = new Map<string, string | null>();
 export function installationFingerprint(path: string): string | null {
   try {

@@ -4,6 +4,13 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 
 ## Working
 
+- [x] Claude plugin bundle
+- [x] Native default preview and Undo
+- [x] OpenCode provider filter
+- [x] Tool requirement checks
+- [x] Worker tool observations
+- [x] Antigravity grouped quotas
+
 - [x] Project folders
 - [x] Team roles
 - [x] Role responsibilities
@@ -15,6 +22,7 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 - [x] Native CLI choice
 - [x] Antigravity CLI discovery
 - [x] Device pairing UI
+- [x] Real two-computer setup
 - [x] Remote role pins
 - [x] Automatic cross-device candidates
 - [x] Remote status and history
@@ -37,6 +45,7 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 - [x] Launch source labels
 - [x] Active lead presence (advisory)
 - [x] Main-harness handoff
+- [x] Native cross-harness proof
 - [x] Optional coordinated control
 - [x] Compact status
 - [x] Run usage
@@ -70,11 +79,7 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 
 ## Required, unfinished
 
-- [ ] Native cross-harness proof
 - [ ] Complete account quotas
-- [ ] Gemini and Cursor workers
+- [ ] Gemini and Cursor proof
 - [ ] ZCode worker
 - [ ] Antigravity worker
-- [ ] Plugin bundles
-- [ ] Wider config preview and rollback
-- [ ] Real two-computer setup

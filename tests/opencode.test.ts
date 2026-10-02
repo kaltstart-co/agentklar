@@ -8,6 +8,7 @@ import { OpenCodeWorker, openCodeApproval, openCodeDbPath, openCodeModels, readO
 import { createService, processGroupAlive } from "../src/service.ts";
 import type { Approval, Run } from "../src/contracts.ts";
 import { captureOpenCodeScope } from "../src/opencode-scope.ts";
+import { satisfiesRequiredTools } from "../src/capabilities.ts";
 
 const pause = () => new Promise<void>(resolve => setTimeout(resolve, 5));
 async function until(check: () => boolean) { for (let n = 0; n < 200; n++) { if (check()) return; await pause(); } assert.fail("timed out"); }
@@ -19,6 +20,19 @@ const models = { connected: ["opencode"], default: { opencode: "mimo-free" }, al
 ] };
 const baseRun = (readOnly = false): Run => ({ id: randomUUID(), projectId: randomUUID(), harness: "opencode", prompt: "fixture task",
   readOnly, state: "running", result: "", tokens: null, createdAt: "now", updatedAt: "now" });
+
+test("OpenCode model tools remain advertised metadata without agent or session coverage", async () => {
+  const requests: unknown[] = [];
+  const catalog = await readOpenCodeCatalog("fixture", "/tmp/project", new AbortController().signal, async () => ({
+    client: { provider: { list: async () => ({ data: models }) }, tool: { list: async (request: unknown) => { requests.push(request); return { data: [{ id: "websearch", description: "PRIVATE", parameters: { secret: "PRIVATE" } }] }; } } } as any,
+    close: async () => {}, exited: new Promise<void>(() => {}),
+  }));
+  assert.deepEqual(requests, [{ directory: "/tmp/project", provider: "opencode", model: "mimo-free" }]);
+  const tools = catalog.models[0].toolEvidence;
+  assert.deepEqual(tools?.tools, ["websearch"]); assert.equal(tools?.complete, false);
+  assert.equal(satisfiesRequiredTools(tools, "opencode/mimo-free", ["web_search"]), false);
+  assert.doesNotMatch(JSON.stringify(catalog), /PRIVATE/);
+});
 
 function fake(readOnly = false) {
   let run = baseRun(readOnly);

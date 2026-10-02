@@ -1,9 +1,12 @@
+import { workerHarnesses } from "../src/contracts.js";
+import { type ToolCapability } from "../src/capabilities.js";
 import { SetupGuide } from "./SetupGuide.js";
 import { AgentKlarUpdates } from "./AgentKlarUpdates.js";
 import { NativeInventory } from "./NativeInventory.js";
 import { ProjectHandoff } from "./ProjectHandoff.js";
 import { useEffect, useRef, useState } from "react";
 import { NativeSetupForm } from "./NativeSetupForm.js";
+import { NativePreferences } from "./NativePreferences.js";
 import { NativeInstallations } from "./NativeInstallations.js";
 import { GitChanges } from "./GitChanges.js";
 import { RemoteApprovals, type PendingHumanAnswer } from "./RemoteApprovals.js";
@@ -118,6 +121,8 @@ export function App() {
     "result" | "resultTruncated"
   > | null>(null);
   const [search, setSearch] = useState("");
+  const [modelSearch, setModelSearch] = useState("");
+  const [openCodeProvider, setOpenCodeProvider] = useState<string | null>(null);
   const [status, setStatus] = useState("all");
   const [error, setError] = useState("");
   const [connectionError, setConnectionError] = useState("");
@@ -140,6 +145,9 @@ export function App() {
   const [complexity, setComplexity] = useState<WorkerAdvice["complexity"]>("standard");
   const [taskType, setTaskType] = useState<TaskType>("coding");
   const [requiresImages, setRequiresImages] = useState(false);
+  const [requiresTools, setRequiresTools] = useState<ToolCapability[]>([]);
+  const [inheritedToolRequirements, setInheritedToolRequirements] = useState(false);
+  const [nativePreferencesOpen, setNativePreferencesOpen] = useState(false);
   const [advice, setAdvice] = useState<{ key: string; data: WorkerAdvice } | null>(null);
   const [adviceBusy, setAdviceBusy] = useState("");
   const [adviceError, setAdviceError] = useState<{ key: string; message: string } | null>(null);
@@ -159,6 +167,7 @@ export function App() {
   const remoteRun = snapshot.remoteDispatches?.find((r) => r.id === runId && r.projectId === projectId);
   const projectPeers = snapshot.peers?.filter((p) => p.projectId === projectId) || [];
   const catalog = catalogs[projectId];
+  const openCodeProviders = [...new Set(catalog?.harnesses.find(h => h.harness === "opencode")?.models.map(m => m.id.split("/")[0]) || [])].sort();
   const modelChoices = (id: string, forProjectId = projectId) =>
     catalogs[forProjectId]?.harnesses
       .find((h) => h.harness === id)
@@ -166,6 +175,7 @@ export function App() {
   const workers = snapshot.harnesses.filter((h) => h.workerSupported);
   const selectedRole = taskProject?.roles.find((r) => r.id === roleId);
   const taskHarness = selectedRole?.harness || harness;
+  const nativeOnlyWorker = ["muse", "opencode", "gemini", "cursor-agent", "zcode"].includes(taskHarness);
   const remoteFollowUp = followUp ? snapshot.remoteDispatches?.find((item) => item.id === followUp.runId) : undefined;
   const remoteRole = Boolean(selectedRole?.peerId || remoteFollowUp);
   const followUpPeer = remoteFollowUp ? snapshot.peers?.find((p) => p.id === remoteFollowUp.peerId) : undefined;
@@ -175,10 +185,10 @@ export function App() {
   const museModel = taskHarness === "muse" ? museModels.find((item) => item.id === (model.trim() || selectedRole?.model)) ||
     (!model.trim() && !selectedRole?.model ? museModels.find((item) => item.isDefault) : undefined) : undefined;
   useEffect(() => {
-    if (taskHarness === "muse" || taskHarness === "opencode") setAutomaticRouting(false);
+    if (nativeOnlyWorker) setAutomaticRouting(false);
   }, [taskHarness]);
   useEffect(() => {
-    if (remoteRole || !taskModal || (taskHarness !== "muse" && taskHarness !== "opencode") || !connected || !draftProjectId ||
+    if (remoteRole || !taskModal || !nativeOnlyWorker || !connected || !draftProjectId ||
         catalogs[draftProjectId]?.harnesses.some((entry) => entry.harness === taskHarness)) return;
     let active = true;
     setCatalogBusy(draftProjectId);
@@ -190,7 +200,7 @@ export function App() {
   }, [taskModal, taskHarness, connected, draftProjectId]);
   const adviceKey = JSON.stringify([
     draftProjectId, roleId, taskHarness, model, selectedRole?.model,
-    taskProject?.preference, complexity, requiresImages, taskType, taskModal, connected,
+    taskProject?.preference, complexity, requiresImages, requiresTools, readOnly, taskType, taskModal, connected,
     deviceScope, workspace, followUp, prompt, selectedRole?.peerId,
   ]);
   const currentAdviceKey = useRef(adviceKey);
@@ -219,6 +229,7 @@ export function App() {
         model: model.trim() || undefined,
         complexity,
         requiresImages,
+        requiresTools, readOnly,
         taskType,
         deviceScope, workspace, followUp: followUp || undefined,
       });
@@ -265,6 +276,9 @@ export function App() {
       ? "Review the linked work. Check the changes and report concrete findings with file paths and lines."
       : "Fix the findings in the linked review. Check the result and explain what changed.") : "");
     setReadOnly(source ? kind === "review" : true);
+    setRequiresTools(source?.routing?.requiresTools || []);
+    setInheritedToolRequirements(Boolean(source?.routing?.requiresTools?.length));
+    setRequiresImages(source?.routing?.requiresImages || false);
     setWorkspace(source?.workspace?.kind || "project");
     setRoleId(null);
     setHarness(source?.harness || "automatic");
@@ -278,6 +292,9 @@ export function App() {
     setFollowUp({ runId: source.id, kind });
     setPrompt(kind === "review" ? "Review the linked work. Check the changes and report concrete findings with file paths and lines." : "Fix the findings in the linked review. Check the result and explain what changed.");
     setReadOnly(kind === "review"); setWorkspace("worktree"); setRoleId(null);
+    setRequiresTools(source.lastKnownRun?.routing?.requiresTools || source.routing?.requiresTools || []);
+    setInheritedToolRequirements(Boolean((source.lastKnownRun?.routing?.requiresTools || source.routing?.requiresTools)?.length));
+    setRequiresImages(source.lastKnownRun?.routing?.requiresImages || source.routing?.requiresImages || false);
     setHarness(source.lastKnownRun?.harness || "codex"); setModel(""); setTaskModal(true);
   }
   async function refresh() {
@@ -774,6 +791,7 @@ export function App() {
                             {!run.workspace.path && run.workspace.plannedPath ? ` Expected folder: ${run.workspace.plannedPath}.` : ""}
                           </p>}
                           {run.harness === "muse" && <MuseSubscriptionUsageView usage={run.museSubscriptionUsage} />}
+                          {run.nativeTools && <details><summary>Tools reported by this worker</summary><p className="hint">{run.nativeTools.message} Observed {new Date(run.nativeTools.checkedAt).toLocaleString()}.</p><p>{run.nativeTools.tools.join(", ") || "No tool names confirmed."}</p></details>}
                           {linkedRuns.length > 1 && (
                             <div>
                               <strong>Linked work</strong>
@@ -1015,8 +1033,8 @@ export function App() {
                           label="Harness"
                           value={role.harness}
                           data={[
-                            ...(role.peerId ? ["codex", "claude", "muse", "opencode"].map((id) => ({ value: id, label: harnessName(id) })) : workers.map((h) => ({ value: h.id, label: h.name }))),
-                            ...(![...(role.peerId ? ["codex", "claude", "muse", "opencode"] : workers.map((h) => h.id))].includes(role.harness) && !workers.some((h) => h.id === role.harness)
+                            ...(role.peerId ? workerHarnesses.map((id) => ({ value: id, label: harnessName(id) })) : workers.map((h) => ({ value: h.id, label: h.name }))),
+                            ...(![...(role.peerId ? workerHarnesses : workers.map((h) => h.id))].includes(role.harness) && !workers.some((h) => h.id === role.harness)
                               ? [{ value: role.harness, label: `${harnessName(role.harness)} (worker unavailable)`, disabled: true }]
                               : []),
                           ]}
@@ -1128,14 +1146,21 @@ export function App() {
                   verify sign-in or account access. Any prices in vendor
                   descriptions are API prices, not your subscription bill.
                 </p>
+                <p className="hint">Image input belongs to the model. Search and image generation need tools in the native session. Tool names advertised by a provider do not prove effective agent settings or permission to use them.</p>
                 {catalogHeader}
+                <TextInput label="Find a model" placeholder="Search by model name or ID" value={modelSearch} onChange={event => setModelSearch(event.currentTarget.value)} />
                 <Benchmarks connected={connected} snapshot={benchmarks} onChange={setBenchmarks} />
                 {catalog?.harnesses.map((entry) => (
                   <div className="role-card" key={entry.harness}>
                     <h3>{harnessName(entry.harness)}</h3>
+                    <p className="hint">Effective tools are unknown before a worker starts.{entry.harness === "claude" ? " Read-only workers have only Read, Glob and Grep." : ""}</p>
+                    {entry.harness === "opencode" && <Stack gap="xs">
+                      <p className="hint">Use the providers already connected in OpenCode. Add accounts in OpenCode, then refresh this list.</p>
+                      {openCodeProviders.length > 0 && <Select label="OpenCode provider" placeholder="All connected providers" clearable searchable value={openCodeProviders.includes(openCodeProvider || "") ? openCodeProvider : null} data={openCodeProviders} onChange={setOpenCodeProvider} />}
+                    </Stack>}
                     {entry.auth && <Alert color={entry.auth.status === "sign_in_required" ? "orange" : "blue"}>{entry.auth.message}</Alert>}
                     {entry.modelsMessage &&
-                      (entry.harness === "muse" || entry.modelsStatus === "unavailable" ||
+                      (entry.harness === "muse" || entry.harness === "opencode" || entry.modelsStatus === "unavailable" ||
                         entry.modelsTruncated) && (
                         <p className="hint">{entry.modelsMessage}</p>
                       )}
@@ -1147,7 +1172,8 @@ export function App() {
                         The native model list was shortened.
                       </Alert>
                     )}
-                    {entry.models.map((item) => (
+                    {entry.models.filter(item => `${item.name} ${item.id}`.toLowerCase().includes(modelSearch.trim().toLowerCase()) &&
+                      (entry.harness !== "opencode" || !openCodeProviders.includes(openCodeProvider || "") || item.id.startsWith(`${openCodeProvider}/`))).map((item) => (
                       <div className="catalog-model" key={item.id}>
                         <Group gap="xs">
                           <strong>{item.name}</strong>
@@ -1166,6 +1192,7 @@ export function App() {
                             : "Unknown"}
                         </p>
                         {item.description && <p>{item.description}</p>}
+                        {item.toolEvidence && <details><summary>Advertised native tools</summary><p className="hint">{item.toolEvidence.message} Effective agent and session access is unknown.</p><p>{item.toolEvidence.tools.join(", ") || "No tool names confirmed."}</p></details>}
                         <BenchmarkDetail snapshot={benchmarks} harness={entry.harness} model={item.resolvedModel || item.id} />
                       </div>
                     ))}
@@ -1292,6 +1319,7 @@ export function App() {
                   <div className="settings-advanced">
                     <h3>Advanced</h3>
                     <p className="hint">Inspect native files, manage other computers, or use manual startup.</p>
+                    {project && <details className="settings-disclosure" open={nativePreferencesOpen} onToggle={event => setNativePreferencesOpen(event.currentTarget.open)}><summary>Native defaults and plugin bundles</summary><div className="disclosure-body">{nativePreferencesOpen && <NativePreferences key={`preferences-${project.id}`} projectId={project.id} connected={connected} request={api} />}</div></details>}
                     {project && <NativeInventory key={`inventory-${project.id}`} projectId={project.id} connected={connected} request={api} />}
                     <details className="settings-disclosure"><summary>Connected computers and remote approvals</summary><div className="disclosure-body"><Devices device={snapshot.device} projects={snapshot.projects} connected={connected} request={api} /></div></details>
                     <details className="settings-disclosure"><summary>Startup and manual MCP setup</summary><div className="disclosure-body">
@@ -1299,7 +1327,7 @@ export function App() {
                       <h4>Other MCP hosts</h4><pre>{snippet}</pre>
                     </div></details>
                     <details className="settings-disclosure"><summary>Installed harness support</summary><div className="disclosure-body">
-                      {snapshot.harnesses.map(h => <div className="harness" key={h.id}><div><strong>{h.name}</strong><p>{h.reason}</p>{h.executable && <p className="hint">Current CLI: {h.executable}</p>}</div><Badge color={h.available ? "teal" : "gray"} variant="light">{h.available ? "Installed" : "Not found"}</Badge><span>{h.workerSupported ? "Worker supported" : h.hostSupported ? "MCP host" : "Discovery only"}</span></div>)}
+                      {snapshot.harnesses.map(h => <div className="harness" key={h.id}><div><strong>{h.name}</strong><p>{h.reason}</p>{h.executable && <p className="hint">Current CLI: {h.executable}</p>}</div><Badge color={h.available ? "teal" : "gray"} variant="light">{h.available ? "Installed" : "Not found"}</Badge><span>{h.workerSupported ? (["gemini", "cursor-agent", "zcode"].includes(h.id) ? "Experimental worker" : "Worker supported") : h.hostSupported ? "MCP host" : "Discovery only"}</span></div>)}
                       <p className="hint">Installed means the executable was found. Sign in through your native harness before starting a worker.</p>
                     </div></details>
                   </div>
@@ -1370,7 +1398,7 @@ export function App() {
                 roleId: roleId || undefined,
                 harness: taskHarness === "automatic" ? undefined : taskHarness,
                 model: model.trim() || undefined,
-                ...(automaticRouting ? { routing: { complexity, requiresImages, taskType, deviceScope } } : {}),
+                ...(automaticRouting || requiresTools.length || followUp && inheritedToolRequirements ? { routing: { complexity, requiresImages, requiresTools, taskType, deviceScope } } : {}),
                 readOnly,
                 includeProjectContext,
                 ...(followUp ? { followUp } : {}),
@@ -1420,7 +1448,7 @@ export function App() {
               value={taskHarness}
               disabled={Boolean(selectedRole)}
               placeholder="No installed worker harness"
-              data={!selectedRole && !followUp && automaticRouting ? [{value:"automatic",label:"Automatic"}, ...["codex", "claude", "muse", "opencode"].map((id) => ({value:id,label:harnessName(id)}))] : remoteRole ? ["codex", "claude", "muse", "opencode"].map((id) => ({ value: id, label: harnessName(id) })) : workers.map((h) => ({ value: h.id, label: h.name }))}
+              data={!selectedRole && !followUp && automaticRouting ? [{value:"automatic",label:"Automatic"}, ...workerHarnesses.map((id) => ({value:id,label:harnessName(id)}))] : remoteRole ? workerHarnesses.map((id) => ({ value: id, label: harnessName(id) })) : workers.map((h) => ({ value: h.id, label: h.name }))}
               onChange={(id) => {
                 setHarness(id || "codex");
                 setModel("");
@@ -1433,7 +1461,7 @@ export function App() {
               <Alert color="orange">
                 {selectedRole
                   ? "This role does not have an installed, supported worker harness. Choose another role or change it in Team."
-                  : "Install Codex, Claude Code, Muse or OpenCode to start a worker."}
+                  : "Connect a supported native CLI on this computer to start a worker."}
               </Alert>
             )}
             <Autocomplete
@@ -1507,6 +1535,9 @@ export function App() {
                   Checks model image support. Browser and tool access depend on
                   the native harness.
                 </p>
+                <Checkbox label="Web search required" checked={requiresTools.includes("web_search")} onChange={event => { const checked = event.currentTarget.checked; setRequiresTools(current => checked ? [...current.filter(item => item !== "web_search"), "web_search"] : current.filter(item => item !== "web_search")); }} />
+                <Checkbox label="Image generation required" checked={requiresTools.includes("image_generation")} onChange={event => { const checked = event.currentTarget.checked; setRequiresTools(current => checked ? [...current.filter(item => item !== "image_generation"), "image_generation"] : current.filter(item => item !== "image_generation")); }} />
+                {requiresTools.length > 0 && <p className="hint">Required tools need fresh effective worker evidence. Unknown support blocks the start. Use your native session for tools that AgentKlar cannot verify yet.</p>}
                 {remoteRole && <p className="hint">{remoteFollowUp && !selectedRole ? "Owner model choice is checked when you start. Choose a saved role on this owner for a model preview." : "Model preview reads the owner computer's native catalog. Automatic choice is checked again there when you start."}</p>}
                 <Button
                   variant="light"
@@ -1598,8 +1629,8 @@ export function App() {
               disabled={!!followUp}
               onChange={(e) => setReadOnly(e.currentTarget.checked)}
             />
-            {(taskHarness === "muse" || taskHarness === "opencode") && <p className="hint">{harnessName(taskHarness)} cannot enforce read-only work. Turn off Read only for a regular task, or choose Codex or Claude Code for a review.</p>}
-            {readOnly && taskHarness !== "muse" && taskHarness !== "opencode" && (
+            {nativeOnlyWorker && <p className="hint">{harnessName(taskHarness)} cannot enforce read-only work. Turn off Read only for a regular task, or choose Codex or Claude Code for a review.</p>}
+            {readOnly && !nativeOnlyWorker && (
               <p className="hint">
                 {taskHarness === "claude"
                   ? "Claude can use only Read, Glob and Grep tools. Your configured hooks can still run. This does not add an operating system sandbox."
@@ -1610,7 +1641,7 @@ export function App() {
               {taskHarness === "automatic" ? "Chooses a native worker" : `Runs a native ${harnessName(taskHarness)} worker`} in {taskProject?.name}
               . Native permission requests appear {remoteRole || connectedRouting ? "in AgentKlar on the owner computer" : "in the task detail"}.
             </p>
-            <Button type="submit" loading={busy} disabled={!taskWorker || !taskProject || ((taskHarness === "muse" || taskHarness === "opencode") && readOnly)}>
+            <Button type="submit" loading={busy} disabled={!taskWorker || !taskProject || (nativeOnlyWorker && readOnly)}>
               Start worker
             </Button>
           </Stack>

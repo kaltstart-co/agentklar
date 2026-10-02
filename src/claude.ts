@@ -13,6 +13,7 @@ import type { Run } from "./contracts.ts";
 import type { NativeCallbacks } from "./native.ts";
 import { composeWorkerPrompt } from "./prompt.ts";
 import { verifyNativeWorktree } from "./workspace.ts";
+import { normalizeToolEvidence, readOnlyClaudeToolEvidence } from "./capabilities.ts";
 
 const reads = ["Read", "Glob", "Grep"];
 const actions = {
@@ -216,6 +217,7 @@ export class ClaudeWorker {
       this.callbacks.update({
         threadId: m.session_id,
         effectiveModel: m.model,
+        nativeTools: this.run.readOnly ? readOnlyClaudeToolEvidence(m.model, new Date().toISOString()) : normalizeToolEvidence({ harness: "claude", modelId: m.model, tools: m.tools, source: "native-session", checkedAt: new Date().toISOString(), complete: true }),
       });
     }
     if (m.type === "assistant") {

@@ -17,6 +17,13 @@ const makeRun = (projectId: string, overrides: Partial<Run> = {}): Run => ({
   nativeHome: "/tmp/native home", ...overrides,
 });
 
+test("ZCode handoff never emits a Claude resume command", () => {
+  const packet = runHandoff(makeRun(randomUUID(), { harness: "zcode" }), undefined, false, "/tmp/zcode.cjs");
+  assert.equal(packet.available, false);
+  assert.equal(packet.command, null);
+  assert.match(packet.reason!, /ZCode.*no verified native CLI resume/);
+});
+
 test("native handoff uses fixed argv and quotes every POSIX shell value", () => {
   const root = mkdtempSync(join(tmpdir(), "agentklar-handoff-"));
   try {

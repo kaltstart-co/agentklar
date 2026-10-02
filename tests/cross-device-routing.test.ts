@@ -71,6 +71,30 @@ test("connected routing preserves exact owner, scope, replay and native eligibil
  const pendingOwner=call(owner,ownerPort)("/api/peer","POST",{version:1,sourceDeviceId:ld.id,targetDeviceId:od.id,grantId:delayedGrant.id,token:delayedGrant.token,operation:"start",requestId:randomUUID(),baseCommit:originalBase,task:{prompt:"exact base",harness:"codex",model:"gpt-6.1-sol",readOnly:false,routingEvidence:started.body.routing}});
  await new Promise(r=>setTimeout(r,20));writeFileSync(join(delayedPath,"later.txt"),"later");git("-C",delayedPath,"config","user.email","test@example.test");git("-C",delayedPath,"config","user.name","Test");git("-C",delayedPath,"add",".");git("-C",delayedPath,"commit","-m","advanced during metadata");release();gate=undefined;
  const ownerRejected=await pendingOwner;assert.equal(ownerRejected.status,409);assert.match(ownerRejected.body.error,/HEAD changed/);assert.equal(remoteStarts,priorStarts);assert.equal(owner.store.runs().filter(r=>r.projectId===delayedOwner.id).length,0);
+ // Unknown tool support must fail at the owner even when routing evidence is weaker.
+ const capabilityStarts=remoteStarts;
+ for(const stronger of ["task", "evidence"] as const){
+  const evidence={...started.body.routing,...(stronger==="evidence"?{requiresTools:["web_search"]}:{})};
+  const rejected=await call(owner,ownerPort)("/api/peer","POST",{version:1,sourceDeviceId:ld.id,targetDeviceId:od.id,grantId:grant.id,token:grant.token,operation:"start",requestId:randomUUID(),baseCommit:git("-C",b,"rev-parse","HEAD"),task:{prompt:"strict tool requirement",harness:"codex",model:"gpt-6.1-sol",readOnly:false,routing:{requiresTools:stronger==="task"?["web_search"]:[]},routingEvidence:evidence}});
+  assert.equal(rejected.status,409,JSON.stringify(rejected.body));assert.match(rejected.body.error,/required worker tools/);
+  assert.equal(remoteStarts,capabilityStarts);
+ }
+ // Preserve a source run's requirement unless the next task explicitly clears it.
+ local.store.db.prepare("INSERT INTO peer_connections(id,data) VALUES(?,?)").run(mapping.id,JSON.stringify({...mapping,grantToken:grant.token}));
+ const sourceRun=owner.store.run(observed.ownerRunId)!;
+ owner.store.saveRun({...sourceRun,routing:{...sourceRun.routing!,requiresTools:["web_search"]}});
+ await peers.status(started.body.id);
+ const followInput={projectId:lp.id,prompt:"review source",readOnly:true,followUp:{runId:started.body.id,kind:"review"}};
+ const inherited=await request("/api/tasks/start","POST",{...followInput,idempotencyKey:"inherited-tools"});
+ assert.equal(inherited.status,202,JSON.stringify(inherited.body));assert.match(inherited.body.error,/No suitable model/);assert.equal(inherited.body.ownerRunId,undefined);assert.equal(remoteStarts,capabilityStarts);
+ const inheritedRequest=JSON.parse(local.store.db.prepare("SELECT data FROM peer_dispatches WHERE id=?").get(inherited.body.id)!.data as string).request.task;
+ assert.deepEqual(inheritedRequest.routing.requiresTools,["web_search"]);
+ const cleared=await request("/api/tasks/start","POST",{...followInput,idempotencyKey:"explicit-clear-tools",routing:{requiresTools:[]}});
+ assert.equal(cleared.status,202,JSON.stringify(cleared.body));assert.equal(cleared.body.connection,"observed",JSON.stringify(cleared.body));assert.equal(typeof cleared.body.ownerRunId,"string");
+ const clearedRequest=JSON.parse(local.store.db.prepare("SELECT data FROM peer_dispatches WHERE id=?").get(cleared.body.id)!.data as string).request.task;
+ assert.deepEqual(clearedRequest.routing.requiresTools,[]);
+ await new Promise(resolve=>setTimeout(resolve,20));assert.equal(remoteStarts,capabilityStarts+1);
+ assert.equal(owner.store.run(cleared.body.ownerRunId)!.routing?.requiresTools?.length??0,0);
  assert.equal((await request("/api/tasks/start","POST",{...input,idempotencyKey:"spoof",routingEvidence:started.body.routing})).status,400);
  }finally{await client.close();await mcp.close();await new Promise<void>(r=>http.close(()=>r()));await local.close();await owner.close();rmSync(dir,{recursive:true,force:true});}
 });

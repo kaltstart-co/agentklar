@@ -14,6 +14,7 @@ import type {
 } from "../src/contracts.ts";
 import { recommendationSchema, recommendWorker, recommendWorkers, selectedWorkerEligibility } from "../src/recommend.ts";
 import { createService } from "../src/service.ts";
+import { normalizeToolEvidence } from "../src/capabilities.ts";
 
 const now = Date.parse("2026-10-01T04:00:00Z");
 const p: Project = {
@@ -93,6 +94,22 @@ function advise(
     now,
   );
 }
+
+test("required tools preserve pins and reject missing, stale, historical and wrong-harness evidence", () => {
+  const native = catalog("claude", ["claude-sonnet-5"]);
+  const evidence = normalizeToolEvidence({ harness: "claude", modelId: "claude-sonnet-5", tools: ["WebSearch"], source: "native-model-metadata", checkedAt: new Date(now).toISOString(), complete: true });
+  native.models[0].toolEvidence = evidence;
+  assert.equal(advise({ harness: "claude", model: "claude-sonnet-5", requiresTools: ["web_search"] }, [native]).choice?.model, "claude-sonnet-5");
+  assert.equal(advise({ harness: "claude", model: "claude-sonnet-5", requiresTools: ["web_search"], readOnly: true }, [native]).choice, null);
+  for (const changed of [undefined, { ...evidence, complete: false }, { ...evidence, source: "native-session" as const }, { ...evidence, harness: "opencode" as const }, { ...evidence, checkedAt: new Date(now - 300001).toISOString() }]) {
+    native.models[0].toolEvidence = changed;
+    const result = advise({ harness: "claude", model: "claude-sonnet-5", requiresTools: ["web_search"] }, [native]);
+    assert.equal(result.choice, null); assert.match(result.reasons.join(" "), /Pinned.*No replacement/);
+    const snapshot = { projectId: p.id, checkedAt: new Date(now).toISOString(), harnesses: [native] };
+    assert.equal(selectedWorkerEligibility({ harness: "claude", model: "claude-sonnet-5" }, { catalog: snapshot, installed: { codex: false, claude: true } }, false, now, "task-pin", { requiresTools: ["web_search"] }).eligible, false);
+  }
+  assert.equal(advise({ requiresTools: ["image_generation"] }).choice, null);
+});
 
 test("preference, host classification and native headroom produce transparent policy tiers", () => {
   const scenarios = [
@@ -207,7 +224,7 @@ test("task and saved role model pins are authoritative; their block returns no r
     () =>
       advise({ roleId: "review" }, [], {
         ...project,
-        roles: [{ ...role, harness: "gemini" }],
+        roles: [{ ...role, harness: "unknown-harness" }],
       }),
     /no worker adapter/,
   );
@@ -475,7 +492,7 @@ test("authenticated recommendation API validates inputs, refreshes on demand and
       { roleId: "missing" },
       { model: "m".repeat(121) },
       { requiresImages: "true" },
-      { harness: "gemini" },
+      { harness: "unknown-harness" },
     ])
       assert.equal((await request(path, body)).status, 400);
     const boundedError = await (
@@ -664,7 +681,7 @@ test("peer Claude competes with local Codex at the same policy tier using its ow
  assert.equal(advice.alternatives[0]?.harness,"codex");
  assert.equal(advice.alternatives[0]?.device?.id,"local");
  assert.equal(advice.benchmarkMethod,"policy-fallback");
- assert.equal(advice.policyVersion,"2026-10-02.3");
+ assert.equal(advice.policyVersion,"2026-10-02.4");
 });
 
 function unrankedSource(harness: "muse" | "opencode", allowed: boolean | null = true) {

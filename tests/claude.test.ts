@@ -161,7 +161,7 @@ test("Claude preserves native settings and waits for root result plus drained st
     drain = resolve;
   });
   const f = fixture(async function* () {
-    yield init;
+    yield { ...init, tools: ["Read", "WebSearch"] } as SDKMessage;
     yield {
       ...init,
       session_id: "child",
@@ -193,6 +193,9 @@ test("Claude preserves native settings and waits for root result plus drained st
     await pause(30);
     assert.equal(f.state().state, "running");
     assert.equal(f.state().effectiveModel, "native-model");
+    assert.deepEqual(f.state().nativeTools?.tools, ["Read", "WebSearch"]);
+    assert.equal(f.state().nativeTools?.source, "native-session");
+    assert.equal(f.state().nativeTools?.modelId, "native-model");
     assert.equal(f.state().result, "");
     assert.equal(f.state().tokens, null);
     assert.deepEqual(f.events, []);
@@ -486,7 +489,7 @@ test("service selects harness, binds idempotency and rejects role mismatch", asy
         await call("/api/tasks/start", {
           ...data,
           idempotencyKey: "bad",
-          harness: "gemini",
+          harness: "unknown-harness",
         })
       ).status,
       400,

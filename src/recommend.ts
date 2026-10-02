@@ -1,5 +1,7 @@
+import { workerHarnesses, type WorkerHarness } from "./contracts.ts";
 import { benchmarksFresh, evidenceForModel, benchmarkNotice, type BenchmarkSnapshot } from "./benchmarks.ts";
 import { z } from "zod";
+import { toolCapabilities, satisfiesRequiredTools } from "./capabilities.ts";
 import type {
   CatalogModel,
   CatalogSnapshot,
@@ -12,11 +14,13 @@ import type {
 export const recommendationSchema = z
   .object({
     roleId: z.string().min(1).max(80).optional(),
-    harness: z.enum(["codex", "claude", "muse", "opencode"]).optional(),
+    harness: z.enum(workerHarnesses).optional(),
     model: z.string().min(1).max(120).optional(),
     complexity: z.enum(["routine", "standard", "hard"]).default("standard"),
     taskType: z.enum(["coding", "reasoning", "data-analysis", "language"]).default("coding"),
     requiresImages: z.boolean().default(false),
+    requiresTools: z.array(z.enum(toolCapabilities)).max(2).default([]),
+    readOnly: z.boolean().default(false),
   })
   .strict();
 export type RecommendationInput = z.infer<typeof recommendationSchema>;
@@ -33,7 +37,7 @@ type Candidate = {
 };
 
 // Reviewed product policy order, not measured coding quality or price.
-const profiles: Record<Exclude<Harness, "muse" | "opencode">, Record<Exclude<Tier, "unknown">, string[]>> = {
+const profiles: Record<"codex" | "claude", Record<Exclude<Tier, "unknown">, string[]>> = {
   codex: {
     efficient: ["gpt-6-luna", "gpt-5.6-luna"],
     balanced: ["gpt-6.1-sol", "gpt-6-sol", "gpt-5.6-sol", "gpt-5.6-terra"],
@@ -68,7 +72,7 @@ function profile(
   model: CatalogModel | undefined,
   pin?: string,
 ) {
-  if (harness === "muse" || harness === "opencode") return { tier: "unknown" as const, order: 999 };
+  if (harness !== "codex" && harness !== "claude") return { tier: "unknown" as const, order: 999 };
   const id =
     harness === "claude"
       ? model?.resolvedModel || model?.id || pin
@@ -141,7 +145,7 @@ function target(
 /** Pure advice. The caller supplies only service-read native metadata and installed commands. */
 export type RecommendationSource = {
   catalog: CatalogSnapshot;
-  installed: Record<"codex" | "claude", boolean> & Partial<Record<"muse" | "opencode", boolean>>;
+  installed: Record<"codex" | "claude", boolean> & Partial<Record<Exclude<WorkerHarness, "codex" | "claude">, boolean>>;
   device?: { id: string; label: string; peerId?: string };
 };
 export function recommendWorker(project: Project, input: RecommendationInput, snapshot: CatalogSnapshot, installed: RecommendationSource["installed"], now = Date.now(), benchmarks?: BenchmarkSnapshot): WorkerAdvice {
@@ -154,7 +158,7 @@ export function recommendWorkers(project: Project, input: RecommendationInput, s
   if (input.roleId && !role) throw new Error("Role not found");
   if (role && input.harness && input.harness !== role.harness)
     throw new Error("Task harness must match the selected role harness.");
-  if (role && role.harness !== "codex" && role.harness !== "claude" && role.harness !== "muse" && role.harness !== "opencode")
+  if (role && !(workerHarnesses as readonly string[]).includes(role.harness))
     throw new Error("This role harness has no worker adapter yet.");
   const harness =
     (role?.harness as Harness | undefined) ||
@@ -171,13 +175,15 @@ export function recommendWorkers(project: Project, input: RecommendationInput, s
     taskType: input.taskType,
     benchmarkMethod: pin ? "pin" : "policy-fallback",
     requiresImages: input.requiresImages,
+    requiresTools: input.requiresTools,
+    readOnly: input.readOnly,
     choice: null,
     alternatives: [],
     reasons: [],
     warnings: [
       "Limited policy advice. Model access, coding quality and actual subscription cost are not verified.",
     ],
-    policyVersion: "2026-10-02.3",
+    policyVersion: "2026-10-02.4",
     confidence: "limited",
     sources: [...sources],
   };
@@ -205,6 +211,12 @@ export function recommendWorkers(project: Project, input: RecommendationInput, s
         );
       else warn(`${catalog.harness} ${id}: ${reason}`);
     };
+    if (input.readOnly && catalog.harness !== "codex" && catalog.harness !== "claude")
+      return reject("this adapter cannot enforce read-only work.");
+    if (input.readOnly && catalog.harness === "claude" && input.requiresTools.length)
+      return reject("read-only Claude workers have only Read, Glob and Grep; the required tools are unavailable.");
+    if (input.requiresTools.length && (model?.toolEvidence?.harness !== catalog.harness || !satisfiesRequiredTools(model?.toolEvidence, id, input.requiresTools, now)))
+      return reject(`fresh effective worker support for ${input.requiresTools.join(", ")} is not confirmed. Continue in a native session with these tools.`);
     if (q.blocked)
       return reject(
         "native ordinary usage or a relevant spend control is blocked.",
@@ -403,7 +415,7 @@ export function recommendWorkers(project: Project, input: RecommendationInput, s
       let end = start + 1;
       while (end < candidates.length && candidates[end].distance === candidates[start].distance && candidates[end].allowed === candidates[start].allowed && candidates[end].exhausted === candidates[start].exhausted) end++;
       const group = candidates.slice(start, end);
-      const evidence = group.map(c => c.choice.harness === "muse" || c.choice.harness === "opencode" ? undefined : evidenceForModel(benchmarks, c.choice.harness, c.benchmarkModel, input.taskType));
+      const evidence = group.map(c => c.choice.harness !== "codex" && c.choice.harness !== "claude" ? undefined : evidenceForModel(benchmarks, c.choice.harness, c.benchmarkModel, input.taskType));
       if (group.length > 1 && evidence.every(e => e !== undefined)) {
         group.forEach((c, i) => { c.choice.benchmark = evidence[i]; });
         group.sort((a, b) => b.choice.benchmark!.score - a.choice.benchmark!.score);
@@ -425,7 +437,7 @@ export function recommendWorkers(project: Project, input: RecommendationInput, s
     advice.reasons.push("Policy order is used: no comparable tie needs ranking, or the group lacks fresh, exact LiveBench scores for every candidate.");
   }
   // Report exact references even when they did not affect policy ordering or a pin.
-  if (benchmarks) unique.forEach(c => { if (c.choice.harness !== "muse" && c.choice.harness !== "opencode") c.choice.benchmark ??= evidenceForModel(benchmarks, c.choice.harness, c.benchmarkModel, input.taskType); });
+  if (benchmarks) unique.forEach(c => { if ((c.choice.harness === "codex" || c.choice.harness === "claude")) c.choice.benchmark ??= evidenceForModel(benchmarks, c.choice.harness, c.benchmarkModel, input.taskType); });
   if (advice.choice?.benchmark) {
     advice.warnings = [benchmarkNotice, ...advice.warnings.filter(w => w !== benchmarkNotice)].slice(0, 8);
     advice.sources.push(advice.choice.benchmark.sourceUrl);
@@ -448,13 +460,15 @@ export function recommendWorkers(project: Project, input: RecommendationInput, s
 
 
 /** Recheck one selected native candidate; never rank replacements on its owner. */
-export function selectedWorkerEligibility(choice: Pick<WorkerChoice,"harness"|"model">, source: RecommendationSource, requiresImages: boolean, now = Date.now(), basis: WorkerChoice["basis"] = "policy"): {eligible:boolean;reason?:string} {
+export function selectedWorkerEligibility(choice: Pick<WorkerChoice,"harness"|"model">, source: RecommendationSource, requiresImages: boolean, now = Date.now(), basis: WorkerChoice["basis"] = "policy", needs: { requiresTools?: RecommendationInput["requiresTools"]; readOnly?: boolean } = {}): {eligible:boolean;reason?:string} {
   if (!source.installed[choice.harness]) return {eligible:false,reason:"Selected native worker is unavailable."};
   const catalog = source.catalog.harnesses.find(c => c.harness === choice.harness);
   const model = catalog?.models.find(m => m.id === choice.model || m.resolvedModel === choice.model);
   if (!catalog || catalog.modelsStatus !== "available" || !model) return {eligible:false,reason:"Selected exact model is absent from the current native catalog."};
   if (catalog.auth?.status === "sign_in_required") return {eligible:false,reason:"Selected worker requires native sign-in."};
   if (requiresImages && !model.inputModalities?.includes("image")) return {eligible:false,reason:"Selected native model image support is unavailable."};
+  if (needs.readOnly && (choice.harness !== "codex" && choice.harness !== "claude" || choice.harness === "claude" && needs.requiresTools?.length)) return {eligible:false,reason:"Selected adapter cannot provide the required tools in read-only mode."};
+  if (needs.requiresTools?.length && (model.toolEvidence?.harness !== choice.harness || !satisfiesRequiredTools(model.toolEvidence, choice.model, needs.requiresTools, now))) return {eligible:false,reason:"Fresh effective support for the required worker tools is not confirmed."};
   const q = quota(catalog,model,choice.model,now,source.catalog.checkedAt);
   if (basis === "policy" && (choice.harness === "muse" || choice.harness === "opencode")) {
     const checked = Date.parse(source.catalog.checkedAt);

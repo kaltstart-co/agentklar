@@ -1,4 +1,7 @@
 import type { BenchmarkEvidence, TaskType } from "./benchmarks.ts";
+import type { ToolEvidence, ToolCapability } from "./capabilities.ts";
+export const workerHarnesses = ["codex", "claude", "muse", "opencode", "gemini", "cursor-agent", "zcode"] as const;
+export type WorkerHarness = typeof workerHarnesses[number];
 export type Preference = "economical" | "balanced" | "best";
 export type Role = {
   id: string;
@@ -51,7 +54,7 @@ export type FollowUpContext = {
   sourceResult: string;
   sourceResultTruncated: boolean;
   sourceRunId: string;
-  sourceHarness: "codex" | "claude" | "muse" | "opencode";
+  sourceHarness: WorkerHarness;
   sourceModel: string | null;
   sourceState: "completed";
 };
@@ -87,7 +90,7 @@ export type OpenCodeScope = {
 };
 export type Run = {
   id: string;
-  harness?: "codex" | "claude" | "muse" | "opencode";
+  harness?: WorkerHarness;
   projectId: string;
   roleId?: string;
   prompt: string;
@@ -116,6 +119,7 @@ export type Run = {
   launchSource?: LaunchSource;
   launchHash?: string;
   routing?: RoutingDecision;
+  nativeTools?: ToolEvidence;
   followUp?: FollowUp;
   followUpContext?: FollowUpContext;
 };
@@ -136,7 +140,7 @@ export type RunHandoff = {
   runId: string;
   available: boolean;
   reason: string | null;
-  harness: "codex" | "claude" | "muse" | "opencode" | null;
+  harness: WorkerHarness | null;
   nativeSessionId: string | null;
   command: null | {
     executable: string;
@@ -184,6 +188,7 @@ export type NativeInstallation = { path: string; version: string | null; fingerp
 export type NativeInstallationStatus = { harness: string; selected: string | null; saved: string | null; restartRequired: boolean; installations: NativeInstallation[] };
 
 export type CatalogModel = {
+  toolEvidence?: ToolEvidence;
   id: string;
   name: string;
   description: string;
@@ -212,7 +217,7 @@ export type AccountQuota = {
   buckets: QuotaBucket[];
 };
 export type HarnessCatalog = {
-  harness: "codex" | "claude" | "muse" | "opencode";
+  harness: WorkerHarness | "antigravity";
   auth?: {
     status: "signed_in" | "sign_in_required" | "unknown";
     source: "claude-auth-status";
@@ -235,7 +240,7 @@ export type WorkerChoice = {
   device?: {id: string; label: string; peerId?: string};
   catalogCheckedAt?: string;
   benchmark?: BenchmarkEvidence;
-  harness: "codex" | "claude" | "muse" | "opencode";
+  harness: WorkerHarness;
   model: string;
   roleId?: string;
   basis: "task-pin" | "role-pin" | "policy";
@@ -244,6 +249,8 @@ export type WorkerChoice = {
   warnings: string[];
 };
 export type WorkerAdvice = {
+  requiresTools?: ToolCapability[];
+  readOnly?: boolean;
   taskType?: TaskType;
   benchmarkMethod?: "reference-tie-break" | "policy-fallback" | "pin";
   projectId: string;
@@ -263,6 +270,7 @@ export type WorkerAdvice = {
 
 // Saved with a run. Keep native catalog and quota details out of run polling.
 export type RoutingDecision = {
+  requiresTools?: ToolCapability[];
   taskType?: TaskType;
   benchmarkMethod?: "reference-tie-break" | "policy-fallback" | "pin";
   selected: Pick<WorkerChoice, "harness" | "model" | "roleId" | "basis" | "tier" | "benchmark" | "device" | "catalogCheckedAt">;
