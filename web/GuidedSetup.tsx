@@ -1,3 +1,5 @@
+import { HarnessIcon } from "./HarnessIcon.js";
+import { Copy, ExternalLink, RefreshCw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Alert, Badge, Button, CopyButton, Group, Select, Stack } from "@mantine/core";
 import type { Harness, OnboardingPreferences, Project, SetupHarness, SetupStatus } from "../src/contracts.js";
@@ -68,7 +70,7 @@ export function GuidedSetup({ project, projects, harnesses, preferences, connect
     </Stack> : <>
       <div className="guided-project"><div><strong>{project.name}</strong><p className="hint">{project.path}</p></div><Badge variant="light" color="gray">Project</Badge></div>
       {error && <Alert color="red" mt="md">{error}</Alert>}
-      <div className="guided-section-heading"><h3>Installed harnesses</h3><Button size="xs" variant="subtle" loading={checking} disabled={saving || !connected} onClick={() => void refresh()}>Check connections</Button></div>
+      <div className="guided-section-heading"><h3>Installed harnesses</h3><Button size="sm" variant="subtle" loading={checking} disabled={saving || !connected} leftSection={<RefreshCw size={14} aria-hidden="true" />} onClick={() => void refresh()}>Check connections</Button></div>
       {installed.length === 0 && <p className="hint">No supported connection was found. Open More harnesses for guidance, then check again after installing.</p>}
       <div className="guided-connections" aria-live="polite">
         {installed.map(h => {
@@ -77,11 +79,11 @@ export function GuidedSetup({ project, projects, harnesses, preferences, connect
           const configured = status?.status === "configured" && !interrupted, selected = main === key;
           return <div className="guided-harness" key={key}>
             <div className="guided-harness-row">
-              <div><strong>{h.name}</strong><p className="hint">{failure ? "Connection check failed" : interrupted ? "Interrupted setup needs attention" : configured ? "MCP entry configured" : status?.status === "conflict" ? "Existing entry needs attention" : status?.status === "unavailable" ? "Native setup unavailable" : checking || !status ? "Checking connection…" : "Ready to connect"}</p></div>
+              <div><strong className="harness-label"><HarnessIcon harness={h.id} size={22} />{h.name}</strong><p className="hint">{failure ? "Connection check failed" : interrupted ? "Interrupted setup needs attention" : configured ? "MCP entry configured" : status?.status === "conflict" ? "Existing entry needs attention" : status?.status === "unavailable" ? "Native setup unavailable" : checking || !status ? "Checking connection…" : "Ready to connect"}</p></div>
               <Group gap="xs" wrap="nowrap">
                 {selected && <Badge color="teal" variant="light">Main</Badge>}
-                {configured && !selected ? <Button size="xs" variant="light" loading={saving} disabled={!preferences || checking || !connected} onClick={() => void remember(key)}>Use as main</Button>
-                  : <Button size="xs" variant="light" disabled={checking || saving || !connected} onClick={() => { setActive(active === key ? null : key); setLaunchVisible(false); }}>{active === key ? "Close" : selected && configured ? "Manage" : status?.status === "missing" && !interrupted ? "Connect" : "Review setup"}</Button>}
+                {configured && !selected ? <Button size="sm" variant="light" loading={saving} disabled={!preferences || checking || !connected} onClick={() => void remember(key)}>Use as main</Button>
+                  : <Button size="sm" variant="light" disabled={checking || saving || !connected} onClick={() => { setActive(active === key ? null : key); setLaunchVisible(false); }}>{active === key ? "Close" : selected && configured ? "Manage" : status?.status === "missing" && !interrupted ? "Connect" : "Review setup"}</Button>}
               </Group>
             </div>
             {active === key && <div className="guided-connection-detail">
@@ -93,11 +95,11 @@ export function GuidedSetup({ project, projects, harnesses, preferences, connect
       </div>
       <p className="hint guided-evidence">Connections do not confirm sign-in, available tools or remaining quota. Your harness checks its own account when you open it.</p>
       {other.length > 0 && <details className="settings-disclosure"><summary>More harnesses</summary><div className="disclosure-body">
-        {other.map(h => <div className="guided-other" key={h.id}><strong>{h.name}</strong><p className="hint">{h.available ? "Installed · guided MCP setup is not available yet. Use its native MCP settings." : "Not found · use its native installer. After tasks finish, restart AgentKlar to discover it."}</p></div>)}
+        {other.map(h => <div className="guided-other" key={h.id}><strong className="harness-label"><HarnessIcon harness={h.id} size={20} />{h.name}</strong><p className="hint">{h.available ? "Installed · guided MCP setup is not available yet. Use its native MCP settings." : "Not found · use its native installer. After tasks finish, restart AgentKlar to discover it."}</p></div>)}
       </div></details>}
       <div className="guided-footer">
-        <Group gap="sm"><Button onClick={onDone}>{main ? "View work" : "Continue to work"}</Button>{main && <Button variant="light" onClick={() => setLaunchVisible(!launchVisible)}>Open {mainName || "main harness"}</Button>}</Group>
-        {launchVisible && main && <div className="guided-launch"><p className="hint">Run this in a terminal, then choose Open {mainName || "main harness"}.</p><pre><code>{`cd ${quote(project.path)}\nagentklar`}</code></pre><CopyButton value={`cd ${quote(project.path)}\nagentklar`}>{({ copied, copy }) => <Button variant="subtle" size="xs" onClick={copy}>{copied ? "Copied" : "Copy command"}</Button>}</CopyButton></div>}
+        <Group gap="sm"><Button onClick={onDone}>{main ? "View work" : "Continue to work"}</Button>{main && <Button variant="default" leftSection={<ExternalLink size={15} aria-hidden="true" />} onClick={() => setLaunchVisible(!launchVisible)}>Open {mainName || "main harness"}</Button>}</Group>
+        {launchVisible && main && <div className="guided-launch"><p className="hint">Run this in a terminal, then choose Open {mainName || "main harness"}.</p><pre><code>{`cd ${quote(project.path)}\nagentklar`}</code></pre><CopyButton value={`cd ${quote(project.path)}\nagentklar`}>{({ copied, copy }) => <Button variant="subtle" size="sm" leftSection={<Copy size={14} aria-hidden="true" />} onClick={copy}>{copied ? "Copied" : "Copy command"}</Button>}</CopyButton></div>}
       </div>
     </>}
   </section>;

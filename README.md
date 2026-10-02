@@ -4,9 +4,15 @@ Keep your native coding harness. AgentKlar gives registered projects a shared lo
 
 This is a fresh TypeScript rewrite. The old Go application is preserved in Git at `archive/pre-rewrite-2026-10-01`. Old databases and configuration are never imported. A run marked **completed** means the worker finished. Review the changes in your normal editor and harness.
 
-The public website is an installation guide. The local service stores project work on each computer. CLI and GUI share that service. A desktop app is planned; the current release ships no macOS or Windows desktop binary.
+The public website is an installation guide. The local service stores project work on each computer. CLI, browser dashboard and the native SwiftUI Mac app share that service. Windows comes later. See [Mac app setup](docs/MACOS_APP.md) for the development build and signing limits.
 
 ## Install and start
+
+### Native Mac preview
+
+The Mac client is written in SwiftUI. It uses native sidebar navigation, menus, sheets and folder pickers. It connects to the same local AgentKlar service as the terminal and browser dashboard.
+
+The current Apple Silicon build is a development preview. Public signing and automatic app updates need an Apple Developer ID certificate. See [build and installation steps](docs/MACOS_APP.md), including the native features still being added. The terminal installer below remains available.
 
 On macOS or Linux (ARM64 or x64), run:
 

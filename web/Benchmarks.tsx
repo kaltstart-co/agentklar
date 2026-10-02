@@ -36,7 +36,7 @@ export function Benchmarks({ connected, snapshot, onChange }: { connected: boole
     <p className="hint">{notice}</p>
     {snapshot && <p className="hint">Release {snapshot.release} · Checked {new Date(snapshot.checkedAt).toLocaleString()} · {fresh(snapshot) ? "Fresh" : "Stale: excluded from tie breaking"}. Release names the benchmark version; individual evaluation dates are unknown.</p>}
     <p className="hint">Coding advice uses Agentic Coding; other task types use Reasoning, Data Analysis or Language. Only exact reviewed model IDs have scores.</p>
-    <Button size="xs" variant="light" disabled={!connected} loading={busy} onClick={() => void refresh()}>Refresh benchmarks</Button>
+    <Button size="sm" variant="light" disabled={!connected} loading={busy} onClick={() => void refresh()}>Refresh benchmarks</Button>
     {error && <Alert color="red">{error}</Alert>}
   </div>;
 }

@@ -213,7 +213,7 @@ export function SkillsForm({
         <details>
           <summary>Add a skill from GitHub</summary>
           <Stack gap="sm" mt="sm">
-            <Button size="xs" variant="subtle" style={{ alignSelf: "flex-start" }} disabled={Boolean(busy)} onClick={useWorkflowSource}>Use AgentKlar workflow</Button>
+            <Button size="sm" variant="subtle" style={{ alignSelf: "flex-start" }} disabled={Boolean(busy)} onClick={useWorkflowSource}>Use AgentKlar workflow</Button>
             <TextInput
               label="GitHub repository"
               placeholder="vercel-labs/skills"
@@ -294,7 +294,7 @@ export function SkillsForm({
           <h3>Native {scope === "project" ? "project" : "personal"} skill folders</h3>
           <Button
             variant="subtle"
-            size="xs"
+            size="sm"
             disabled={!connected || Boolean(busy)}
             loading={busy === "refresh"}
             onClick={() => void refresh()}
@@ -331,7 +331,7 @@ export function SkillsForm({
                 {item.id && item.state === "installed" && (
                   <Group>
                     <Button
-                      size="xs"
+                      size="sm"
                       variant="light"
                       disabled={!connected || Boolean(busy)}
                       loading={busy === "preview-update"}
@@ -340,7 +340,7 @@ export function SkillsForm({
                       Preview upstream update
                     </Button>
                     <Button
-                      size="xs"
+                      size="sm"
                       variant="light"
                       color="red"
                       disabled={!connected || Boolean(busy)}

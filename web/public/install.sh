@@ -106,7 +106,7 @@ main() {
   if [ "$platform" = darwin ]; then
     "$cli" service install
     "$cli" service start
-    "$cli" service open
+    if [ "${AGENTKLAR_INSTALL_NO_OPEN:-0}" != 1 ]; then "$cli" service open; fi
   else
     echo "Keep this terminal open. Open the private setup URL printed below."
     exec "$cli" start

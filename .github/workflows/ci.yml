@@ -14,3 +14,36 @@ jobs:
       - run: npm run build
       - run: npm test
       - run: npm run smoke:package
+  macos-native:
+    name: Native Mac app (ARM64)
+    runs-on: macos-15
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v5
+      - name: Verify Apple Silicon and full Xcode
+        run: |
+          test "$(uname -m)" = arm64
+          test -d "$DEVELOPER_DIR"
+          xcodebuild -version
+          swift --version
+      - name: Build native app
+        run: swift build --package-path macos --build-system native -c release
+      - name: Run native tests
+        run: swift test --package-path macos --build-system native
+      - name: Run local boundary checks
+        run: SDKROOT="$(xcrun --show-sdk-path)" macos/Tests/run-foundation.sh
+      - name: Package development preview
+        run: python3 macos/scripts/package.py
+      - name: Save development preview
+        uses: actions/upload-artifact@v4
+        with:
+          name: AgentKlar-macos-arm64-development-${{ github.sha }}
+          path: |
+            macos/out/AgentKlar-*-arm64.zip
+            macos/out/AgentKlar-*-arm64.dmg
+          if-no-files-found: error
+          retention-days: 7

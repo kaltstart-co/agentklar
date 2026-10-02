@@ -2,7 +2,9 @@ node_modules/
 dist/
 .vercel/
 .env*
-agentklar
-agentklar-bar
+/agentklar
+/agentklar-bar
 *.sqlite*
 .DS_Store
+macos/.build/
+macos/out/

@@ -9,7 +9,7 @@ const installer = resolve("web/public/install.sh");
 const releaseHash = "376a2798314a8fce87cc9df3aa1b655fe7ed9ab42df4b05f81d54ea110fa45dc";
 const runtimeHash = "bed7eea5325e1108f32ce5228ddd6a5f0f08a499ee42aa7442aea583702f6057";
 
-function fixture(options: { bootstrap?: boolean; existing?: boolean; busy?: boolean; corrupt?: string; platform?: string; conflictingPrefix?: boolean } = {}) {
+function fixture(options: { bootstrap?: boolean; existing?: boolean; busy?: boolean; corrupt?: string; platform?: string; conflictingPrefix?: boolean; noOpen?: boolean } = {}) {
   const root = mkdtempSync(join(tmpdir(), "agentklar-installer-"));
   const bin = join(root, "tools"), home = join(root, "home"), templates = join(root, "templates"), log = join(root, "calls");
   const runtime = join(home, ".local/share/agentklar/node-v24.21.0-darwin-arm64");
@@ -56,6 +56,7 @@ cp "$TEST_TEMPLATES/node" "$TEST_TEMPLATES/npm" "$destination/node-v24.21.0-darw
     TEST_TEMPLATES: templates, TEST_BUSY: options.busy ? "yes" : "no", TEST_CORRUPT: options.corrupt || "",
     TEST_PLATFORM: options.platform || "Darwin",
     TEST_CONFLICT_PREFIX: options.conflictingPrefix ? "yes" : "no",
+    ...(options.noOpen ? { AGENTKLAR_INSTALL_NO_OPEN: "1" } : {}),
     ...(options.conflictingPrefix ? { NPM_CONFIG_PREFIX: join(root, "unrelated-prefix") } : {}),
   } });
   return { root, home, prefix, runtime, result, calls: () => existsSync(log) ? readFileSync(log, "utf8") : "", close: () => rmSync(root, { recursive: true, force: true }) };
@@ -76,6 +77,15 @@ test("installer reuses Node24, checks the pinned release and opens managed setup
     const again = f.result(); assert.equal(again.status, 0, again.stderr);
     assert.equal((f.calls().match(/npm install/g) || []).length, 1);
     assert.match(f.calls(), /agentklar update/);
+  } finally { f.close(); }
+});
+
+test("desktop installer starts the managed service without opening an external browser", () => {
+  const f = fixture({ noOpen: true });
+  try {
+    const result = f.result(); assert.equal(result.status, 0, result.stderr);
+    assert.match(f.calls(), /agentklar service install\nagentklar service start/);
+    assert.doesNotMatch(f.calls(), /agentklar service open/);
   } finally { f.close(); }
 });
 

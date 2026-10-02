@@ -48,7 +48,7 @@ export function InstructionsForm({ projectId, connected }: { projectId: string; 
     <Group justify="space-between">
       <Select style={{ width: "min(100%, 360px)" }} label="Instruction file" value={file} onChange={(value) => setFile(value as InstructionFileId)} allowDeselect={false}
         data={Object.entries(filenames).map(([value, label]) => ({ value, label: `${label} · ${fileUsers[value as InstructionFileId]}` }))} />
-      <Button variant="subtle" size="xs" disabled={!connected} loading={loading} onClick={() => void refresh()}>Refresh file status</Button>
+      <Button variant="subtle" size="sm" disabled={!connected} loading={loading} onClick={() => void refresh()}>Refresh file status</Button>
     </Group>
     {error && <Alert color="red">{error}</Alert>}
     {metadata && <><p className="instruction-path"><code>{metadata.path}</code> <Badge variant="light" color={metadata.status === "unavailable" ? "orange" : "gray"}>{metadata.status}</Badge></p>
@@ -158,7 +158,7 @@ function InstructionEditor({ projectId, file, connected, active, unavailable, ag
       {history.length ? history.map((entry) => <div key={entry.id}>
         <p className="hint">{new Date(entry.createdAt).toLocaleString()} · {entry.operation} · {entry.state}{entry.message && ` · ${entry.message}`}</p>
         {entry.state === "interrupted" && (
-          <Button size="xs" variant="light" disabled={!connected || Boolean(busy) || !document || dirty}
+          <Button size="sm" variant="light" disabled={!connected || Boolean(busy) || !document || dirty}
             loading={busy === "undo"} onClick={() => void change(entry)}>Try undo</Button>
         )}
       </div>) : <p className="hint">No saved changes for this file.</p>}

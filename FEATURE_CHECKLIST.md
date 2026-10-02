@@ -92,10 +92,13 @@ Plan: [docs/ONBOARDING_PLAN.md](docs/ONBOARDING_PLAN.md).
 - [x] Guided GUI setup
 - [x] Saved launch choices
 
-## Desktop app plan
+## Native Mac preview
 
 Plan: [docs/DESKTOP_PLAN.md](docs/DESKTOP_PLAN.md).
 
-- [ ] macOS app
-- [ ] Signed updates
-- [ ] Windows app
+- [x] SwiftUI build
+- [x] Local boundary checks
+- [ ] Native GUI acceptance
+- [ ] Full native parity
+- [ ] Signed distribution
+- [ ] Signed app updates

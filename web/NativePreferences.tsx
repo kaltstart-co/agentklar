@@ -120,23 +120,23 @@ export function NativePreferences({ projectId, connected, request = localRequest
       <TextInput label="Default model" placeholder="Use native fallback" value={model} disabled={disabled || !settings}
         onChange={event => { setModel(event.currentTarget.value); setSettingPreview(null); }} />
       <Group mt="xs">
-        <Button size="xs" disabled={disabled || !settings} onClick={() => void change("native-settings", "preview", undefined, "model")}>Preview model</Button>
-        <Button size="xs" variant="subtle" disabled={disabled || !settings} onClick={() => { setModel(""); setSettingPreview(null); }}>Clear model draft</Button>
+        <Button size="sm" disabled={disabled || !settings} onClick={() => void change("native-settings", "preview", undefined, "model")}>Preview model</Button>
+        <Button size="sm" variant="subtle" disabled={disabled || !settings} onClick={() => { setModel(""); setSettingPreview(null); }}>Clear model draft</Button>
       </Group>
       <Select mt="sm" label="Default effort" placeholder="Use native fallback" clearable value={effort} data={efforts} disabled={disabled || !settings}
         onChange={value => { setEffort(value); setSettingPreview(null); }} />
-      <Button mt="xs" size="xs" disabled={disabled || !settings} onClick={() => void change("native-settings", "preview", undefined, "effort")}>Preview effort</Button>
+      <Button mt="xs" size="sm" disabled={disabled || !settings} onClick={() => void change("native-settings", "preview", undefined, "effort")}>Preview effort</Button>
       <p className="hint">An empty model or effort removes that managed default and uses the native fallback.</p>
       {settingError && <Alert color="red">{settingError}</Alert>}
       {settingPreview && <div className="instruction-preview">
         <h3>{settingPreview.key} · {settingPreview.scope}</h3>
         <p>Before: <code>{fallback(settingPreview.before)}</code></p><p>After: <code>{fallback(settingPreview.after)}</code></p>
         <p className="hint">{settingPreview.message}</p>
-        <Button size="xs" disabled={disabled} loading={busy === "native-settings/apply"} onClick={() => void change("native-settings", "apply")}>Apply reviewed default</Button>
+        <Button size="sm" disabled={disabled} loading={busy === "native-settings/apply"} onClick={() => void change("native-settings", "apply")}>Apply reviewed default</Button>
       </div>}
       {settings?.changes.filter(change => change.canUndo).map(receipt => <Group key={receipt.id} mt="xs">
         <Badge color={receipt.state === "interrupted" ? "orange" : "gray"}>{receipt.field} · {receipt.state}</Badge>
-        <Button size="xs" variant="subtle" disabled={disabled} onClick={() => void change("native-settings", "undo", receipt.id)}>Undo unchanged {receipt.field}</Button>
+        <Button size="sm" variant="subtle" disabled={disabled} onClick={() => void change("native-settings", "undo", receipt.id)}>Undo unchanged {receipt.field}</Button>
       </Group>)}
       {settings?.changes.some(change => change.state === "interrupted" && !change.canUndo) && <Alert mt="sm" color="orange">A native change was interrupted. Its settings have changed since; inspect the native config before continuing.</Alert>}
     </section>
@@ -145,21 +145,21 @@ export function NativePreferences({ projectId, connected, request = localRequest
       <p className="hint">A real native plugin with the AgentKlar workflow skill. Local project scope. Individual skill installs stay separate.</p>
       {plugins && <><Badge color={plugins.available ? "teal" : "orange"}>{plugins.available ? "Native plugin commands available" : "Native plugin commands unavailable"}</Badge><p className="hint">{plugins.message}</p></>}
       {pluginError && <Alert color="red">{pluginError}</Alert>}
-      <Button size="xs" disabled={disabled || !plugins?.available} loading={busy === "plugins/preview"} onClick={() => void change("plugins", "preview")}>Preview workflow plugin</Button>
+      <Button size="sm" disabled={disabled || !plugins?.available} loading={busy === "plugins/preview"} onClick={() => void change("plugins", "preview")}>Preview workflow plugin</Button>
       {pluginPreview && <div className="instruction-preview">
         <h3>{pluginPreview.name} · {pluginPreview.version}</h3>
         <p>{pluginPreview.scope} · {pluginPreview.capabilities.skills.length} skill · {pluginPreview.capabilities.agents} agents · {pluginPreview.capabilities.hooks} hooks · {pluginPreview.capabilities.mcpServers} MCP servers</p>
         <p className="hint">{pluginPreview.message}</p>
         <details><summary>Reviewed native commands and package</summary><pre>{JSON.stringify({ commands: pluginPreview.commands, manifest: pluginPreview.manifest, files: pluginPreview.files }, null, 2)}</pre></details>
-        <Button mt="sm" size="xs" disabled={disabled} loading={busy === "plugins/apply"} onClick={() => void change("plugins", "apply")}>Install reviewed plugin</Button>
+        <Button mt="sm" size="sm" disabled={disabled} loading={busy === "plugins/apply"} onClick={() => void change("plugins", "apply")}>Install reviewed plugin</Button>
       </div>}
       {plugins?.changes.filter(receipt => receipt.state !== "undone").map(receipt => <div key={receipt.id} className="instruction-preview">
         <Group><Badge>{receipt.version} · {receipt.state}</Badge><Badge color={receipt.installed && plugins.available ? "teal" : "gray"}>{!plugins.available ? "Install state unavailable" : receipt.installed ? "Installed" : "Not installed"}</Badge><Badge color={receipt.recognized ? "teal" : "gray"}>{receipt.recognized ? "Components recognized at install" : "Recognition unverified"}</Badge></Group>
         <p className="hint">{receipt.message}</p>
-        {receipt.canUndo && <Button size="xs" variant="subtle" disabled={disabled} onClick={() => void change("plugins", "undo", receipt.id)}>Undo unchanged plugin</Button>}
+        {receipt.canUndo && <Button size="sm" variant="subtle" disabled={disabled} onClick={() => void change("plugins", "undo", receipt.id)}>Undo unchanged plugin</Button>}
       </div>)}
     </section>
     {notice && <Alert color="teal">{notice}</Alert>}
-    <Button size="xs" variant="light" disabled={disabled} loading={busy === "refresh"} onClick={() => void refresh()}>Refresh native defaults and plugins</Button>
+    <Button size="sm" variant="light" disabled={disabled} loading={busy === "refresh"} onClick={() => void refresh()}>Refresh native defaults and plugins</Button>
   </Stack>;
 }

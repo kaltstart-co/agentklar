@@ -9,5 +9,5 @@
       { "key": "Cache-Control", "value": "no-cache" }
     ]
   }],
-  "rewrites": [{ "source": "/((?!assets/|install.sh$).*)", "destination": "/index.html" }]
+  "rewrites": [{ "source": "/((?!assets/|harness-icons/|install.sh$|appcast.xml$).*)", "destination": "/index.html" }]
 }

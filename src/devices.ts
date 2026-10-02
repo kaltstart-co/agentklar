@@ -1,5 +1,6 @@
 import { randomUUID, createHash } from "node:crypto";
-import { accessSync, constants, realpathSync, statSync } from "node:fs";
+import { accessSync, constants, realpathSync, statSync, readFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { hostname } from "node:os";
 import { spawnSync } from "node:child_process";
 import type { DatabaseSync } from "node:sqlite";
@@ -8,12 +9,38 @@ import { workerHarnesses, type NativeInstallation, type NativeInstallationStatus
 
 export { workerHarnesses };
 const versions = new Map<string, string | null>();
+function fileIdentity(path: string) {
+  const stat = statSync(path);
+  if (!stat.isFile()) throw new Error("Not a file");
+  return [realpathSync(path), stat.dev, stat.ino, stat.size, stat.mtimeMs, stat.ctimeMs, stat.mode];
+}
+function npmPackageIdentity(entry: string) {
+  let folder = dirname(entry);
+  for (let n = 0; n < 6 && folder.includes("/node_modules/"); n++, folder = dirname(folder)) {
+    try { return fileIdentity(join(folder, "package.json")); } catch {}
+  }
+  return null;
+}
 export function installationFingerprint(path: string): string | null {
   try {
     accessSync(path, constants.X_OK);
-    const stat = statSync(path);
-    if (!stat.isFile()) return null;
-    return createHash("sha256").update(JSON.stringify([realpathSync(path), stat.dev, stat.ino, stat.size, stat.mtimeMs, stat.mode])).digest("hex");
+    const identity = fileIdentity(path), entry = String(identity[0]), related: unknown[] = [];
+    // npm normally links its entry point. Include its package metadata so a
+    // stable entry script cannot keep an obsolete cached --version result.
+    if (entry.includes("/node_modules/")) related.push(npmPackageIdentity(entry));
+    // Some npm installations use a small shell wrapper instead of a symlink.
+    // Inspect only literal basedir targets; never run a shell to resolve them.
+    if (Number(identity[3]) <= 65536) {
+      const text = readFileSync(entry, "utf8");
+      if (text.startsWith("#!") && /\b(?:sh|bash)\b/.test(text.split("\n", 1)[0]!)) {
+        for (const match of text.matchAll(/\$(?:basedir|\{basedir\})(\/[^"'\s]*?node_modules\/[^"'\s]+)/g)) {
+          if (related.length >= 8) break;
+          const target = resolve(dirname(entry), "." + match[1]);
+          try { const targetIdentity = fileIdentity(target); related.push([targetIdentity, npmPackageIdentity(String(targetIdentity[0]))]); } catch { related.push([target, "missing"]); }
+        }
+      }
+    }
+    return createHash("sha256").update(JSON.stringify([identity, related])).digest("hex");
   } catch { return null; }
 }
 export function nativeInstallations(harness: string): NativeInstallation[] {
@@ -40,15 +67,34 @@ export function deviceSettings(db: DatabaseSync) {
   db.prepare("INSERT OR IGNORE INTO local_device VALUES(1,?)").run(randomUUID());
   const device = { id: String(db.prepare("SELECT deviceId FROM local_device WHERE id=1").get()!.deviceId), label: hostname(), platform: process.platform };
   const saved = (harness: string) => (db.prepare("SELECT path FROM native_installations WHERE harness=?").get(harness)?.path as string | undefined) ?? null;
+  const baseline = new Map<string, { path: string | null; fingerprint: string | null; version: string | null }>();
+  function remember(harness: string, path: string | null) {
+    if (!baseline.has(harness)) {
+      const fingerprint = path ? installationFingerprint(path) : null;
+      baseline.set(harness, { path, fingerprint, version: fingerprint ? versions.get(fingerprint) ?? null : null });
+    }
+    return baseline.get(harness)!;
+  }
   return {
     device,
     selected(harness: string, fallback: string | null) {
       const path = saved(harness);
-      if (path === null) return fallback;
-      return selectedInstallation(harness, path);
+      const selected = path === null ? fallback : selectedInstallation(harness, path);
+      remember(harness, selected);
+      return selected;
     },
     status(commands: Record<string, string | null>): NativeInstallationStatus[] {
-      return workerHarnesses.map((harness) => ({ harness, selected: commands[harness] ?? null, saved: saved(harness), restartRequired: saved(harness) !== null && this.selected(harness, null) !== commands[harness], installations: nativeInstallations(harness) }));
+      return workerHarnesses.map((harness) => {
+        const selected = commands[harness] ?? null, start = remember(harness, selected);
+        const installations = nativeInstallations(harness);
+        const choice = saved(harness) ?? start.path ?? installations[0]?.path ?? null;
+        const path = choice ? selectedInstallation(harness, choice) : null;
+        const fingerprint = path ? installationFingerprint(path) : null;
+        if (start.fingerprint && versions.has(start.fingerprint)) start.version = versions.get(start.fingerprint)!;
+        const current = { path, fingerprint, version: fingerprint ? versions.get(fingerprint) ?? null : null };
+        const changed = path !== start.path || fingerprint !== start.fingerprint;
+        return { harness, selected, saved: saved(harness), restartRequired: changed, changed, baseline: { ...start }, current, installations };
+      });
     },
     save(harness: string, path: string, fingerprint: string) {
       if (!workerHarnesses.includes(harness as typeof workerHarnesses[number]) || !executables(harness).includes(path) || installationFingerprint(path) !== fingerprint) return false;

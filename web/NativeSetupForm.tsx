@@ -76,9 +76,9 @@ export function NativeSetupForm({ projectId, connected, initialHarness = "codex"
     {notice && <Alert color="teal">{notice}</Alert>}
     {status?.change?.state === "interrupted" && <Alert color="orange">{status.change.message || "A setup change was interrupted. Refresh status and inspect native settings."}</Alert>}
     <Group>
-      <Button size="xs" variant="light" disabled={!connected || Boolean(busy)} loading={busy === "status"} onClick={() => void refresh()}>Refresh native status</Button>
-      <Button size="xs" disabled={!connected || Boolean(busy) || status?.status !== "missing"} loading={busy === "preview"} onClick={() => void change("preview")}>Preview connection</Button>
-      {status?.canUndo && <Button size="xs" variant="subtle" disabled={!connected || Boolean(busy)} loading={busy === "undo"} onClick={() => void change("undo")}>{status.change?.state === "interrupted" ? "Try undo unchanged entry" : "Undo managed connection"}</Button>}
+      <Button size="sm" variant="light" disabled={!connected || Boolean(busy)} loading={busy === "status"} onClick={() => void refresh()}>Refresh native status</Button>
+      <Button size="sm" disabled={!connected || Boolean(busy) || status?.status !== "missing"} loading={busy === "preview"} onClick={() => void change("preview")}>Preview connection</Button>
+      {status?.canUndo && <Button size="sm" variant="subtle" disabled={!connected || Boolean(busy)} loading={busy === "undo"} onClick={() => void change("undo")}>{status.change?.state === "interrupted" ? "Try undo unchanged entry" : "Undo managed connection"}</Button>}
     </Group>
     {preview && <div className="instruction-preview">
       <h3>{preview.command ? "Native add command" : "Native settings change"} · {preview.scope} scope</h3>

@@ -1,31 +1,28 @@
-# Desktop app direction
+# Native Mac app direction
 
-The working product runs locally. Each computer owns its project folders, native accounts, worker processes, approvals and saved work. The deployed website provides installation guides, release links and updates. It has no project database or native account credentials.
+The current app is a SwiftUI preview for macOS 14 and newer on Apple Silicon. SwiftPM builds it; Sparkle 2.10.0 supplies the signed app update path. The Electron prototype is retired and is not part of the shipped architecture.
 
-## One product, two entry points
+## One local service
 
-- Terminal menu for keyboard users.
-- Desktop GUI for setup and visibility.
-- One shared local service and database.
-- Existing harnesses keep their normal UI, tools, accounts and permissions.
-- Remote computers run their own service and harnesses.
+The terminal menu, native Mac app and browser support dashboard use the same TypeScript service and saved work. Native harnesses keep their usual accounts, tools and permissions. Each computer owns its project folders and worker processes. The hosted website supplies downloads and setup guidance; it has no project database or native credentials.
 
-Reuse the current React/Mantine GUI and TypeScript service. The desktop app should connect to an existing owned service or start its own verified install. A busy or unrelated service must be explained without replacement. Closing the window should leave background work running. Quitting the service must use the existing active-work and approval guards.
+The app discovers the existing standalone Node 24 launcher, uses its managed-service commands and obtains a private local session. Missing installations use the hash-checked bundled CLI installer with `AGENTKLAR_INSTALL_NO_OPEN=1`. It does not replace an unrelated service or launch workers through an arbitrary shell. Closing the app leaves background work running.
 
-## Packaging test
+## Current native scope
 
-Tauri can bundle a service executable alongside the GUI. Electron provides Node.js in its main process. Test one signed macOS package before choosing a wrapper; retain the service's Node 24 requirement, native subprocess behavior and trusted approval boundary. Do not add a browser tool or change model providers as part of desktop packaging.
+Work, Context, Instructions, Team, Models, Usage and Settings have native controls backed by existing APIs. Supported concrete approvals require a separate review and allow-once action. Context uses revision checks; instruction edits use preview/apply and owned undo. Explicit harness/model pins remain visible.
 
-Primary references checked on 2026-10-02: [Tauri external binaries](https://v2.tauri.app/develop/sidecar/), [Electron process model](https://www.electronjs.org/docs/latest/tutorial/process-model), [Tauri Windows installers](https://v2.tauri.app/distribute/windows-installer/).
+Remote workflows and approvals, plugins and skills, benchmark advice and advanced defaults remain in the browser dashboard. This is a preview, not full parity. No embedded web page hides these gaps.
 
-## Build order
+## Release gates
 
-- [ ] macOS packaging proof
-- [ ] Native folder picker
-- [ ] Background status
-- [ ] Open native harness
-- [ ] Signed app updates
-- [ ] Windows worker proof
-- [ ] Windows installer
+- [x] Native view build
+- [x] Local boundary checks
+- [ ] Native GUI acceptance
+- [ ] Developer ID signing
+- [ ] Notarized distribution
+- [ ] Signed update proof
 
-Start with macOS. Windows requires actual checks for executable discovery, native account homes, startup ownership, process cleanup, permissions, Git worktrees and remote paths. The current release supports macOS and Linux; no Windows or desktop binary is shipped yet.
+The development build is ad-hoc signed. Public app updates stay disabled without the signed-release configuration and valid Developer ID signature. Service updates keep the existing guarded CLI path. App update installation must preserve background work and require an explicit restart decision.
+
+The next step is actual native GUI acceptance, followed by a signed package and signed Sparkle update proof when a signing identity is available. The current desktop scope is macOS; other desktop platforms have no verified package. Build and packaging details are in [MACOS_APP.md](MACOS_APP.md).

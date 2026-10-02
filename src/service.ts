@@ -1219,7 +1219,7 @@ export function createService(
     if (!parsed.success) return c.json({ error: "Choose a listed native installation." }, 400);
     if (stopping) return c.json({ error: "Local service is stopping." }, 503);
     if (!devices.save(parsed.data.harness, parsed.data.path, parsed.data.fingerprint)) return c.json({ error: "Installation changed or is no longer available. Refresh installations and choose again." }, 409);
-    return c.json({ saved: true, restartRequired: commands[parsed.data.harness] !== parsed.data.path, activeRuns: activeRuns().length });
+    return c.json({ saved: true, restartRequired: devices.status(commands).find(entry => entry.harness === parsed.data.harness)?.restartRequired ?? true, activeRuns: activeRuns().length });
   });
   app.get("/api/snapshot", (c) => {
     c.header("Cache-Control", "no-store");

@@ -1,3 +1,5 @@
+import { ArrowUpLeft, BookOpen, Boxes, ChartNoAxesCombined, FileText, FolderOpen, ListTodo, Plus, Search, Settings2, Users, ChevronRight } from "lucide-react";
+import { HarnessIcon } from "./HarnessIcon.js";
 import { workerHarnesses } from "../src/contracts.js";
 import { type ToolCapability } from "../src/capabilities.js";
 import { SetupGuide } from "./SetupGuide.js";
@@ -396,7 +398,7 @@ export function App() {
             : "No native list has been checked for this project."}
         </p>
         <Button
-          size="xs"
+          size="sm"
           variant="light"
           loading={catalogBusy === projectId}
           disabled={!connected || !projectId}
@@ -522,7 +524,12 @@ export function App() {
     onProjectSelected={id => void selectProject(id)} onAddProject={() => setProjectModal(true)} onDone={() => { setSetupDismissed(true); setSetupOpen(false); setView("Work"); }} />;
   if (!local) return <div className="download-page">
     <header className="download-header"><a className="brand" href="/"><span className="brand-mark">a</span>AgentKlar</a><a href="https://github.com/kaltstart-co/agentklar/releases">Releases</a></header>
-    <main id="main-content">{setup}</main>
+    <main id="main-content">{setup}
+      <section className="settings-card mac-preview">
+        <div><h3>Mac app preview</h3><p className="hint">Apple Silicon development preview. Signing and public automatic app updates are still pending.</p></div>
+        <Button component="a" variant="default" href="https://github.com/kaltstart-co/agentklar/releases/download/v0.1.0-beta.32/AgentKlar-0.1.0-beta.32-arm64.dmg">Download Mac preview</Button>
+      </section>
+    </main>
   </div>;
   return (
     <div className="shell">
@@ -553,7 +560,7 @@ export function App() {
           disabled={!connected}
           onClick={() => setProjectModal(true)}
         >
-          ＋ Add existing project
+          <Plus size={15} aria-hidden="true" /> Add project
         </button>
         <nav aria-label="Main navigation">
           {(
@@ -599,8 +606,9 @@ export function App() {
             <Button
               disabled={!connected || !project}
               onClick={() => openTask()}
+              leftSection={<Plus size={16} aria-hidden="true" />}
             >
-              ＋ New task
+              New task
             </Button>
           )}
         </header>
@@ -656,7 +664,7 @@ export function App() {
                 <>
                   <p className="hint instruction-path">
                     {lead ? `Lead connected: ${lead.clientName || "Unknown MCP client"} · MCP client report · Last seen ${time(lead.lastSeenAt)}.` : "No lead connected."}
-                    {lead && snapshot.controls?.[project.id]?.mode !== "coordinated" && <Button size="xs" variant="subtle" ml="xs" disabled={busy}
+                    {lead && snapshot.controls?.[project.id]?.mode !== "coordinated" && <Button size="sm" variant="subtle" ml="xs" disabled={busy}
                       onClick={() => void act(async () => {
                         await api(`/projects/${project.id}/lead`, { observedClaimId: lead.claimId }, "DELETE");
                       })}>Clear lead</Button>}
@@ -666,7 +674,8 @@ export function App() {
                     <TextInput
                       id="task-search"
                       aria-label="Search tasks"
-                      placeholder="Search tasks…"
+                      placeholder="Search tasks"
+                      leftSection={<Search size={15} aria-hidden="true" />}
                       value={search}
                       onChange={(e) => setSearch(e.currentTarget.value)}
                     />
@@ -780,7 +789,7 @@ export function App() {
                               run.state,
                             ) && (
                               <Button
-                                size="xs"
+                                size="sm"
                                 color="gray"
                                 variant="subtle"
                                 loading={busy}
@@ -829,7 +838,7 @@ export function App() {
                               <strong>Linked work</strong>
                               <Group gap="xs" mt="xs">
                                 {linkedRuns.map((item) => (
-                                  <Button key={item.id} size="xs" variant={item.id === run.id ? "filled" : "light"}
+                                  <Button key={item.id} size="sm" variant={item.id === run.id ? "filled" : "light"}
                                     onClick={() => setRunId(item.id)}>
                                     {item.followUp?.kind === "review" ? "Review" : item.followUp?.kind === "fix" ? "Fix" : "Original"} · {labels[item.state]}
                                   </Button>
@@ -839,10 +848,10 @@ export function App() {
                           )}
                           <GitChanges key={run.id} runId={run.id} projectId={projectId} snapshot={snapshot} connected={connected} request={api} />
                           {run.state === "completed" && run.followUp?.kind !== "review" && (
-                            <Button size="xs" variant="light" onClick={() => openTask(run)}>Review work</Button>
+                            <Button size="sm" variant="light" onClick={() => openTask(run)}>Review work</Button>
                           )}
                           {run.state === "completed" && run.followUp?.kind === "review" && (
-                            <Button size="xs" variant="light" onClick={() => openTask(run)}>Fix findings</Button>
+                            <Button size="sm" variant="light" onClick={() => openTask(run)}>Fix findings</Button>
                           )}
                           {run.routing && (
                             <details>
@@ -897,7 +906,7 @@ export function App() {
                                   {a.decisions.map((decision) => (
                                     <Button
                                       key={decision}
-                                      size="xs"
+                                      size="sm"
                                       variant={
                                         decision
                                           .toLowerCase()
@@ -970,7 +979,7 @@ export function App() {
                         </>
                       ) : (
                         <div className="detail-empty">
-                          <span>↖</span>
+                          <ArrowUpLeft size={25} aria-hidden="true" />
                           <h3>Select a task</h3>
                           <p>
                             See its native events, result and permission
@@ -983,7 +992,7 @@ export function App() {
                 </>
               ) : (
                 <div className="setup">
-                  <div className="empty-mark">＋</div>
+                  <div className="empty-mark"><FolderOpen size={22} aria-hidden="true" /></div>
                   <h2>Bring your project</h2>
                   <p>
                     Register an existing folder. Keep using your editor and
@@ -996,7 +1005,7 @@ export function App() {
                     className="text-link"
                     onClick={() => setView("Settings")}
                   >
-                    Then connect one MCP host →
+                    Connect your harness <ChevronRight size={14} aria-hidden="true" />
                   </button>
                 </div>
               ))}
@@ -1032,7 +1041,7 @@ export function App() {
                       <Group justify="space-between">
                         <h3>Role {index + 1}</h3>
                         <Button
-                          size="xs"
+                          size="sm"
                           color="gray"
                           variant="subtle"
                           onClick={() =>
@@ -1063,6 +1072,8 @@ export function App() {
                         ]} onChange={(value) => setRoles(roles.map((r) => r.id === role.id ? { ...r, peerId: value && value !== "local" ? value : undefined } : r))} />
                         <Select
                           label="Harness"
+                          leftSection={<HarnessIcon harness={role.harness} size={18} />}
+                          renderOption={({ option }) => <Group gap="sm"><HarnessIcon harness={option.value} size={18} /><span>{option.label}</span></Group>}
                           value={role.harness}
                           data={[
                             ...(role.peerId ? workerHarnesses.map((id) => ({ value: id, label: harnessName(id) })) : workers.map((h) => ({ value: h.id, label: h.name }))),
@@ -1137,7 +1148,7 @@ export function App() {
                         ])
                       }
                     >
-                      ＋ Add role
+                      <Plus size={15} aria-hidden="true" /> Add role
                     </Button>
                     <Button
                       loading={busy}
@@ -1184,7 +1195,7 @@ export function App() {
                 <Benchmarks connected={connected} snapshot={benchmarks} onChange={setBenchmarks} />
                 {catalog?.harnesses.map((entry) => (
                   <div className="role-card" key={entry.harness}>
-                    <h3>{harnessName(entry.harness)}</h3>
+                    <h3 className="harness-label"><HarnessIcon harness={entry.harness} size={20} />{harnessName(entry.harness)}</h3>
                     <p className="hint">Effective tools are unknown before a worker starts.{entry.harness === "claude" ? " Read-only workers have only Read, Glob and Grep." : ""}</p>
                     {entry.harness === "opencode" && <Stack gap="xs">
                       <p className="hint">Use the providers already connected in OpenCode. Add accounts in OpenCode, then refresh this list.</p>
@@ -1289,7 +1300,7 @@ export function App() {
                 {catalogHeader}
                 {catalog?.harnesses.map((entry) => (
                   <div className="role-card" key={entry.harness}>
-                    <h3>{harnessName(entry.harness)}</h3>
+                    <h3 className="harness-label"><HarnessIcon harness={entry.harness} size={20} />{harnessName(entry.harness)}</h3>
                     {entry.quota.message && <p>{entry.quota.message}</p>}
                     {entry.quota.observedAt && <p className="hint">Observed: {new Date(entry.quota.observedAt).toLocaleString()}</p>}
                     <div>
@@ -1343,11 +1354,11 @@ export function App() {
                 <p className="page-description">Manage this computer and your native harness connections.</p>
                 {!connected ? <>{setup}<details className="settings-disclosure"><summary>Manual MCP connection</summary><div className="disclosure-body"><p className="hint">Use the local app to generate an entry for your computer.</p><pre>{snippet}</pre></div></details></> : <>
                   {guidedSetup}
+                  <AgentKlarUpdates connected={connected} request={api} />
                   <div className="settings-advanced">
                     <h3>Advanced</h3>
                     <p className="hint">Inspect native files, manage other computers, or use manual startup.</p>
                     <details className="settings-disclosure"><summary>This computer and native installations</summary><div className="disclosure-body"><NativeInstallations device={snapshot.device} request={api} /></div></details>
-                    <details className="settings-disclosure"><summary>AgentKlar updates</summary><div className="disclosure-body"><AgentKlarUpdates connected={connected} request={api} /></div></details>
                     {project && <details className="settings-disclosure" open={nativePreferencesOpen} onToggle={event => setNativePreferencesOpen(event.currentTarget.open)}><summary>Native defaults and plugin bundles</summary><div className="disclosure-body">{nativePreferencesOpen && <NativePreferences key={`preferences-${project.id}`} projectId={project.id} connected={connected} request={api} />}</div></details>}
                     {project && <NativeInventory key={`inventory-${project.id}`} projectId={project.id} connected={connected} request={api} />}
                     <details id="connected-computers" className="settings-disclosure" open={devicesOpen} onToggle={event => setDevicesOpen(event.currentTarget.open)}><summary>Connected computers and remote approvals</summary><div className="disclosure-body"><Devices device={snapshot.device} projects={snapshot.projects} connected={connected} request={api} /></div></details>
@@ -1356,7 +1367,7 @@ export function App() {
                       <h4>Other MCP hosts</h4><pre>{snippet}</pre>
                     </div></details>
                     <details className="settings-disclosure"><summary>Installed harness support</summary><div className="disclosure-body">
-                      {snapshot.harnesses.map(h => <div className="harness" key={h.id}><div><strong>{h.name}</strong><p>{h.reason}</p>{h.executable && <p className="hint">Current CLI: {h.executable}</p>}</div><Badge color={h.available ? "teal" : "gray"} variant="light">{h.available ? "Installed" : "Not found"}</Badge><span>{h.workerSupported ? (["gemini", "cursor-agent", "zcode"].includes(h.id) ? "Experimental worker" : "Worker supported") : h.hostSupported ? "MCP host" : "Discovery only"}</span></div>)}
+                      {snapshot.harnesses.map(h => <div className="harness" key={h.id}><div><strong className="harness-label"><HarnessIcon harness={h.id} size={20} />{h.name}</strong><p>{h.reason}</p>{h.executable && <p className="hint">Current CLI: {h.executable}</p>}</div><Badge color={h.available ? "teal" : "gray"} variant="light">{h.available ? "Installed" : "Not found"}</Badge><span>{h.workerSupported ? (["gemini", "cursor-agent", "zcode"].includes(h.id) ? "Experimental worker" : "Worker supported") : h.hostSupported ? "MCP host" : "Discovery only"}</span></div>)}
                       <p className="hint">Installed means the executable was found. Sign in through your native harness before starting a worker.</p>
                     </div></details>
                   </div>
@@ -1480,6 +1491,8 @@ export function App() {
             />
             <Select
               label="Worker harness"
+              leftSection={<HarnessIcon harness={harness} size={18} />}
+              renderOption={({ option }) => <Group gap="sm"><HarnessIcon harness={option.value} size={18} /><span>{option.label}</span></Group>}
               value={taskHarness}
               disabled={Boolean(selectedRole)}
               placeholder="No installed worker harness"
@@ -1607,7 +1620,7 @@ export function App() {
                     {adviceChoice && <p className="hint">Checked again on Start.</p>}
                     {adviceChoice && !adviceChoice.device?.peerId && (
                       <Button
-                        size="xs"
+                        size="sm"
                         variant="light"
                         disabled={!canUseAdvice}
                         onClick={() => {
@@ -2047,7 +2060,7 @@ function NativeHandoff({ runId, connected, projectBusy }: { runId: string; conne
     <details className="run-context">
       <summary>Continue in native harness</summary>
       <p className="hint">Show a command for your terminal. AgentKlar will not run it.</p>
-      <Button size="xs" variant="light" loading={loading} disabled={!canShow} onClick={() => void load()}>
+      <Button size="sm" variant="light" loading={loading} disabled={!canShow} onClick={() => void load()}>
         Show native command
       </Button>
       {projectBusy && <p className="hint">A worker is active in this checkout. Close it before preparing a native command.</p>}
@@ -2056,7 +2069,7 @@ function NativeHandoff({ runId, connected, projectBusy }: { runId: string; conne
       {canShow && packet?.command && (
         <div>
           <p className="hint">Copy into your terminal (macOS or Linux):</p>
-          <Button size="xs" variant="light" disabled={loading} onClick={() => void copy()}>
+          <Button size="sm" variant="light" disabled={loading} onClick={() => void copy()}>
             {copied ? "Copied" : "Copy command"}
           </Button>
           <pre className="result native-command" tabIndex={0} aria-label="Native continuation command">{packet.command.display}</pre>
@@ -2106,7 +2119,7 @@ function RunContext({ run, connected }: { run: Run; connected: boolean }) {
       {error && (
         <Alert color="red">
           {error}{" "}
-          <Button size="xs" variant="subtle" onClick={() => void load()}>
+          <Button size="sm" variant="subtle" onClick={() => void load()}>
             Try again
           </Button>
         </Alert>
@@ -2171,14 +2184,6 @@ function QuotaWindowView({
 }
 
 function NavIcon({ index }: { index: number }) {
-  const paths = [
-    "M3 3h5v5H3z M12 3h5v5h-5z M3 12h5v5H3z M12 12h5v5h-5z",
-    "M4 13L14 3l3 3L7 16l-4 1z M12 5l3 3",
-    "M4 4h12 M4 8h12 M4 12h8 M4 16h10",
-    "M7 9a3 3 0 1 0 0-6a3 3 0 0 0 0 6 M2 17v-2a5 5 0 0 1 10 0v2 M14 4a3 3 0 0 1 0 6 M15 12a4 4 0 0 1 3 4v1",
-    "M10 2l8 8-8 8-8-8z M10 6l4 4-4 4-4-4z",
-    "M10 2a8 8 0 1 0 0 16a8 8 0 0 0 0-16 M10 5v5l3 2",
-    "M3 5h14 M3 10h14 M3 15h14 M7 3v4 M13 8v4 M7 13v4",
-  ];
-  return <svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d={paths[index]} /></svg>;
+  const Icon = [ListTodo, BookOpen, FileText, Users, Boxes, ChartNoAxesCombined, Settings2][index];
+  return <Icon size={18} strokeWidth={1.7} aria-hidden="true" />;
 }

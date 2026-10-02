@@ -67,7 +67,7 @@ export function RemoteApprovals({ dispatchId, peerId, owner, connected, connecti
     {summaries.length > 0 && summaries.map(item => <div key={item.id}>
       <strong>{item.title}</strong>
       {!item.available && <p className="hint">{item.reason || "Answer this request on the owner computer."}</p>}
-      <Button size="xs" variant="light" disabled={busy || !connected || !active || !item.available || !!pending} onClick={() => void act(async current => {
+      <Button size="sm" variant="light" disabled={busy || !connected || !active || !item.available || !!pending} onClick={() => void act(async current => {
         const value = await request<Read>(`/remote-approvals/${dispatchId}/${item.id}/read`, {});
         if (current()) { setRead(value); setReceipt(value.receipt ?? null); if(value.actionIntent?.state === "pending") { pendingStore[dispatchId]=value.actionIntent;setPending(value.actionIntent); } }
       })}>Review request</Button>
@@ -77,7 +77,7 @@ export function RemoteApprovals({ dispatchId, peerId, owner, connected, connecti
       <p>Owner: {owner}. Review this {approval.kind === "command" ? "command" : "file change"} before continuing.</p>
       {details(approval)}
       <details><summary>All request details</summary><pre style={{overflow:"auto",maxHeight:260}}>{JSON.stringify(approval.details,null,2)}</pre></details>
-      <Group>{approval.decisions.map(decision => <Button size="xs" key={decision} variant={decision.toLowerCase().includes("accept") ? "filled" : "light"}
+      <Group>{approval.decisions.map(decision => <Button size="sm" key={decision} variant={decision.toLowerCase().includes("accept") ? "filled" : "light"}
         disabled={!connected || busy || !active || !available || !!pending} onClick={() => {
           if(pendingStore[dispatchId]) return;
           const answer = { approvalId: approval.id, requestId: crypto.randomUUID(), expectedDigest: read!.digest!, decision };

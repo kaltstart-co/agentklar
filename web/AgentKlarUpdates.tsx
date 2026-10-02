@@ -41,10 +41,12 @@ export function AgentKlarUpdates({ connected, request }: {
         <p className="hint">{status.installation.reason}</p>
         {status.installation.supported && <>
           <p className="hint">Save open drafts first. The terminal command refuses active workers. Reopen the dashboard after the update.</p>
-          <Group gap="xs"><code>{status.command}</code><CopyButton value={status.command}>{({ copied, copy }) => <Button size="xs" variant="light" onClick={copy}>{copied ? "Copied" : "Copy update command"}</Button>}</CopyButton></Group>
+          <Group gap="xs"><code>{status.command}</code><CopyButton value={status.command}>{({ copied, copy }) => <Button size="sm" variant="light" onClick={copy}>{copied ? "Copied" : "Copy update command"}</Button>}</CopyButton></Group>
         </>}
       </>}
-      <Group><Button size="sm" variant="light" disabled={!connected || busy} loading={busy} onClick={() => void check()}>Check for update</Button></Group>
+      <Group gap="sm">
+        <Button variant="default" disabled={!connected || busy} loading={busy} onClick={() => void check()}>Check service update</Button>
+      </Group>
       {error && !status && <Alert color="red">{error}</Alert>}
     </Stack>
   </section>;
