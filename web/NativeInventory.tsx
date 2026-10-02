@@ -21,9 +21,9 @@ export function NativeInventory({ projectId, connected, request }: {
     } catch (e) { if (id === generation.current) setError((e as Error).message); }
     finally { if (id === generation.current) { inFlight.current = false; setBusy(false); } }
   }
-  return <details>
+  return <details className="settings-disclosure">
     <summary>Native config and extensions</summary>
-    <Stack gap="sm" style={{ minWidth: 0, overflowWrap: "anywhere" }}>
+    <Stack className="disclosure-body" gap="sm" style={{ minWidth: 0, overflowWrap: "anywhere" }}>
       <p className="hint">Read source presence and bounded extension metadata for this project and computer. Config values stay private. Cached packages and manifests do not prove an extension is enabled or loaded in your native session.</p>
       <Button size="xs" variant="light" disabled={!connected || busy} loading={busy} onClick={() => void refresh()}>Refresh native inventory</Button>
       {!connected && <p className="hint">Reconnect the local service to read inventory.</p>}

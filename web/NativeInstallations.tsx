@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Alert, Button, Select, Stack } from "@mantine/core";
+import { Alert, Button, Group, Select, Stack } from "@mantine/core";
 import type { NativeInstallationStatus, Snapshot } from "../src/contracts.js";
 
 export function NativeInstallations({ device, request }: { device: Snapshot["device"]; request: <T>(path: string, body?: unknown) => Promise<T> }) {
@@ -26,21 +26,19 @@ export function NativeInstallations({ device, request }: { device: Snapshot["dev
     finally { setBusy(false); }
   }
   return <Stack gap="sm">
-    <h3>This computer</h3>
-    <p>{device ? `${device.label} · ${device.platform}` : "Computer details are unavailable. Restart AgentKlar after updating."}</p>
-    {device && <p className="hint">Device ID: {device.id}</p>}
-    <p className="hint">Workers and native sign-in checks run on this computer. Each computer uses its own native accounts and project folders.</p>
-    <Button variant="light" loading={busy} onClick={() => void refresh()}>Find native installations</Button>
+    <div className="settings-heading"><div><h3>This computer</h3><p className="hint">{device ? `${device.label} · ${device.platform}` : "Computer details unavailable. Restart after updating."}</p></div><Button variant="light" loading={busy} onClick={() => void refresh()}>Find native installations</Button></div>
+    <p className="hint">Workers use this computer’s native accounts and project folders.</p>
+    {device && <details className="inline-disclosure"><summary>Device identity</summary><p className="hint">Device ID: {device.id}</p></details>}
     {error && <Alert color="red">{error}</Alert>}
     {notice && <Alert color="blue">{notice}</Alert>}
-    {entries.map((entry) => <Stack gap="xs" key={entry.harness}>
+    {entries.map((entry) => <Stack className="installation-choice" gap="xs" key={entry.harness}>
       <strong>{entry.harness}</strong>
       <p className="hint">Current CLI: {entry.selected || "Not available"}</p>
       {(entry.restartRequired || (entry.saved && entry.selected === null)) && <Alert color="orange">{entry.selected === null
         ? `Saved CLI unavailable: ${entry.saved}. Review a listed installation and save it again.`
         : `Saved choice: ${entry.saved}. Restart after jobs finish to apply it.`}</Alert>}
       <Select label="Native installation on this computer" value={choices[entry.harness] ?? entry.saved ?? entry.selected} data={entry.installations.map((item) => ({ value: item.path, label: `${item.version || "Version unknown"} · ${item.path}` }))} onChange={(value) => setChoices({ ...choices, [entry.harness]: value || "" })} disabled={busy || !entry.installations.length} />
-      <Button variant="light" disabled={busy || !entry.installations.some((item) => item.path === (choices[entry.harness] ?? entry.saved ?? entry.selected))} onClick={() => void save(entry)}>Save for next restart</Button>
+      <Group><Button variant="light" disabled={busy || !entry.installations.some((item) => item.path === (choices[entry.harness] ?? entry.saved ?? entry.selected))} onClick={() => void save(entry)}>Save for next restart</Button></Group>
     </Stack>)}
   </Stack>;
 }

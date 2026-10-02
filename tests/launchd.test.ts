@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -31,6 +32,36 @@ test("an unrelated launchd label appearing during install is not adopted", { ski
     for (const path of [plist, join(home, "launchd-install.json"), join(home, "operator-key")])
       assert.equal(existsSync(path), false);
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("managed startup preserves the installation npm prefix without registering a real job", { skip: process.platform !== "darwin" }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "agentklar-launchd-prefix-"));
+  const home = join(dir, "home"), plist = join(dir, "LaunchAgents", "agentklar.plist");
+  const previous = process.env.NPM_CONFIG_PREFIX;
+  const prefix = join(dir, "private-node");
+  process.env.NPM_CONFIG_PREFIX = prefix;
+  let captured = false;
+  const control = (args: string[]) => {
+    if (args[0] === "print") return false;
+    assert.equal(args[0], "bootstrap");
+    const converted = spawnSync("/usr/bin/plutil", ["-convert", "json", "-o", "-", plist], { encoding: "utf8" });
+    assert.equal(converted.status, 0, converted.stderr);
+    const env = JSON.parse(converted.stdout).EnvironmentVariables;
+    assert.equal(env.NPM_CONFIG_PREFIX, prefix);
+    assert.equal(env.PATH, process.env.PATH);
+    assert.equal(env.AGENTKLAR_HOME, home);
+    captured = true;
+    throw new Error("Captured startup; no real job launched");
+  };
+  try {
+    await assert.rejects(install({ home, port: 4452, label: "com.agentklar.test.prefix", plist,
+      journal: join(home, "launchd-install.json"), target: "gui/501/com.agentklar.test.prefix", domain: "gui/501" }, control), /no real job launched/);
+    assert.equal(captured, true);
+    assert.equal(existsSync(plist), false);
+  } finally {
+    if (previous === undefined) delete process.env.NPM_CONFIG_PREFIX; else process.env.NPM_CONFIG_PREFIX = previous;
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("private operator opens fresh browser links and stops new work during shutdown", async () => {

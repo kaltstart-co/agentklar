@@ -2,6 +2,20 @@
 
 Verified on 2026-10-01 and 2026-10-02 using Node 24.21.0. The old application was not used.
 
+## Installer, layout and Claude quotas — beta.29
+
+The shell installer downloads an immutable, SHA-256-checked beta.28 starter and uses its guarded updater to reach the newest compatible official release. It reuses writable Node 24/npm or installs checked official Node binaries privately. Its launcher and managed macOS startup preserve the installation's npm prefix. Tests cover corrupt archives, conflicting npm settings, safe repeat installation, active-work refusal, Linux foreground startup, unsupported platforms, and occupied or broken launchers without overwriting them. Vite ships the exact script bytes at `/install.sh`; Vercel excludes that file from the HTML rewrite.
+
+Browser checks used an isolated local service and temporary project. All seven pages had the same content width and left edge. Scrolling Settings moved the main content while the sidebar and brand stayed at the top. A real 320-pixel viewport had no horizontal overflow or overlapping navigation buttons. The installer action displayed `Copied`; exact clipboard contents were not confirmed by the browser helper. The local connection error now uses a plain message instead of a JSON parser error. Evidence: `/tmp/agentklar-beta29-qa/`.
+
+Claude's pinned SDK exposes an experimental usage method. The empty-input metadata session calls it with `skipBehaviors:true`, so it sends no model prompt and does not scan transcripts. A fresh read from the signed-in native Claude executable returned general five-hour and weekly percentages plus a model-scoped weekly window. Only bounded normalized windows are retained; costs, credits, account details and behavior data are discarded. Discovery and quota reads fail independently. Routing uses general Claude windows and known model-family scopes; unknown labels do not constrain unrelated models. Older native versions retain an unavailable result. Complete cross-harness quota coverage remains unchecked.
+
+Automatic Muse/OpenCode fallback requires a fresh complete native catalog, a unique native default or sole offered model, and positive included-usage evidence. It preserves unknown quality/cost labels and excludes hard work, Best preference, exhausted limits and image mismatches. If first-run allowance is unknown, the error explains how to choose a native harness explicitly. Pins remain fixed, and the owner rechecks allowance before dispatch.
+
+The bounded native main-harness attempt used the immutable installed beta.28 package, actual Codex 0.159.2/Sol 6.1 and signed-in Claude metadata. Codex read `projects_list` through the real MCP bridge after a one-time native tool approval. The earlier call waited at that approval and was cancelled. The ten-minute bound ended with zero workers and unchanged test Git files; build/review/fix/handoff remains unproved. Codex saved trust for the named temporary folder; root removed only that entry afterward. The native config byte hash changed during the CLI session, so unchanged-config status is not claimed. Evidence: `/tmp/agentklar-native-proof-beta28/`.
+
+Final local checks passed: TypeScript, build, all 231 tests with zero skips, package smoke with 24 MCP tools, and whitespace checks. An independent read-only review found the unusable-launcher edge case; the fix and regression checks passed. A separate review found no quota/routing issues. The Mac mini `.local` hostname did not resolve from this computer. A real two-computer test and all eight remaining checklist items remain required.
+
 ## AgentKlar workflow skill — beta.17
 
 The portable [workflow skill](../skills/agentklar-workflow/SKILL.md) uses current MCP tools and schemas. It keeps user pins, saved cost preference, exact-key retries, worktree limits, local approvals, and lead review in the native harness. The skill-creator `quick_validate.py` passed. An isolated skill-installer test mapped the pinned repository source to this same `SKILL.md`, previewed the full text, installed the exact bytes in a temporary `.agents/skills` folder, then removed the managed copy.

@@ -110,7 +110,7 @@ export async function install(p: ReturnType<typeof paths>, control: typeof launc
   const program = source ? [process.execPath, "--import", fileURLToPath(import.meta.resolve("tsx")), server] : [process.execPath, server];
   const id = randomUUID();
   const env: Record<string, string> = { AGENTKLAR_HOME: p.home, AGENTKLAR_PORT: String(p.port), AGENTKLAR_SERVICE_ID: id };
-  for (const name of ["PATH", "CODEX_HOME", "CLAUDE_CONFIG_DIR"])
+  for (const name of ["PATH", "NPM_CONFIG_PREFIX", "CODEX_HOME", "CLAUDE_CONFIG_DIR"])
     if (process.env[name]) env[name] = process.env[name]!;
   const plistData = { Label: p.label, ProgramArguments: program,
     WorkingDirectory: root, EnvironmentVariables: env, RunAtLoad: true,

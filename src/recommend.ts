@@ -86,13 +86,15 @@ function quota(
   now: number,
   checkedAt: string,
 ) {
-  const relevant = catalog.quota.buckets.filter(
-    (b) =>
-      ((catalog.harness === "codex" && b.id === "codex" || catalog.harness === "muse" && b.id === "muse") && b.normalModel === null) ||
-      b.normalModel === id ||
-      (model != null && b.normalModel === model.id) ||
-      (model?.resolvedModel != null && b.normalModel === model.resolvedModel),
-  );
+  const nativeModel = model?.resolvedModel || model?.id || id;
+  const claudeFamily = /^(?:claude-)?(opus|sonnet)(?:-|$)/.exec(nativeModel)?.[1];
+  const relevant = catalog.quota.buckets.filter(b => {
+    if (b.normalModel === null) return catalog.harness === "codex" && b.id === "codex" ||
+      catalog.harness === "muse" && b.id === "muse" ||
+      catalog.harness === "claude" && ["claude", "seven_day_oauth_apps"].includes(b.id);
+    if (catalog.harness === "claude" && ["opus", "sonnet"].includes(b.normalModel)) return b.normalModel === claudeFamily;
+    return b.normalModel === id || b.normalModel === model?.id || b.normalModel === model?.resolvedModel;
+  });
   const windows = relevant
     .flatMap((b) => [b.primary, b.secondary])
     .filter((w) => w !== null);
@@ -190,6 +192,7 @@ export function recommendWorkers(project: Project, input: RecommendationInput, s
     id: string,
     pinned: boolean,
     source: RecommendationSource,
+    nativeFallback = false,
   ) => {
     const q = quota(catalog, model, id, now, source.catalog.checkedAt);
     const p = profile(catalog.harness, model, id);
@@ -234,7 +237,7 @@ export function recommendWorkers(project: Project, input: RecommendationInput, s
         "Fable billing may require usage credits; included access and billing are unknown.",
       );
     if (
-      !pinned &&
+      !pinned && !nativeFallback &&
       (p.tier === "unknown" ||
         (catalog.harness === "claude" && model?.id === "default"))
     )
@@ -269,9 +272,9 @@ export function recommendWorkers(project: Project, input: RecommendationInput, s
         "Pinned model is absent from the current catalog; capability and access are unknown.",
       );
     if (p.tier === "unknown")
-      warnings.push(
-        "Pinned model has no reviewed tier; capability, billing and access are unknown.",
-      );
+      warnings.push(nativeFallback
+        ? "Native fallback has no reviewed tier or comparable scores. Cost and quality ranking are unknown; the saved preference cannot be compared."
+        : "Pinned model has no reviewed tier; capability, billing and access are unknown.");
     if (catalog.harness === "muse" && /contributor/i.test(id))
       warnings.push("Review the native model description for contributor data-use terms before starting work.");
     const wanted = target(project, input, q.headroom);
@@ -279,13 +282,15 @@ export function recommendWorkers(project: Project, input: RecommendationInput, s
       reasons.unshift(
         `Preserved the explicit ${basis === "task-pin" ? "task" : "role"} model pin.`,
       );
+    else if (nativeFallback)
+      reasons.unshift(`Used the ${model?.isDefault ? "explicit native default" : "only offered native model"} after no reviewed candidate remained. Native ordinary usage is allowed; no cost or quality rank was inferred.`);
     else
       reasons.unshift(
         `Saved ${project.preference} preference and ${input.complexity} complexity target the ${wanted} tier. This model is in the reviewed ${p.tier} tier.`,
       );
     const tierIndex = tiers.indexOf(p.tier as Exclude<Tier, "unknown">);
     const targetIndex = tiers.indexOf(wanted);
-    if (!pinned && tierIndex !== targetIndex)
+    if (!pinned && !nativeFallback && tierIndex !== targetIndex)
       warnings.push(
         `No exact target is selected here; this is the nearest available reviewed tier (${p.tier}).`,
       );
@@ -313,8 +318,6 @@ export function recommendWorkers(project: Project, input: RecommendationInput, s
     });
   };
   const allowedHarnesses: Harness[] = harness ? [harness] : ["codex", "claude"];
-  if ((harness === "muse" || harness === "opencode") && !pin)
-    advice.reasons.push(`Choose a specific ${harness} model to get pin advice, or start it manually with its native default. It has no reviewed cost or quality tier.`);
   const eligibleSources = sourcesInput.filter(source => !role || (role.peerId ? source.device?.peerId === role.peerId : !source.device?.peerId));
   if (role && !eligibleSources.length) advice.reasons.push("Pinned role device is unavailable. No replacement was selected.");
   for (const source of eligibleSources) {
@@ -362,6 +365,26 @@ export function recommendWorkers(project: Project, input: RecommendationInput, s
     } else warn(`${h}: native models could not be read.`);
   }
   }
+  // Unranked native choices need positive allowance evidence; never infer a paid-provider fallback.
+  const fallbackHarnesses: Harness[] = harness ? [harness].filter(h => h === "muse" || h === "opencode") : ["muse", "opencode"];
+  if (!pin && candidates.length === 0) {
+    for (const source of eligibleSources) for (const h of fallbackHarnesses) {
+      if (!source.installed[h]) continue;
+      const catalog = source.catalog.harnesses.find((c): c is WorkerCatalog => c.harness === h);
+      const checked = Date.parse(source.catalog.checkedAt);
+      if (!catalog || catalog.modelsStatus !== "available" || catalog.modelsTruncated || catalog.auth?.status === "sign_in_required" ||
+          !Number.isFinite(checked) || checked > now || now - checked > 5 * 60_000 || input.complexity === "hard" || project.preference === "best") continue;
+      const defaults = catalog.models.filter(model => model.isDefault);
+      const model = defaults.length === 1 ? defaults[0] : defaults.length === 0 && catalog.models.length === 1 ? catalog.models[0] : undefined;
+      if (!model || /contributor/i.test(model.id)) continue;
+      const q = quota(catalog, model, model.id, now, source.catalog.checkedAt);
+      if (!q.allowed || q.blocked || q.exhausted) continue;
+      evaluate(catalog, model, model.id, false, source, true);
+    }
+    if (candidates.length === 0 && eligibleSources.some(source => fallbackHarnesses.some(h => source.installed[h]))) {
+      advice.reasons.unshift("Automatic selection cannot safely rank this native setup. Choose Muse or OpenCode explicitly, review its native model, and turn off Choose model automatically to use its native default. For images, choose a model with confirmed image input. Native access and billing still need checking.");
+    }
+  }
   candidates.sort(
     (a, b) =>
       a.distance - b.distance ||
@@ -396,6 +419,8 @@ export function recommendWorkers(project: Project, input: RecommendationInput, s
     advice.benchmarkMethod = "reference-tie-break";
     advice.reasons.push(`Fresh LiveBench ${advice.choice.benchmark.metric} reference scores break this equal policy fit after native included usage priority.`);
 
+  } else if (advice.choice?.tier === "unknown" && !pin) {
+    advice.reasons.push("No reviewed candidate remained. The native fallback is unranked; preference, capability and cost comparisons are unknown.");
   } else if (advice.choice && !pin) {
     advice.reasons.push("Policy order is used: no comparable tie needs ranking, or the group lacks fresh, exact LiveBench scores for every candidate.");
   }
@@ -411,6 +436,8 @@ export function recommendWorkers(project: Project, input: RecommendationInput, s
     advice.choice
       ? pin
         ? "Advice preserves the model pin. Starting a worker still needs an explicit task_start call."
+        : advice.choice.tier === "unknown"
+          ? "Selected a fresh native default or only offered model with positive ordinary usage evidence. No reviewed quality or cost ranking was assigned."
         : advice.benchmarkMethod === "reference-tie-break"
           ? "Choices prefer the target tier, then the nearest reviewed tier; equal fits prefer known native included usage, then fresh comparable LiveBench reference scores."
           : "Choices prefer the target tier, then the nearest reviewed tier; equal fits prefer known native included usage, then the reviewed policy order."
@@ -429,6 +456,11 @@ export function selectedWorkerEligibility(choice: Pick<WorkerChoice,"harness"|"m
   if (catalog.auth?.status === "sign_in_required") return {eligible:false,reason:"Selected worker requires native sign-in."};
   if (requiresImages && !model.inputModalities?.includes("image")) return {eligible:false,reason:"Selected native model image support is unavailable."};
   const q = quota(catalog,model,choice.model,now,source.catalog.checkedAt);
+  if (basis === "policy" && (choice.harness === "muse" || choice.harness === "opencode")) {
+    const checked = Date.parse(source.catalog.checkedAt);
+    if (!q.allowed || catalog.modelsTruncated || !Number.isFinite(checked) || checked > now || now - checked > 5 * 60_000)
+      return { eligible: false, reason: "Unranked automatic choice needs a fresh native catalog and positive ordinary usage evidence. Choose the harness and model explicitly instead." };
+  }
   if (q.blocked || (q.exhausted && basis === "policy")) return {eligible:false,reason:"Selected native usage is blocked or its applicable fresh window is exhausted."};
   return {eligible:true};
 }

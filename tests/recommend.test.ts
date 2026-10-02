@@ -666,3 +666,102 @@ test("peer Claude competes with local Codex at the same policy tier using its ow
  assert.equal(advice.benchmarkMethod,"policy-fallback");
  assert.equal(advice.policyVersion,"2026-10-02.3");
 });
+
+function unrankedSource(harness: "muse" | "opencode", allowed: boolean | null = true) {
+  return { catalog: { projectId: p.id, checkedAt: new Date(now).toISOString(), harnesses: [{ ...catalog(), harness, models: [model(harness === "muse" ? "spark" : "provider/native", { isDefault: harness === "muse" })], quota: { status: "available" as const, message: null, ordinaryUsageAllowed: allowed, buckets: [] as QuotaBucket[] } }] }, installed: { codex: false, claude: false, [harness]: true } };
+}
+
+for (const harness of ["muse", "opencode"] as const) test(`${harness}-only Automatic uses a fresh native choice only with positive ordinary usage evidence`, () => {
+  const source = unrankedSource(harness);
+  const advice = recommendWorkers(p, recommendationSchema.parse({}), [source], now);
+  assert.equal(advice.choice?.harness, harness);
+  assert.equal(advice.choice?.model, source.catalog.harnesses[0].models[0].id);
+  assert.equal(advice.choice?.tier, "unknown");
+  assert.equal(advice.choice?.basis, "policy");
+  assert.equal(advice.benchmarkMethod, "policy-fallback");
+  assert.equal(advice.choice?.benchmark, undefined);
+  assert.match(advice.choice!.reasons.join(" "), /no reviewed candidate.*no cost or quality rank/);
+  assert.match(advice.choice!.warnings.join(" "), /ranking.*unknown/);
+  assert.doesNotMatch(advice.reasons.join(" "), /Choices prefer the target tier/);
+  const unknown = unrankedSource(harness, null);
+  const firstRun = recommendWorkers(p, recommendationSchema.parse({}), [unknown], now);
+  assert.equal(firstRun.choice, null);
+  assert.match(firstRun.reasons[0], /Choose Muse or OpenCode.*turn off Choose model automatically/);
+});
+
+test("unranked fallback preserves allowance, image, freshness and quality floors", () => {
+  const eligible = () => unrankedSource("muse");
+  for (const change of [
+    (source: ReturnType<typeof eligible>) => { source.catalog.harnesses[0].quota.ordinaryUsageAllowed = false; },
+    (source: ReturnType<typeof eligible>) => { source.catalog.checkedAt = new Date(now - 300_001).toISOString(); },
+    (source: ReturnType<typeof eligible>) => { source.catalog.checkedAt = new Date(now + 1).toISOString(); },
+    (source: ReturnType<typeof eligible>) => { source.catalog.harnesses[0].modelsTruncated = true; },
+    (source: ReturnType<typeof eligible>) => { source.catalog.harnesses[0].models[0].id = "contributor-native"; },
+  ]) {
+    const source = eligible(); change(source);
+    assert.equal(recommendWorkers(p, recommendationSchema.parse({}), [source], now).choice, null);
+  }
+  const exhausted = eligible();
+  exhausted.catalog.harnesses[0].quota.buckets = [bucket(100, { id: "muse" })];
+  assert.equal(recommendWorkers(p, recommendationSchema.parse({}), [exhausted], now).choice, null);
+  const blocked = eligible();
+  blocked.catalog.harnesses[0].quota.buckets = [bucket(20, { id: "muse", spendControlReached: true })];
+  assert.equal(recommendWorkers(p, recommendationSchema.parse({}), [blocked], now).choice, null);
+  const images = eligible(); images.catalog.harnesses[0].models[0].inputModalities = ["text"];
+  assert.equal(recommendWorkers(p, recommendationSchema.parse({ requiresImages: true }), [images], now).choice, null);
+  assert.equal(recommendWorkers(p, recommendationSchema.parse({ complexity: "hard" }), [eligible()], now).choice, null);
+  assert.equal(recommendWorkers({ ...p, preference: "best" }, recommendationSchema.parse({}), [eligible()], now).choice, null);
+  const ambiguous = unrankedSource("opencode");
+  ambiguous.catalog.harnesses[0].models.push(model("other-provider/model"));
+  assert.equal(recommendWorkers(p, recommendationSchema.parse({}), [ambiguous], now).choice, null);
+});
+
+test("unranked choices never replace reviewed candidates, explicit pins or device ownership", () => {
+  const muse = unrankedSource("muse");
+  const codex = { catalog: { projectId: p.id, checkedAt: new Date(now).toISOString(), harnesses: [catalog()] }, installed: { codex: true, claude: false } };
+  assert.equal(recommendWorkers(p, recommendationSchema.parse({}), [muse, codex], now).choice?.harness, "codex");
+  assert.equal(recommendWorkers(p, recommendationSchema.parse({ harness: "codex" }), [muse], now).choice, null);
+  assert.equal(recommendWorkers(p, recommendationSchema.parse({ model: "gpt-5.6-sol" }), [muse], now).choice, null);
+  const pinned = recommendWorkers(p, recommendationSchema.parse({ harness: "muse", model: "explicit-model" }), [muse], now);
+  assert.equal(pinned.choice?.model, "explicit-model");
+  assert.equal(pinned.choice?.basis, "task-pin");
+  const roleProject = { ...p, roles: [{ id: "native", name: "Native", responsibility: "Implement", harness: "muse" as const, peerId: "mapped" }] };
+  assert.equal(recommendWorkers(roleProject, recommendationSchema.parse({ roleId: "native" }), [muse], now).choice, null);
+  const remote = { ...muse, device: { id: "owner", label: "Owner", peerId: "mapped" } };
+  assert.equal(recommendWorkers(roleProject, recommendationSchema.parse({ roleId: "native" }), [muse, remote], now).choice?.device?.peerId, "mapped");
+});
+
+test("Claude general and exact family windows constrain advice without leaking unknown model scopes", async () => {
+  const { parseClaudeQuota } = await import("../src/catalog.ts");
+  const claude = catalog("claude", ["claude-haiku-4-5", "claude-sonnet-4-6", "claude-opus-4-8"]);
+  const reset = new Date(now + 3600000).toISOString();
+  const limits = (extra: Record<string, unknown>) => parseClaudeQuota({ rate_limits_available: true, rate_limits: { five_hour: { utilization: 10, resets_at: reset }, seven_day: { utilization: 20, resets_at: reset }, ...extra } });
+  claude.quota = limits({ five_hour: { utilization: 90, resets_at: reset } });
+  const low = advise({ harness: "claude" }, [claude]);
+  assert.equal(low.choice?.tier, "efficient");
+  assert.match(low.choice!.reasons.join(" "), /10% remaining/);
+  claude.quota = limits({ five_hour: { utilization: 100, resets_at: reset } });
+  assert.equal(advise({ harness: "claude" }, [claude]).choice, null);
+  claude.quota = limits({ seven_day_oauth_apps: { utilization: 100, resets_at: reset } });
+  assert.equal(advise({ harness: "claude" }, [claude]).choice, null);
+  claude.quota = limits({ seven_day_opus: { utilization: 100, resets_at: reset }, seven_day_sonnet: { utilization: 30, resets_at: reset }, model_scoped: [{ display_name: "Unknown family", utilization: 100, resets_at: reset }] });
+  assert.equal(advise({ harness: "claude", complexity: "hard" }, [claude]).choice?.model, "claude-sonnet-4-6");
+  const pin = advise({ harness: "claude", model: "claude-opus-4-8" }, [claude]);
+  assert.match(pin.choice!.warnings.join(" "), /exhausted/);
+  claude.models = [model("opus", { resolvedModel: "claude-sonnet-4-6" }), model("sonnet", { resolvedModel: "claude-opus-4-8" })];
+  assert.equal(advise({ harness: "claude", complexity: "hard" }, [claude]).choice?.model, "claude-sonnet-4-6");
+  assert.match(advise({ harness: "claude", model: "sonnet" }, [claude]).choice!.warnings.join(" "), /exhausted/);
+  assert.doesNotMatch(advise({ harness: "claude", model: "opus" }, [claude]).choice!.warnings.join(" "), /exhausted/);
+});
+
+test("owner recheck keeps unranked Automatic allowance positive while preserving explicit pins", () => {
+  const source = unrankedSource("opencode");
+  const choice = { harness: "opencode" as const, model: "provider/native" };
+  assert.equal(selectedWorkerEligibility(choice, source, false, now).eligible, true);
+  source.catalog.harnesses[0].quota.ordinaryUsageAllowed = null;
+  assert.equal(selectedWorkerEligibility(choice, source, false, now).eligible, false);
+  assert.equal(selectedWorkerEligibility(choice, source, false, now, "task-pin").eligible, true);
+  source.catalog.harnesses[0].quota.ordinaryUsageAllowed = true;
+  source.catalog.checkedAt = new Date(now - 300_001).toISOString();
+  assert.equal(selectedWorkerEligibility(choice, source, false, now).eligible, false);
+});

@@ -16,6 +16,7 @@ import { query, type Options } from "@anthropic-ai/claude-agent-sdk";
 import {
   CatalogCache,
   parseQuota,
+  parseClaudeQuota,
   readCodexCatalog,
   readClaudeAuth,
   readClaudeCatalog,
@@ -443,6 +444,74 @@ test("Claude SDK discovery waits on empty input, preserves native settings and c
     ).modelsStatus,
     "unavailable",
   );
+});
+
+test("Claude quota keeps zero and unknown windows, accepts resets and excludes private usage", () => {
+  const raw = {
+    rate_limits_available: true,
+    accountId: "SECRET_ACCOUNT", session: { total_cost_usd: "SECRET_COST" },
+    behaviors: { data: "SECRET_TRANSCRIPT" },
+    rate_limits: {
+      five_hour: { utilization: 0, resets_at: "2030-01-01T00:00:00Z" },
+      seven_day: { utilization: null, resets_at: null },
+      seven_day_opus: { utilization: 100, resets_at: "bad" },
+      seven_day_sonnet: { utilization: -1, resets_at: "2030-01-01T00:00:00Z" },
+      seven_day_oauth_apps: { utilization: 50, resets_at: "2030-01-01T02:00:00+02:00" },
+      model_scoped: [{ display_name: "Fable", utilization: 25, resets_at: "2030-01-02T00:00:00Z" }],
+      extra_usage: { used_credits: "SECRET_CREDIT" },
+    },
+  };
+  const quota = parseClaudeQuota(raw);
+  assert.equal(quota.status, "available");
+  assert.equal(quota.ordinaryUsageAllowed, null);
+  assert.deepEqual(quota.buckets[0].primary, { usedPercent: 0, windowDurationMins: 300, resetsAt: 1893456000 });
+  assert.equal(quota.buckets[0].secondary, null);
+  assert.equal(quota.buckets.find(b => b.normalModel === "opus")!.secondary!.resetsAt, null);
+  assert.equal(quota.buckets.find(b => b.normalModel === "sonnet")!.secondary, null);
+  assert.equal(quota.buckets.find(b => b.id === "seven_day_oauth_apps")!.secondary!.resetsAt, 1893456000);
+  assert.equal(quota.buckets.find(b => b.name === "Fable")!.secondary!.windowDurationMins, 10080);
+  assert.match(quota.message!, /experimental/);
+  assert.doesNotMatch(JSON.stringify(quota), /SECRET|credits|behaviors|accountId/);
+  for (const malformed of [null, {}, { rate_limits_available: false, rate_limits: raw.rate_limits },
+    { rate_limits_available: true, rate_limits: null }]) {
+    assert.equal(parseClaudeQuota(malformed).status, "unavailable");
+  }
+  for (const utilization of [NaN, Infinity, -1, 101, "0", undefined]) {
+    assert.equal(parseClaudeQuota({ rate_limits_available: true,
+      rate_limits: { five_hour: { utilization } } }).buckets[0].primary, null);
+  }
+  for (const resets_at of ["2030-02-30T00:00:00Z", "not a date", "2030-01-01", -1, null]) {
+    assert.equal(parseClaudeQuota({ rate_limits_available: true, rate_limits: {
+      five_hour: { utilization: 0, resets_at } } }).buckets[0].primary!.resetsAt, null);
+  }
+  assert.equal(parseClaudeQuota({ rate_limits_available: true, rate_limits: {
+    model_scoped: Array.from({ length: 100 }, () => ({ display_name: "Model", utilization: 0 })) } }).buckets.length, 17);
+});
+
+test("Claude model and experimental quota reads fail independently under the same bound", async () => {
+  for (const mode of ["success", "models-fail", "quota-fail", "quota-hang", "models-hang"]) {
+    let requested: unknown, closed = false;
+    const factory = (() => ({
+      supportedModels: async () => {
+        if (mode === "models-fail") throw new Error("SECRET_MODEL");
+        if (mode === "models-hang") return new Promise(() => {});
+        return [{ value: "haiku", displayName: "Haiku" }];
+      },
+      usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET: async (options: unknown) => {
+        requested = options;
+        if (mode === "quota-fail") throw new Error("SECRET_QUOTA");
+        if (mode === "quota-hang") return new Promise(() => {});
+        return { rate_limits_available: true, rate_limits: { five_hour: { utilization: 0 } } };
+      },
+      close() { closed = true; },
+    })) as unknown as typeof query;
+    const result = await readClaudeCatalog("claude", tmpdir(), new AbortController().signal, factory, 30);
+    assert.deepEqual(requested, { skipBehaviors: true });
+    assert.equal(result.modelsStatus, mode.startsWith("models-") ? "unavailable" : "available", mode);
+    assert.equal(result.quota.status, mode.startsWith("quota-") ? "unavailable" : "available", mode);
+    assert.equal(closed, true);
+    assert.doesNotMatch(JSON.stringify(result), /SECRET/);
+  }
 });
 
 test("Claude native auth probe keeps only status, bounds output and owns its child", async () => {

@@ -1,3 +1,4 @@
+import { SetupGuide } from "./SetupGuide.js";
 import { AgentKlarUpdates } from "./AgentKlarUpdates.js";
 import { NativeInventory } from "./NativeInventory.js";
 import { ProjectHandoff } from "./ProjectHandoff.js";
@@ -71,7 +72,12 @@ async function api<T>(
           body: JSON.stringify(body),
         }),
   });
-  const data = await response.json();
+  let data;
+  try {
+    data = await response.json();
+  } catch {
+    throw new Error("The local service could not be reached. Open the setup link from your terminal, then try again.");
+  }
   if (!response.ok)
     throw Object.assign(
       new Error(
@@ -92,6 +98,7 @@ const time = (value: string) =>
   });
 export function App() {
   const [view, setView] = useState<View>("Work");
+  useEffect(() => { document.getElementById("main-content")?.scrollTo({ top: 0 }); }, [view]);
   const [snapshot, setSnapshot] = useState(empty);
   const [catalogs, setCatalogs] = useState<
     Record<string, CatalogSnapshot | null>
@@ -469,52 +476,10 @@ export function App() {
     null,
     2,
   );
-  const backgroundSetup = (
-    <details><summary>Start at login on macOS</summary>
-      <p className="hint">Stop the foreground terminal service first. Use the same custom home and port, if set.</p>
-      <pre>agentklar service install{"\n"}agentklar service open</pre>
-      <p className="hint">The setup link works once for five minutes. See README for stop, start, and uninstall.</p>
-    </details>
-  );
-  const setup = (
-    <div className="setup">
-      <div className="empty-mark">↗</div>
-      <h2>
-        {local
-          ? "Connect your local workspace"
-          : "Your work stays on your computer"}
-      </h2>
-      <p>
-        {local
-          ? "Start AgentKlar, then open the one-time setup link printed by the service. This gives this browser a local session."
-          : "This hosted page is a setup guide. Run the local app to see projects, workers and permission requests."}
-      </p>
-      <p className="hint">Requires Node 24 on macOS or Linux. Install the pinned beta package:</p>
-      <pre>npm install -g https://github.com/kaltstart-co/agentklar/releases/download/v0.1.0-beta.28/agentklar-0.1.0-beta.28.tgz{"\n"}agentklar start</pre>
-      <p>
-        Open the setup link from the terminal, then use{" "}
-        <code>http://127.0.0.1:4317</code>.
-      </p>
-      {backgroundSetup}
-      <details><summary>Run from a source checkout</summary><pre>npm ci{"\n"}npm run build{"\n"}npm start</pre></details>
-      <Button variant="light" onClick={() => setView("Settings")}>
-        See MCP setup
-      </Button>
-      {local && (
-        <Button
-          variant="subtle"
-          onClick={() => {
-            setConnectionError("");
-            void refresh();
-          }}
-        >
-          Try connection again
-        </Button>
-      )}
-    </div>
-  );
+  const setup = <SetupGuide local={local} onSettings={() => setView("Settings")} onRetry={() => { setConnectionError(""); void refresh(); }} />;
   return (
     <div className="shell">
+      <a className="skip-link" href="#main-content">Skip to main content</a>
       <aside className="sidebar">
         <a
           className="brand"
@@ -554,7 +519,7 @@ export function App() {
               onClick={() => setView(item)}
             >
               <span aria-hidden="true">
-                {["▦", "✎", "≡", "♧", "◇", "◷", "⚙"][i]}
+                <NavIcon index={i} />
               </span>
               {item}
               {item === "Work" &&
@@ -576,8 +541,9 @@ export function App() {
           </p>
         </div>
       </aside>
-      <main>
-        <header>
+      <main id="main-content" tabIndex={-1}>
+        <div className="page-content">
+        <header className="page-header">
           <div>
             <div className="eyebrow">{project?.name || "YOUR WORKSPACE"}</div>
             <h1>{view}</h1>
@@ -1314,62 +1280,35 @@ export function App() {
               </section>
             )}
             {view === "Settings" && (
-              <section className="content-panel">
-                <h2>Connect your native harness</h2>
-                <p className="muted">
-                  Your harness stays in charge. Add AgentKlar as an MCP server
-                  to register projects, start workers and collect results.
-                </p>
-                {!connected && <>
-                  {setup}
+              <section className="content-panel settings-panel">
+                <p className="page-description">Manage this computer and your native harness connections.</p>
+                {!connected ? <>{setup}<details className="settings-disclosure"><summary>Manual MCP connection</summary><div className="disclosure-body"><p className="hint">Use the local app to generate an entry for your computer.</p><pre>{snippet}</pre></div></details></> : <>
+                  <section className="settings-card"><NativeInstallations device={snapshot.device} request={api} /></section>
+                  <AgentKlarUpdates connected={connected} request={api} />
+                  <section className="settings-card">
+                    <div className="settings-heading"><div><h3>Native connection</h3><p className="hint">Preview the connection before adding it. Your harness keeps its own accounts and permissions.</p></div></div>
+                    {project ? <NativeSetupForm key={project.id} projectId={project.id} connected={connected} /> : <p className="hint">Add or select a project to connect Codex, Claude Code, Muse, OpenCode, or Antigravity.</p>}
+                  </section>
+                  <div className="settings-advanced">
+                    <h3>Advanced</h3>
+                    <p className="hint">Inspect native files, manage other computers, or use manual startup.</p>
+                    {project && <NativeInventory key={`inventory-${project.id}`} projectId={project.id} connected={connected} request={api} />}
+                    <details className="settings-disclosure"><summary>Connected computers and remote approvals</summary><div className="disclosure-body"><Devices device={snapshot.device} projects={snapshot.projects} connected={connected} request={api} /></div></details>
+                    <details className="settings-disclosure"><summary>Startup and manual MCP setup</summary><div className="disclosure-body">
+                      <h4>Start at login on macOS</h4><p className="hint">Stop the foreground service first. Keep the same custom home and port, if set.</p><pre>agentklar service install{"\n"}agentklar service open</pre>
+                      <h4>Other MCP hosts</h4><pre>{snippet}</pre>
+                    </div></details>
+                    <details className="settings-disclosure"><summary>Installed harness support</summary><div className="disclosure-body">
+                      {snapshot.harnesses.map(h => <div className="harness" key={h.id}><div><strong>{h.name}</strong><p>{h.reason}</p>{h.executable && <p className="hint">Current CLI: {h.executable}</p>}</div><Badge color={h.available ? "teal" : "gray"} variant="light">{h.available ? "Installed" : "Not found"}</Badge><span>{h.workerSupported ? "Worker supported" : h.hostSupported ? "MCP host" : "Discovery only"}</span></div>)}
+                      <p className="hint">Installed means the executable was found. Sign in through your native harness before starting a worker.</p>
+                    </div></details>
+                  </div>
                 </>}
-                {connected && backgroundSetup}
-                {connected && <NativeInstallations device={snapshot.device} request={api} />}
-                <AgentKlarUpdates connected={connected} request={api} />
-                {project && <NativeInventory key={`inventory-${project.id}`} projectId={project.id} connected={connected} request={api} />}
-                <Devices device={snapshot.device} projects={snapshot.projects} connected={connected} request={api} />
-                <h3>Native connection</h3>
-                {connected && project ? <NativeSetupForm key={project.id} projectId={project.id} connected={connected} /> : connected ? <p className="hint">Add or select a project to connect Codex, Claude Code, Muse, OpenCode, or Antigravity.</p> :
-                  <p className="hint">Open the local app and select a project. Settings can then check, preview and add the native connection. This hosted guide has no access to your computer.</p>}
-                <details><summary>Manual setup for other MCP hosts</summary><pre>{snippet}</pre></details>
-                <h3>Harnesses on this computer</h3>
-                {connected ? (
-                  snapshot.harnesses.map((h) => (
-                    <div className="harness" key={h.id}>
-                      <div>
-                        <strong>{h.name}</strong>
-                        <p>{h.reason}</p>
-                        {h.executable && <p className="hint">Current CLI: {h.executable}</p>}
-                      </div>
-                      <Badge
-                        color={h.available ? "teal" : "gray"}
-                        variant="light"
-                      >
-                        {h.available ? "Installed" : "Not found"}
-                      </Badge>
-                      <span>
-                        {h.workerSupported
-                          ? "Worker supported"
-                          : h.hostSupported
-                            ? "MCP host"
-                            : "Discovery only"}
-                      </span>
-                    </div>
-                  ))
-                ) : (
-                  <p className="muted">
-                    Open the local app to check installed harnesses. This hosted
-                    page has no connection to your computer.
-                  </p>
-                )}
-                <p className="hint">
-                  Installed means the executable was found. Sign in through your
-                  native harness before starting a worker.
-                </p>
               </section>
             )}
           </>
         )}
+        </div>
       </main>
       <Modal
         opened={projectModal}
@@ -2163,4 +2102,17 @@ function QuotaWindowView({
       </p>
     </div>
   );
+}
+
+function NavIcon({ index }: { index: number }) {
+  const paths = [
+    "M3 3h5v5H3z M12 3h5v5h-5z M3 12h5v5H3z M12 12h5v5h-5z",
+    "M4 13L14 3l3 3L7 16l-4 1z M12 5l3 3",
+    "M4 4h12 M4 8h12 M4 12h8 M4 16h10",
+    "M7 9a3 3 0 1 0 0-6a3 3 0 0 0 0 6 M2 17v-2a5 5 0 0 1 10 0v2 M14 4a3 3 0 0 1 0 6 M15 12a4 4 0 0 1 3 4v1",
+    "M10 2l8 8-8 8-8-8z M10 6l4 4-4 4-4-4z",
+    "M10 2a8 8 0 1 0 0 16a8 8 0 0 0 0-16 M10 5v5l3 2",
+    "M3 5h14 M3 10h14 M3 15h14 M7 3v4 M13 8v4 M7 13v4",
+  ];
+  return <svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d={paths[index]} /></svg>;
 }

@@ -24,6 +24,7 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 - [x] Native MCP setup
 - [x] Background startup (macOS)
 - [x] Package install
+- [x] One-command installer
 - [x] Guarded package updates
 - [x] Interrupted update recovery
 - [x] Codex delegation
@@ -42,6 +43,7 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 - [x] Task cancellation
 - [x] Restart detection
 - [x] Support dashboard
+- [x] Consistent page layout
 - [x] Independent review
 - [x] Linked review and fix
 - [x] Native continuation commands
@@ -66,14 +68,10 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 - [x] Workflow skill
 - [x] Parallel worktrees
 
-## In progress
+## Required, unfinished
 
 - [ ] Native cross-harness proof
-
 - [ ] Complete account quotas
-
-## Next
-
 - [ ] Gemini and Cursor workers
 - [ ] ZCode worker
 - [ ] Antigravity worker

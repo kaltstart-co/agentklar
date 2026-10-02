@@ -16,7 +16,7 @@ const modelFailure =
 const quotaFailure =
   "Native account limits could not be read. Check your native Codex CLI.";
 const claudeQuota =
-  "Claude Code does not expose account quota through this supported native SDK read.";
+  "Claude Code account limits are unavailable through its experimental native usage read. Older CLIs or profiles without plan limits may not support it.";
 const museQuota =
   "Model refresh does not read Muse account usage. A completed Muse task may show an observed account snapshot.";
 const opencodeQuota = "OpenCode account limits are not exposed by this native catalog read.";
@@ -92,6 +92,47 @@ export function parseQuota(value: unknown): AccountQuota {
     ordinaryUsageAllowed: allowed,
     buckets,
   };
+}
+/** Keep only plan windows from Claude's unstable native metadata API. */
+export function parseClaudeQuota(value: unknown): AccountQuota {
+  const response = record(value), limits = record(response?.rate_limits);
+  if (response?.rate_limits_available !== true || !limits)
+    return unavailableQuota(claudeQuota);
+  const quotaWindow = (value: unknown, duration: number): QuotaWindow | null => {
+    const entry = record(value), used = entry?.utilization;
+    if (typeof used !== "number" || !Number.isFinite(used) || used < 0 || used > 100) return null;
+    const reset = entry?.resets_at;
+    const parts = typeof reset === "string" && reset.length <= 40
+      ? /^(\d{4})-(\d{2})-(\d{2})T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.exec(reset) : null;
+    const year = Number(parts?.[1]), month = Number(parts?.[2]), day = Number(parts?.[3]);
+    const calendarValid = month >= 1 && month <= 12 && day >= 1 &&
+      day <= new Date(Date.UTC(year, month, 0)).getUTCDate();
+    const resetMs = parts && calendarValid ? Date.parse(reset as string) : NaN;
+    return { usedPercent: used, windowDurationMins: duration,
+      resetsAt: Number.isFinite(resetMs) && resetMs >= 0 ? Math.floor(resetMs / 1000) : null };
+  };
+  const buckets: AccountQuota["buckets"] = [{
+    id: "claude", name: "Claude plan", normalModel: null,
+    primary: quotaWindow(limits.five_hour, 300), secondary: quotaWindow(limits.seven_day, 10080),
+    spendControlReached: null,
+  }];
+  for (const [key, name, normalModel] of [
+    ["seven_day_oauth_apps", "Claude OAuth apps", null],
+    ["seven_day_opus", "Claude Opus", "opus"],
+    ["seven_day_sonnet", "Claude Sonnet", "sonnet"],
+  ] as const) {
+    if (limits[key] != null) buckets.push({ id: key, name, normalModel,
+      primary: null, secondary: quotaWindow(limits[key], 10080), spendControlReached: null });
+  }
+  const scoped = Array.isArray(limits.model_scoped) ? limits.model_scoped : [];
+  for (const [index, raw] of scoped.slice(0, 16).entries()) {
+    const entry = record(raw), name = text(entry?.display_name, 160);
+    if (name) buckets.push({ id: `claude-model-${index}`, name, normalModel: null,
+      primary: null, secondary: quotaWindow(entry, 10080), spendControlReached: null });
+  }
+  return { status: "available", ordinaryUsageAllowed: null, buckets,
+    message: "Claude plan limits from an experimental native SDK API; it may change or disappear." +
+      (scoped.length > 16 ? " Model limit buckets were shortened to 16." : "") };
 }
 /** Muse usage is account-wide and observed after a worker, never a live balance. */
 export function withObservedMuseQuota(snapshot: CatalogSnapshot, runs: Run[]): CatalogSnapshot {
@@ -528,22 +569,33 @@ export async function readClaudeCatalog(
         },
       },
     });
-    const models = await Promise.race([stream.supportedModels(), stopped]);
-    if (!Array.isArray(models)) return result;
-    const seen = new Set<string>();
-    for (const raw of models.slice(0, 100)) {
-      const m = model(raw, "claude");
-      if (clipped(raw) || !m) result.modelsTruncated = true;
-      if (m && !seen.has(m.id)) {
-        seen.add(m.id);
-        result.models.push(m);
+    const current = stream;
+    const modelsRead = async () => {
+      const models = await Promise.race([current.supportedModels(), stopped]);
+      if (!Array.isArray(models)) return;
+      const seen = new Set<string>();
+      for (const raw of models.slice(0, 100)) {
+        const m = model(raw, "claude");
+        if (clipped(raw) || !m) result.modelsTruncated = true;
+        if (m && !seen.has(m.id)) {
+          seen.add(m.id);
+          result.models.push(m);
+        }
       }
-    }
-    result.modelsTruncated ||= models.length > 100;
-    result.modelsStatus = "available";
-    result.modelsMessage = result.modelsTruncated
-      ? "Native catalog shortened; this list may be incomplete."
-      : "Native catalog discovery does not verify sign-in, model access or subscription entitlement.";
+      result.modelsTruncated ||= models.length > 100;
+      result.modelsStatus = "available";
+      result.modelsMessage = result.modelsTruncated
+        ? "Native catalog shortened; this list may be incomplete."
+        : "Native catalog discovery does not verify sign-in, model access or subscription entitlement.";
+    };
+    const quotaRead = async () => {
+      const usage = current.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET;
+      if (typeof usage !== "function") return;
+      result.quota = parseClaudeQuota(await Promise.race([
+        usage.call(current, { skipBehaviors: true }), stopped,
+      ]));
+    };
+    await Promise.allSettled([modelsRead(), quotaRead()]);
   } catch {
   } finally {
     clearTimeout(timeout);

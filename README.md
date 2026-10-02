@@ -6,7 +6,17 @@ This is a fresh TypeScript rewrite. The old Go application is preserved in Git a
 
 ## Install and start
 
-Requires Node 24 and npm on macOS or Linux. Install this pinned GitHub beta package, then start the local service:
+On macOS or Linux (ARM64 or x64), run:
+
+```sh
+curl -fsSL https://agentklar-seven.vercel.app/install.sh | bash
+```
+
+The installer reuses Node 24 and npm when their global install folder is writable. Otherwise it downloads a private Node 24 runtime from the official Node.js site. It checks pinned SHA256 checksums for the runtime and beta.28 starter package, then uses the guarded updater for the newest compatible official release. It needs curl, tar, Bash and a SHA256 tool, and runs without sudo. Existing AgentKlar installs use that same updater; unsafe replacements or busy updates stop with an explanation.
+
+On macOS it adds startup at login and opens a fresh private dashboard link. An unrelated startup job or a busy foreground service blocks setup without replacement. On Linux it starts the service in the current terminal and prints the private setup URL; keep that terminal open. The printed absolute AgentKlar command works in a new terminal even if `~/.local/bin` is outside your PATH. Its launcher and managed startup keep the selected npm prefix for future updates without editing your npm configuration. It installs no coding harness and changes no native sign-in or harness settings. Sign in to your coding harness normally, then connect it in Settings. Windows is unsupported.
+
+For a manual install, use Node 24 and npm, then start the local service:
 
 ```sh
 npm install -g https://github.com/kaltstart-co/agentklar/releases/download/v0.1.0-beta.28/agentklar-0.1.0-beta.28.tgz

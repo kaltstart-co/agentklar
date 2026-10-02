@@ -28,8 +28,8 @@ export function AgentKlarUpdates({ connected, request }: {
     } catch (e) { if (id === generation.current) setError((e as Error).message); }
     finally { if (id === generation.current) { inFlight.current = false; setBusy(false); } }
   }
-  return <details>
-    <summary>AgentKlar updates</summary>
+  return <section className="settings-card updates-card">
+    <h3>AgentKlar updates</h3>
     <Stack gap="sm" style={{ minWidth: 0, overflowWrap: "anywhere" }}>
       {!connected && <p className="hint">Open the local app to check its installed version.</p>}
       {status && <>
@@ -44,8 +44,8 @@ export function AgentKlarUpdates({ connected, request }: {
           <Group gap="xs"><code>{status.command}</code><CopyButton value={status.command}>{({ copied, copy }) => <Button size="xs" variant="light" onClick={copy}>{copied ? "Copied" : "Copy update command"}</Button>}</CopyButton></Group>
         </>}
       </>}
-      <Button size="xs" variant="light" disabled={!connected || busy} loading={busy} onClick={() => void check()}>Check for update</Button>
+      <Group><Button size="sm" variant="light" disabled={!connected || busy} loading={busy} onClick={() => void check()}>Check for update</Button></Group>
       {error && !status && <Alert color="red">{error}</Alert>}
     </Stack>
-  </details>;
+  </section>;
 }

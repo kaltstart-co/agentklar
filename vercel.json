@@ -2,5 +2,12 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist/web",
   "framework": "vite",
-  "rewrites": [{ "source": "/((?!assets/).*)", "destination": "/index.html" }]
+  "headers": [{
+    "source": "/install.sh",
+    "headers": [
+      { "key": "Content-Type", "value": "text/x-shellscript; charset=utf-8" },
+      { "key": "Cache-Control", "value": "no-cache" }
+    ]
+  }],
+  "rewrites": [{ "source": "/((?!assets/|install.sh$).*)", "destination": "/index.html" }]
 }
