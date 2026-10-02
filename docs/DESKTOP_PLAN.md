@@ -1,6 +1,6 @@
 # Native Mac app direction
 
-The current app is a SwiftUI preview for macOS 14 and newer on Apple Silicon. SwiftPM builds it; Sparkle 2.10.0 supplies the signed app update path. The Electron prototype is retired and is not part of the shipped architecture.
+The current beta.33 source app is a SwiftUI preview for macOS 14 and newer on Apple Silicon. SwiftPM builds it; Sparkle 2.10.0 supplies the signed app update path. The Electron prototype is retired and is not part of the shipped architecture.
 
 ## One local service
 
@@ -10,9 +10,11 @@ The app discovers the existing standalone Node 24 launcher, uses its managed-ser
 
 ## Current native scope
 
-Work, Context, Instructions, Team, Models, Usage and Settings have native controls backed by existing APIs. Supported concrete approvals require a separate review and allow-once action. Context uses revision checks; instruction edits use preview/apply and owned undo. Explicit harness/model pins remain visible.
+Work, Context, Instructions, Team, Models, Usage and Settings use standard macOS controls backed by existing APIs. Controls inherit the host system’s appearance; the current development host runs macOS 27. Work has a native toolbar and responsive list/detail layout. Action rows adapt to narrow space. Project photos are cached per Mac as normalized PNG files.
 
-Remote workflows and approvals, plugins and skills, benchmark advice and advanced defaults remain in the browser dashboard. This is a preview, not full parity. No embedded web page hides these gaps.
+The source includes remote work and concrete approvals, linked review/fix, skills/plugins, benchmark advice, native defaults, Git handoff review/apply/recovery, coordinated control and native task navigation. Supported approvals still require review and allow-once. Context keeps revision checks; instruction edits keep preview/apply and owned undo. Explicit harness/model pins remain visible.
+
+Muse catalog discovery independently calls the documented native [`usage/read`](https://dev.meta.ai/docs/muse-code/changelog); missing observations remain unknown. This is last-seen subscription data, not a live balance. Complete account quotas remain unfinished. Source implementation does not establish full native GUI acceptance or feature parity.
 
 ## Release gates
 
@@ -22,6 +24,8 @@ Remote workflows and approvals, plugins and skills, benchmark advice and advance
 - [ ] Developer ID signing
 - [ ] Notarized distribution
 - [ ] Signed update proof
+
+The beta.33 source package builds on Apple Silicon, and the latest backend/foundation run passed 309 checks. The new project-photo XCTest addition has not run yet; CI is pending.
 
 The development build is ad-hoc signed. Public app updates stay disabled without the signed-release configuration and valid Developer ID signature. Service updates keep the existing guarded CLI path. App update installation must preserve background work and require an explicit restart decision.
 

@@ -11,6 +11,7 @@ import AppKit
     }
     var body: some Scene {
         WindowGroup { MainView(client: client).environmentObject(updates) }
+            .defaultSize(width: 1120, height: 760)
             .commands {
                 CommandGroup(after: .appInfo) { Button("Check for App Updates…") { updates.checkForUpdates() }.disabled(!updates.canCheck || !client.maintenanceReady) }
                 CommandGroup(after: .newItem) {

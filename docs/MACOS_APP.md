@@ -1,20 +1,22 @@
 # AgentKlar for macOS
 
-AgentKlar has a native SwiftUI development preview for Apple Silicon Macs running macOS 14 or newer. It uses native windows, lists, forms, folder selection and alerts. Electron is retired and is not shipped. The app does not embed the browser dashboard or a WebView.
+AgentKlar has a native SwiftUI development preview for Apple Silicon Macs running macOS 14 or newer. It uses standard macOS windows, toolbars, lists, grouped forms, folder selection and alerts. These controls inherit the host system’s appearance; the current development host runs macOS 27. Electron is retired and is not shipped. The app does not embed the browser dashboard or a WebView.
 
 The TypeScript service still owns projects, saved work, workers and approvals. It runs with standalone Node 24. The app connects over the local API through a private session obtained with `agentklar service open --print`. Native harnesses keep their own accounts, settings and permission decisions. Closing the app leaves the managed service and background work running.
 
 ## Preview features
 
-- Work: create a worker task with automatic model advice or explicit pins, set image/tool requirements, stop it, read results and events, and review supported concrete approvals once. Local review/fix actions preserve their source workspace.
-- Context: edit the shared brief, memory and handoff with revision checks.
+- Work: use a native toolbar and responsive task list/detail layout, create a worker task with automatic model advice or explicit pins, set image/tool requirements, stop it, read results and events, and review supported concrete approvals once. Local and remote linked review/fix actions preserve their source workspace.
+- Context: edit the shared brief, memory and handoff with revision checks; review Git changes, prepare/apply a handoff, recover an interrupted apply and manage coordinated control. Task links open the matching native task view.
 - Instructions: read AGENTS.md or CLAUDE.md, preview a change, apply it and undo an unchanged owned change. Native tabs manage project/personal skills and the separate Claude workflow plugin through reviewed receipts.
 - Team: save roles, responsibilities, local/remote harness/model pins and cost preference.
 - Models and Usage: read native metadata, cached benchmark evidence, available allowance and reported task usage. Missing values stay unknown.
-- Settings: connect a harness, choose a native installation, save the main harness, preview model/effort defaults, manage paired devices and check updates.
+- Settings: connect a harness, choose a native installation, save the main harness, preview model/effort defaults, manage paired devices and check updates. Project photos are cached per Mac as normalized PNG files.
 - Remote work: choose a saved remote role or include connected computers in automatic selection; read compact owner status/results, request stop and review supported concrete remote approvals. Remote task selection never requests an unsupported local event tail.
 
-These extended screens are in the source build and have not been released in beta.32. This preview has not reached browser feature parity. Remote linked review/fix, explicit Git change handoff and coordinated-control UI still use the existing browser support dashboard. Open-main-harness guidance uses the terminal. Unknown approval kinds cannot be accepted in the native app. Worker completion is not human review.
+These controls are implemented in the beta.33 source build. Responsive action rows stack when space is narrow, and important Work actions stay in the native toolbar. Full native GUI acceptance and feature parity remain unverified. Open-main-harness guidance uses the terminal. Unknown approval kinds cannot be accepted in the native app. Worker completion is not human review.
+
+Muse model refresh now also makes an independent native [`usage/read`](https://dev.meta.ai/docs/muse-code/changelog). It returns last-seen subscription windows with their original observation time, not a live balance. An empty observation stays unknown, and quota failure does not hide the model list. Complete account quota coverage remains unfinished.
 
 ## Build locally
 
@@ -47,6 +49,8 @@ Sparkle activation checks the signed-release marker, fixed feed, key and Apple D
 
 ## Verification limits
 
-The native release build compiles all views. Six XCTest cases and the standalone boundary checks passed in Mac CI. A GUI smoke check on the MacBook opened all seven pages, switched saved projects, read the actual root instruction file, checked service update status, and opened and cancelled a task draft. Both Macs have the preview in Applications and a healthy beta.32 local service; the Mac mini GUI was not exercised.
+The beta.33 native source package builds on Apple Silicon. The latest backend run passed 309 tests, and the standalone native boundary checks passed separately. Earlier Mac CI passed six XCTest cases; the new project-photo XCTest addition has not run yet, and its CI result is pending.
 
-Full native GUI acceptance is pending. Worker launch and concrete approval decisions, instruction apply/undo, context/team saves, metadata refresh and first installation still need GUI workflow proof. No signing identity is available, so Developer ID distribution, notarization and a signed Sparkle download/install round trip remain unverified. See [validation evidence](VALIDATION.md) for the exact checks and limits.
+The installed beta.33 GUI on the MacBook rendered the new Work, Models, Team, Settings, Context and Instructions screens. Captured screenshots show aligned sidebar icons, the compact project switcher, native toolbars, model cards and expandable details. Project-menu selection and the native image picker were also exercised in a temporary build. Image import completion and narrow-window interaction remain unverified. The computer-use connection closed during the remaining checks. The Mac mini GUI was not exercised.
+
+Full native GUI acceptance is pending, including narrow-window action layouts, project photos, worker starts and approvals, remote linked review/fix, Git handoff/recovery, coordinated control and configuration writes. No signing identity is available, so Developer ID distribution, notarization and a signed Sparkle download/install round trip remain unverified. See [validation evidence](VALIDATION.md) for the exact checks and limits.

@@ -66,8 +66,8 @@ function validatePatch(path: string, packet: ChangePacket) {
 }
 
 export class Changes {
-  private applying = new Set<string>();
-  constructor(private store: Store, private home: string) { store.db.exec("CREATE TABLE IF NOT EXISTS change_previews(id TEXT PRIMARY KEY,data TEXT NOT NULL)"); }
+  private applying = new Map<string, Extract<RunWorkspace, { kind: "worktree" }>>();
+  constructor(private store: Store, private home: string, private workspaceBusy: (workspace: Extract<RunWorkspace, { kind: "worktree" }>) => boolean = () => false) { store.db.exec("CREATE TABLE IF NOT EXISTS change_previews(id TEXT PRIMARY KEY,data TEXT NOT NULL)"); }
   export(run: Run, project: Project | undefined, sourceDeviceId: string, busy: boolean): ChangePacket {
     if (!project || run.projectId !== project.id) throw new ChangeError("Source project no longer exists.");
     if (busy || ["running", "needs_attention"].includes(run.state)) throw new ChangeError("Source checkout has an active or possibly surviving worker. Wait until it stops.");
@@ -127,6 +127,12 @@ export class Changes {
       });
   }
   read(id: string) { return this.public(this.saved(id)); }
+  blocks(path: string): boolean {
+    return [...this.applying.values()].some(workspace => {
+      const destination = workspace.path!;
+      return path === destination || path.startsWith(destination + "/") || destination.startsWith(path + "/");
+    });
+  }
   async apply(id: string, expectedDigest: string, expectedBaseCommit: string): Promise<ChangeApply> {
     const saved = this.saved(id), packet = checkedPacket(saved.packet);
     if (expectedDigest !== packet.digest || expectedBaseCommit !== packet.baseCommit) throw new ChangeError("Reviewed patch digest or base differs. Read the saved preview before applying.");
@@ -137,12 +143,14 @@ export class Changes {
     if (this.applying.has(id)) throw new ChangeError("This patch is already being applied.");
     const project = this.store.projects().find(p => p.id === saved.projectId);
     if (!project || project.path !== saved.root.repoRoot || projectRootIdentity(project.path) !== saved.root.repoStamp || projectRootIdentity(saved.root.commonDir) !== saved.root.commonStamp) throw new ChangeError("Recipient project identity changed. Prepare a fresh handoff.");
-    const expectedTree = validatePatch(project.path, packet);
-    this.applying.add(id);
+    const destination = saved.application?.workspace ?? plannedWorktree({ kind: "worktree", ...saved.root, baseCommit: packet.baseCommit, rootRunId: id }, this.home);
+    if (!destination.path || this.blocks(destination.path) || this.workspaceBusy(destination))
+      throw new ChangeError("Apply destination has an active or possibly surviving worker or another changes operation. Wait until it stops.");
+    this.applying.set(id, destination);
     try {
+      const expectedTree = validatePatch(project.path, packet);
       if (!saved.application) {
-        const workspace = plannedWorktree({ kind: "worktree", ...saved.root, baseCommit: packet.baseCommit, rootRunId: id }, this.home);
-        saved.application = { workspace, expectedTree, startedAt: new Date().toISOString(), state: "creating" };
+        saved.application = { workspace: destination, expectedTree, startedAt: new Date().toISOString(), state: "creating" };
         this.save(saved); // Record the exact destination before Git changes anything.
       }
       const intent = saved.application;
@@ -155,6 +163,7 @@ export class Changes {
         if (verifyWorktree(verified, verified.path!) !== verified.branch || git(verified.path!, ["rev-parse", "HEAD"]).trim() !== packet.baseCommit) throw new ChangeError("Saved destination does not match its owned worktree and base. No files were overwritten.");
         verified = { ...verified, verified: true, workspaceStamp: projectRootIdentity(verified.path!) };
       }
+      if (this.workspaceBusy(verified)) throw new ChangeError("Apply destination has an active or possibly surviving worker. Wait until it stops.");
       intent.workspace = verified; intent.state = "applying"; intent.error = undefined; this.save(saved);
       if (projectRootIdentity(project.path) !== saved.root.repoStamp) throw new ChangeError("Recipient project changed during worktree creation.");
       const indexed = git(verified.path!, ["write-tree"]).trim(), baseTree = git(verified.path!, ["rev-parse", `${packet.baseCommit}^{tree}`]).trim();

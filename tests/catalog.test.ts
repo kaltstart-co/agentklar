@@ -74,6 +74,7 @@ createInterface({input:process.stdin}).on('line', line => {
  if(request.method==='initialized')return;
  const reply=result=>process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:request.id,result})+'\\n');
  if(request.method==='initialize')return reply({});
+ if(request.method==='usage/read')return reply({});
  if(request.method==='model/list')return mode==='malformed' ? reply({models:{}}) : reply({source:mode==='fake'?'fakeCatalog':mode==='config'?'configCatalog':mode==='bundled'?'bundledCatalog':'providerCatalog',providerId:'muse',profileId:null,models:[row('muse-spark-1.3'),row('muse-spark-1.3-contributor'),row('muse-spark-1.3'),row('foreign','other')]});
  throw new Error('Unexpected method '+request.method);
 });
@@ -124,7 +125,7 @@ function assertStopped(pid: number, label: string) {
   assert.throws(() => process.kill(pid, 0), `${label}: PID ${pid} is still alive`);
 }
 
-test("Muse probe reads only the native model list and removes incompatible routes", async () => {
+test("Muse probe reads native model and usage metadata and removes incompatible routes", async () => {
   const dir = mkdtempSync(join(tmpdir(), "agentklar-muse-catalog-"));
   const file = join(dir, "muse.mjs"), log = join(dir, "wire");
   writeFileSync(file, museFixture);
@@ -139,7 +140,7 @@ test("Muse probe reads only the native model list and removes incompatible route
     assert.equal(result.quota.status, "unavailable");
     assert.equal(result.quota.ordinaryUsageAllowed, null);
     const calls = readFileSync(log, "utf8").trim().split("\n").map((line) => JSON.parse(line));
-    assert.deepEqual(calls.map((r) => r.method), ["initialize", "initialized", "model/list"]);
+    assert.deepEqual(calls.map((r) => r.method), ["initialize", "initialized", "model/list", "usage/read"]);
     assert.deepEqual(calls[0].params.capabilities, { experimentalApi: false, userInputDialogs: false });
     assert.deepEqual(calls[2].params, {});
     assert.ok(calls.every((r) => !JSON.stringify(r).includes("session")));

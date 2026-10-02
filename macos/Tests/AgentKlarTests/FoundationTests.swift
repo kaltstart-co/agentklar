@@ -1,4 +1,7 @@
 import XCTest
+import AppKit
+import CryptoKit
+import ImageIO
 @testable import AgentKlar
 
 final class FoundationTests: XCTestCase {
@@ -63,6 +66,45 @@ final class FoundationTests: XCTestCase {
         client.busy = false
         XCTAssertTrue(client.maintenanceReady)
     }
+    @MainActor func testProjectPictureNormalizesAndPreservesSavedImageOnRejectedInput() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        defer { try? FileManager.default.removeItem(at: directory) }
+        // Use a bitmap directly so this fixture also works without a visible window.
+        let bitmap = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 640, pixelsHigh: 320,
+            bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+            colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
+        try XCTUnwrap(bitmap.bitmapData).initialize(repeating: 255, count: bitmap.bytesPerRow * bitmap.pixelsHigh)
+        let source = directory.appendingPathComponent("source.png")
+        try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(to: source)
+        let pictures = directory.appendingPathComponent("pictures"), id = UUID().uuidString
+        let store = ProjectPictureStore(directory: pictures)
+        try store.save(source, projectID: id)
+        let hash = SHA256.hash(data: Data(id.lowercased().utf8)).map { String(format: "%02x", $0) }.joined()
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: pictures.path), [hash + ".png"])
+        let savedURL = pictures.appendingPathComponent(hash + ".png"), saved = try Data(contentsOf: savedURL)
+        XCTAssertEqual(Array(saved.prefix(8)), [137, 80, 78, 71, 13, 10, 26, 10])
+        let native = try XCTUnwrap(CGImageSourceCreateWithData(saved as CFData, nil))
+        let properties = try XCTUnwrap(CGImageSourceCopyPropertiesAtIndex(native, 0, nil) as? [CFString: Any])
+        let width = try XCTUnwrap(properties[kCGImagePropertyPixelWidth] as? NSNumber).intValue
+        let height = try XCTUnwrap(properties[kCGImagePropertyPixelHeight] as? NSNumber).intValue
+        XCTAssertTrue((1...128).contains(width) && (1...128).contains(height))
+        XCTAssertEqual(width, height * 2)
+        let cached = ProjectPictureStore(directory: pictures)
+        cached.load([id]); XCTAssertNotNil(cached.pictures[id])
+        let original = try XCTUnwrap(store.pictures[id])
+        let oversized = directory.appendingPathComponent("oversized.png")
+        try Data(repeating: 0, count: 8 * 1024 * 1024 + 1).write(to: oversized)
+        XCTAssertThrowsError(try store.save(oversized, projectID: id))
+        XCTAssertEqual(try Data(contentsOf: savedURL), saved)
+        XCTAssertThrowsError(try store.save(source, projectID: "../escape"))
+        XCTAssertEqual(try Data(contentsOf: savedURL), saved)
+        XCTAssertTrue(store.pictures[id] === original)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: pictures.path), [hash + ".png"])
+        try store.remove(id)
+        XCTAssertNil(store.pictures[id]); XCTAssertFalse(FileManager.default.fileExists(atPath: savedURL.path))
+    }
+
     func testCommandBoundsTimeoutAndRetainedDescendantPipes() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

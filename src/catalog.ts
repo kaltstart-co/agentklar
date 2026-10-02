@@ -1,5 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { query } from "@anthropic-ai/claude-agent-sdk";
+import { parseMuseQuota } from "./muse-quota.ts";
 import { readOpenCodeCatalog } from "./opencode.ts";
 import { readAntigravityCatalog } from "./antigravity.ts";
 import { workerHarnesses, type WorkerHarness } from "./contracts.ts";
@@ -20,7 +21,7 @@ const quotaFailure =
 const claudeQuota =
   "Claude Code account limits are unavailable through its experimental native usage read. Older CLIs or profiles without plan limits may not support it.";
 const museQuota =
-  "Model refresh does not read Muse account usage. A completed Muse task may show an observed account snapshot.";
+  "Native Muse usage/read has no valid last-seen observation. It does not fetch a live balance; account allowance remains unknown.";
 const opencodeQuota = "OpenCode account limits are not exposed by this native catalog read.";
 const record = (v: unknown): Record<string, unknown> | null =>
   v !== null && typeof v === "object" && !Array.isArray(v)
@@ -142,9 +143,9 @@ export function withObservedMuseQuota(snapshot: CatalogSnapshot, runs: Run[]): C
     .map(r => r.museSubscriptionUsage!).sort((a, b) => b.observedAtMs - a.observedAtMs)[0];
   if (!usage) return snapshot;
   return { ...snapshot, harnesses: snapshot.harnesses.map(c => c.harness !== "muse" ? c : {
-    ...c, quota: {
+    ...c, quota: c.quota.observedAt && Date.parse(c.quota.observedAt) >= usage.observedAtMs ? c.quota : {
       status: "available", observedAt: new Date(usage.observedAtMs).toISOString(),
-      message: "Observed after a Muse worker; refresh does not read a live balance. Routing ignores observations older than five minutes or past their reset.",
+      message: "Observed after a Muse worker; native usage/read returns last-seen windows, not a live balance. Routing ignores observations older than five minutes or past their reset.",
       ordinaryUsageAllowed: null,
       buckets: [{ id: "muse", name: "Observed Muse subscription usage", normalModel: null,
         primary: { usedPercent: usage.window.usedPercent, windowDurationMins: usage.window.windowDurationMins, resetsAt: usage.window.resetsAtMs / 1000 },
@@ -470,7 +471,10 @@ async function readJsonRpcCatalog(
         : "Native catalog discovery does not verify model access or subscription entitlement.";
     };
     const quotaRead = async () => {
-      if (harness === "muse") return;
+      if (harness === "muse") {
+        result.quota = parseMuseQuota(await rpc("usage/read", {}));
+        return;
+      }
       result.quota = parseQuota(
         await rpc("account/rateLimits/read", {
           excludeResetCreditDetails: true,

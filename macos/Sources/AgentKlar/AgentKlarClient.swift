@@ -15,6 +15,7 @@ private final class LocalSessionDelegate: NSObject, URLSessionTaskDelegate, @unc
     @Published var snapshot: JSON = .object([:])
     @Published var onboarding: JSON = .object([:])
     @Published var projectID = ""
+    @Published var requestedRunID: String?
     @Published var connected = false
     @Published var busy = false
     @Published private(set) var pendingWrites = 0
@@ -158,6 +159,7 @@ private final class LocalSessionDelegate: NSObject, URLSessionTaskDelegate, @unc
         if parts.contains("skills") { return 135 }
         if parts.contains("plugins") || parts.contains("recommend") || path == "/tasks/start" { return 120 }
         if parts.contains("native-settings") { return 60 }
+        if parts.contains("changes") || parts.contains("remote-approvals") || parts.contains("peers") || parts.first == "runs" { return 60 }
         return parts.contains("setup") ? 35 : 20
     }
 }

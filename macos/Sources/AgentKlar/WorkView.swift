@@ -25,36 +25,40 @@ struct WorkView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("Work").font(.largeTitle.weight(.semibold))
                 Picker("Computer", selection: $showingRemote) {
                     Text("This Mac").tag(false); Text("Connected Macs").tag(true)
-                }.pickerStyle(.segmented).frame(width: 250)
+                }.labelsHidden().pickerStyle(.segmented).frame(width: 250)
+                    .help("Choose where to view work")
                 Spacer()
-                Button("Refresh", systemImage: "arrow.clockwise") { Task { await client.refresh() } }
-                Button("New task", systemImage: "plus") { followUpSource = .null; newTask = true }
-                    .disabled(!client.connected || client.projectID.isEmpty).keyboardShortcut("n")
-            }.padding(20)
+            }.padding(.horizontal, 20).padding(.vertical, 12)
+            Divider()
             if showingRemote {
-                NativeRemoteWorkView(client: client, selected: $remoteSelectedID)
-            } else { HSplitView {
+                NativeRemoteWorkView(client: client, selected: $remoteSelectedID) { source in followUpSource = source; newTask = true }
+            } else if runs.isEmpty && search.isEmpty {
+                emptyWork
+            } else { NativeWorkLayout {
                 VStack {
                     TextField("Search tasks", text: $search).textFieldStyle(.roundedBorder).padding([.horizontal, .top], 12)
                     List(selection: $selectedID) {
                         ForEach(runs, id: \.selfID) { run in
-                            VStack(alignment: .leading, spacing: 5) {
-                                Text(run["prompt"].string ?? "Task").lineLimit(2)
-                                Text("\(run["state"].string ?? "Unknown") · \(run["harness"].string ?? "Native worker")")
-                                    .font(.caption).foregroundStyle(.secondary)
-                            }.padding(.vertical, 5).tag(run["id"].string ?? "")
+                            HStack(alignment: .top, spacing: 10) {
+                                NativeHarnessIcon(harness: run["harness"].string ?? "", size: 24)
+                                VStack(alignment: .leading, spacing: 5) {
+                                    Text(run["prompt"].string ?? "Task").lineLimit(2)
+                                    Text("\(stateName(run["state"].string)) · \(run["harness"].string ?? "Native worker")")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
+                            }.padding(.vertical, 6).tag(run["id"].string ?? "")
                         }
                     }
                     if runs.isEmpty { Text("No tasks in this project.").foregroundStyle(.secondary).padding() }
-                }.frame(minWidth: 240, idealWidth: 300, maxWidth: 400)
+                }
+            } detail: {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 18) {
                         if let id = selected["id"].string {
                             HStack {
-                                Text(selected["state"].string ?? "Unknown").foregroundStyle(.secondary)
+                                Label(stateName(selected["state"].string), systemImage: selected["state"].string == "completed" ? "checkmark.circle" : "circle.dotted").font(.caption).foregroundStyle(.secondary)
                                 Spacer()
                                 if ["running", "needs_attention"].contains(selected["state"].string ?? "") {
                                     Button("Stop task", role: .destructive) { Task { await act { _ = try await client.request("/runs/\(id)/stop", body: [:]) } } }
@@ -63,12 +67,16 @@ struct WorkView: View {
                             }
                             Text(selected["prompt"].string ?? "Task").font(.title2).textSelection(.enabled)
                             if selected["promptTruncated"].bool == true { Text("Task prompt preview shortened.").font(.caption).foregroundStyle(.secondary) }
-                            Text(selected["tokens"].number.map { "Reported tokens: \(Int($0))" } ?? "Token usage unknown").font(.caption).foregroundStyle(.secondary)
+                            HStack(spacing: 8) {
+                                NativeHarnessIcon(harness: selected["harness"].string ?? "", size: 18)
+                                Text(selected["harness"].string ?? "Native worker")
+                                Text("·")
+                                Text(selected["tokens"].number.map { "\($0.formatted(.number.precision(.fractionLength(0)))) reported tokens" } ?? "Usage not reported")
+                            }.font(.caption).foregroundStyle(.secondary)
                             if let model = selected["routing"]["selected"]["model"].string {
-                                Text("Routed model: \(model) · \(selected["routing"]["selected"]["basis"].string ?? "Unknown basis")").font(.caption)
-                                DisclosureGroup("Routing evidence") { Text(selected["routing"].prettyText).font(.system(.caption, design: .monospaced)).textSelection(.enabled) }
+                                Text(model).font(.caption).foregroundStyle(.secondary)
                             }
-                            Text("Completion means the worker finished. Human review is separate.").font(.caption).foregroundStyle(.secondary)
+                            if selected["state"].string == "completed" { Text("Worker finished. Ready for review.").font(.caption).foregroundStyle(.secondary) }
                             if let error = selected["error"].string, !error.isEmpty { Text(error).foregroundStyle(.red).textSelection(.enabled) }
                             if !detailError.isEmpty { Text(detailError).foregroundStyle(.red) }
                             ForEach(approvals, id: \.selfID) { approval in
@@ -89,9 +97,15 @@ struct WorkView: View {
                                 }
                             }
                             if !result.isEmpty {
-                                Text("Result").font(.headline)
-                                Text(result).font(.system(.body, design: .monospaced)).textSelection(.enabled)
-                                if shortened { Text("Result is shortened. Read more through your native MCP host.").font(.caption).foregroundStyle(.secondary) }
+                                GroupBox("Result") {
+                                    VStack(alignment: .leading, spacing: 12) {
+                                        Text(result).textSelection(.enabled)
+                                        if shortened { Text("Result is shortened. Read more through your native MCP host.").font(.caption).foregroundStyle(.secondary) }
+                                    }.frame(maxWidth: .infinity, alignment: .leading).padding(8)
+                                }
+                            }
+                            if selected["routing"] != .null {
+                                DisclosureGroup("Model choice details") { Text(selected["routing"].prettyText).font(.system(.caption, design: .monospaced)).textSelection(.enabled) }
                             }
                             DisclosureGroup("Native events") {
                                 ForEach(Array(events.enumerated()), id: \.offset) { _, event in
@@ -108,13 +122,25 @@ struct WorkView: View {
                                     followUpSource = selected; newTask = true
                                 }.disabled(changing || !client.connected)
                             }
-                            Text("Git change handoff is still available through the browser support dashboard.").font(.caption).foregroundStyle(.secondary)
+                            DisclosureGroup("Move changes to another project") { NativeChangesView(client: client, sourceID: id).id(id) }
                         } else {
                             ContentUnavailableView("Select a task", systemImage: "list.bullet.rectangle", description: Text("Read native results and review concrete permission requests."))
                         }
                     }.frame(maxWidth: .infinity, alignment: .leading).padding(24)
-                }.frame(minWidth: 320)
+                }
             } }
+        }
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button("Refresh", systemImage: "arrow.clockwise") { Task { await client.refresh() } }
+                    .disabled(!client.connected).help("Refresh work")
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Button("New task", systemImage: "plus") { followUpSource = .null; newTask = true }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!client.connected || client.projectID.isEmpty).keyboardShortcut("n")
+                    .help("Create a task")
+            }
         }
         .sheet(isPresented: $newTask) { NativeTaskSheet(client: client, selectedID: $selectedID, remoteSelectedID: $remoteSelectedID, showingRemote: $showingRemote, source: followUpSource) }
         .confirmationDialog("Allow this exact native request once?", isPresented: Binding(get: { reviewedApproval != nil }, set: { if !$0 { reviewedApproval = nil } }), titleVisibility: .visible) {
@@ -125,6 +151,17 @@ struct WorkView: View {
         } message: { Text("Only the concrete request shown in the task detail is approved. No future requests are approved.") }
         .onChange(of: client.projectID) { _, _ in selectedID = nil; remoteSelectedID = nil; reviewedApproval = nil }
         .onChange(of: showingRemote) { _, _ in reviewedApproval = nil }
+        .task(id: client.requestedRunID) {
+            guard let id = client.requestedRunID else { return }
+            await client.refresh()
+            guard client.requestedRunID == id, !Task.isCancelled else { return }
+            if client.runs.contains(where: { $0["id"].string == id }) {
+                selectedID = id; showingRemote = false
+            } else if (client.snapshot["remoteDispatches"].array ?? []).contains(where: { $0["id"].string == id && $0["projectId"].string == client.projectID }) {
+                remoteSelectedID = id; showingRemote = true
+            } else { client.error = "This task is no longer available in the selected project. Refresh its saved handoff or choose another task." }
+            client.requestedRunID = nil
+        }
         .task(id: showingRemote ? nil : selectedID) {
             events = []; result = ""; detailError = ""; eventsShortened = false
             guard !showingRemote, let id = selectedID else { return }
@@ -144,6 +181,35 @@ struct WorkView: View {
                 try? await Task.sleep(for: .seconds(2))
             }
         }
+    }
+    @ViewBuilder private var emptyWork: some View {
+        if client.projectID.isEmpty {
+            ContentUnavailableView("Add your first project", systemImage: "folder.badge.plus", description: Text("Choose an existing project folder using the toolbar."))
+        } else {
+            VStack(spacing: 20) {
+                Image(systemName: "square.stack.3d.up").font(.system(size: 34, weight: .light)).foregroundStyle(Color.accentColor)
+                VStack(spacing: 8) {
+                    Text("Start work with your agents").font(.title2.weight(.semibold))
+                    Text("Delegate a task, follow progress, and review results in one place.")
+                        .foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 360)
+                }
+                Button("New task", systemImage: "plus") { followUpSource = .null; newTask = true }
+                    .buttonStyle(.borderedProminent).controlSize(.large).disabled(!client.connected)
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 16) { detectedTools }.fixedSize(horizontal: true, vertical: false)
+                    VStack(spacing: 10) { detectedTools }
+                }.padding(.top, 8)
+            }.padding(24).frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+    @ViewBuilder private var detectedTools: some View {
+        ForEach(client.harnesses.filter { $0["available"].bool == true && $0["workerSupported"].bool == true }, id: \.selfID) { worker in
+            HStack(spacing: 6) { NativeHarnessIcon(harness: worker["id"].string ?? "", size: 20); Text(worker["name"].string ?? "Harness").font(.caption).foregroundStyle(.secondary) }
+                .help("Detected on this Mac. Native access is checked when work starts.")
+        }
+    }
+    private func stateName(_ value: String?) -> String {
+        ["running": "Working", "needs_attention": "Needs attention", "completed": "Finished", "failed": "Failed", "cancelled": "Cancelled", "interrupted": "Interrupted"][value ?? ""] ?? "Unknown"
     }
     private func concrete(_ approval: JSON) -> Bool {
         let details = approval["details"]
@@ -165,6 +231,31 @@ struct WorkView: View {
         guard !changing else { return }; changing = true; detailError = ""
         do { try await work(); await client.refresh() } catch { detailError = error.localizedDescription }
         changing = false
+    }
+}
+
+// Keep the task list useful when a small window cannot fit two readable columns.
+struct NativeWorkLayout<ListContent: View, DetailContent: View>: View {
+    let list: ListContent
+    let detail: DetailContent
+    init(@ViewBuilder list: () -> ListContent, @ViewBuilder detail: () -> DetailContent) {
+        self.list = list(); self.detail = detail()
+    }
+    var body: some View {
+        GeometryReader { space in
+            if space.size.width >= 600 {
+                HSplitView {
+                    list.frame(minWidth: 220, idealWidth: 280, maxWidth: 340)
+                    detail.frame(minWidth: 280)
+                }
+            } else {
+                VStack(spacing: 0) {
+                    list.frame(height: min(220, space.size.height * 0.36))
+                    Divider()
+                    detail.frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+        }
     }
 }
 
@@ -195,7 +286,11 @@ private struct NativeTaskSheet: View {
     @State private var error = ""
     @State private var advice: JSON = .null
     private var workers: [JSON] { client.harnesses.filter { $0["available"].bool == true && $0["workerSupported"].bool == true } }
-    private var roles: [JSON] { client.project["roles"].array ?? [] }
+    private var roles: [JSON] {
+        let all = client.project["roles"].array ?? []
+        guard source["id"].string != nil else { return all }
+        return all.filter { $0["peerId"] == source["peerId"] }
+    }
     private var effectiveHarness: String { roles.first { $0["id"].string == roleID }?["harness"].string ?? harness }
     private var supportedReview: Bool { effectiveHarness.isEmpty || ["codex", "claude"].contains(effectiveHarness) }
     private var followUpKind: String { source["followUp"]["kind"].string == "review" ? "fix" : "review" }
@@ -213,11 +308,14 @@ private struct NativeTaskSheet: View {
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text(source["id"].string == nil ? "Start a native worker" : followUpKind == "review" ? "Review linked work" : "Fix linked findings").font(.title2.weight(.semibold))
-            ScrollView {
-                Form {
-                    Text("Project: \(client.project["name"].string ?? "Choose a project")")
-                    TextEditor(text: $prompt).font(.body).frame(height: 95).accessibilityLabel("Task prompt")
+            Text(source["id"].string == nil ? "New task" : followUpKind == "review" ? "Review linked work" : "Fix linked findings").font(.title2.weight(.semibold))
+            Form {
+                Section("Task") {
+                    Text(client.project["name"].string ?? "Choose a project").font(.caption).foregroundStyle(.secondary)
+                    TextEditor(text: $prompt).font(.body).scrollContentBackground(.hidden).padding(8).frame(height: 110)
+                        .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 8)).accessibilityLabel("Task prompt")
+                }
+                Section("Assignment") {
                     Picker("Role", selection: $roleID) {
                         Text("No saved role").tag("")
                         ForEach(roles, id: \.selfID) { role in
@@ -232,30 +330,39 @@ private struct NativeTaskSheet: View {
                         Text(role["model"].string.map { "Saved model pin: \($0)" } ?? "Saved role uses its native default unless explicitly pinned.").font(.caption)
                     }
                     TextField("Model (optional explicit pin)", text: $model)
+                }
+                Section("Routing") {
                     Toggle("Use routing policy", isOn: $automaticRouting)
                     Picker("Computers for automatic choice", selection: $deviceScope) {
                         Text("This Mac").tag("local"); Text("This Mac and connected Macs").tag("connected")
                     }.disabled(!roleID.isEmpty || source["id"].string != nil || workspace != "worktree" || !automaticRouting)
-                    Text("Remote roles keep their saved owner. Automatic remote work requires a separate worktree and a tested project mapping.").font(.caption).foregroundStyle(.secondary)
-                    Text(automaticRouting ? "Pins are preserved. Native model access, allowance and requirements are checked again on Start." : "Use your explicit pins or the native default. Required tools still need verified support.").font(.caption).foregroundStyle(.secondary)
                     Picker("Task type", selection: $taskType) {
                         Text("Coding").tag("coding"); Text("Reasoning").tag("reasoning"); Text("Data analysis").tag("data-analysis"); Text("Language").tag("language")
                     }
                     Picker("Complexity", selection: $complexity) { Text("Routine").tag("routine"); Text("Standard").tag("standard"); Text("Hard").tag("hard") }
-                    Text("Saved preference: \(client.project["preference"].string ?? "Unknown"). Policy favors efficient workers for routine work. Dollar cost is unknown.").font(.caption).foregroundStyle(.secondary)
+                    Text("Preference: \(client.project["preference"].string ?? "Unknown")").font(.caption).foregroundStyle(.secondary)
+                    DisclosureGroup("How routing works") {
+                        Text("Remote roles keep their saved owner. Automatic remote work requires a separate worktree and a tested project mapping.")
+                        Text(automaticRouting ? "Pins are preserved. Native model access, allowance and requirements are checked again on Start." : "Use your explicit pins or the native default. Required tools still need verified support.")
+                        Text("Efficient workers are favored for routine work. Dollar cost is unknown.")
+                    }.font(.caption).foregroundStyle(.secondary)
+                }
+                Section("Required capabilities") {
                     Toggle("Image input required", isOn: $requiresImages)
                     Toggle("Web search required", isOn: $webSearch)
                     Toggle("Image generation required", isOn: $imageGeneration)
                     Text("Required tools need fresh effective worker evidence. Unknown support blocks Start. Model vision and installed plugins do not prove tool access.").font(.caption).foregroundStyle(.secondary)
+                }
+                Section("Workspace") {
                     if source["id"].string == nil {
                         Picker("Workspace", selection: $workspace) { Text("Isolated worktree").tag("worktree"); Text("Project folder").tag("project") }
                     } else { Text("The linked work's original workspace is preserved.").font(.caption) }
                     Toggle("Use saved project context", isOn: $includeContext)
                     Toggle("Read only", isOn: $readOnly).disabled(source["id"].string != nil && followUpKind == "review")
                     if readOnly && !supportedReview { Text("Choose Codex or Claude for enforced read-only work.").foregroundStyle(.secondary) }
+                }
                     adviceDetails
-                }.formStyle(.grouped)
-            }
+            }.formStyle(.grouped).frame(maxHeight: .infinity)
             if !error.isEmpty { Text(error).foregroundStyle(.red).textSelection(.enabled) }
             HStack {
                 Button("Cancel", role: .cancel) { dismiss() }.disabled(starting)
@@ -265,7 +372,7 @@ private struct NativeTaskSheet: View {
                 Button("Start worker") { Task { await start() } }.keyboardShortcut(.defaultAction)
                     .disabled(starting || suggesting || !client.connected || client.projectID.isEmpty || prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || (readOnly && !supportedReview))
             }
-        }.padding(24).frame(width: 620, height: 720).disabled(starting)
+        }.padding(20).frame(minWidth: 460, idealWidth: 560, maxWidth: 640, minHeight: 440, idealHeight: 620, maxHeight: 720).disabled(starting)
         .onChange(of: draft) { _, _ in key = UUID().uuidString; advice = .null }
         .onChange(of: workspace) { _, next in if next != "worktree" { deviceScope = "local" } }
         .onChange(of: roleID) { _, id in if let role = roles.first(where: { $0["id"].string == id }) { harness = role["harness"].string ?? "" } }
@@ -281,13 +388,22 @@ private struct NativeTaskSheet: View {
     @ViewBuilder private var adviceDetails: some View {
         if advice != .null {
             let choice = advice["choice"]
-            Text(choice["model"].string.map { "\(choice["harness"].string ?? "Harness") · \($0)" } ?? "No suitable worker found").font(.headline)
+            if let model = choice["model"].string {
+                Text("\(choice["harness"].string ?? "Harness") · \(model)").font(.headline)
+            } else { Text("No suitable worker found").font(.headline) }
             Text("Checked again on Start. Account allowance, model pins and required tools are checked by the service.").font(.caption)
-            ForEach(Array(((advice["reasons"].array ?? []) + (advice["warnings"].array ?? []) + (choice["reasons"].array ?? []) + (choice["warnings"].array ?? [])).enumerated()), id: \.offset) { _, item in Text(item.string ?? "").font(.caption).foregroundStyle(.secondary) }
+            ForEach(Array(adviceMessages.enumerated()), id: \.offset) { _, text in Text(text).font(.caption).foregroundStyle(.secondary) }
             if let score = choice["benchmark"]["score"].number {
                 Text("LiveBench \(choice["benchmark"]["metric"].string ?? "Reference"): \(score.formatted())/100 · max effort · \(advice["benchmarkMethod"].string ?? "reference only")").font(.caption)
             }
         }
+    }
+    private var adviceMessages: [String] {
+        var messages = advice["reasons"].array ?? []
+        messages.append(contentsOf: advice["warnings"].array ?? [])
+        messages.append(contentsOf: advice["choice"]["reasons"].array ?? [])
+        messages.append(contentsOf: advice["choice"]["warnings"].array ?? [])
+        return messages.compactMap(\.string)
     }
     private func suggest() async {
         guard !suggesting else { return }; suggesting = true; error = ""
@@ -305,7 +421,7 @@ private struct NativeTaskSheet: View {
         let project = client.projectID
         var body = pins
         body.merge(["projectId": project, "prompt": prompt, "idempotencyKey": key, "readOnly": readOnly, "includeProjectContext": includeContext]) { _, next in next }
-        if automaticRouting || requiresImages || !tools.isEmpty { body["routing"] = routing }
+        if automaticRouting || requiresImages || !tools.isEmpty || source["routing"]["requiresImages"].bool == true || !(source["routing"]["requiresTools"].array ?? []).isEmpty { body["routing"] = routing }
         if source["id"].string == nil { body["workspace"] = workspace }
         do {
             let run = try await client.request("/tasks/start", body: body)

@@ -99,6 +99,9 @@ Plan: [docs/DESKTOP_PLAN.md](docs/DESKTOP_PLAN.md).
 - [x] SwiftUI build
 - [x] Local boundary checks
 - [x] Native GUI smoke
+- [x] Native toolbar layout
+- [x] Compact model cards
+- [x] Project picture storage
 - [ ] Native GUI acceptance
 - [ ] Full native parity
 - [ ] Signed distribution

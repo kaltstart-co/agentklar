@@ -155,6 +155,7 @@ struct NativeDevicesView: View {
 struct NativeRemoteWorkView: View {
     @ObservedObject var client: AgentKlarClient
     @Binding var selected: String?
+    let onFollowUp: (JSON) -> Void
     @State private var observed: JSON = .null
     @State private var working = false
     @State private var message = ""
@@ -162,12 +163,19 @@ struct NativeRemoteWorkView: View {
     private var dispatch: JSON { dispatches.first { $0["id"].string == selected } ?? .null }
     private var current: JSON { observed["id"].string == selected ? observed : dispatch }
     var body: some View {
-        HSplitView {
+        NativeWorkLayout {
             List(selection: $selected) {
                 ForEach(dispatches, id: \.selfID) { item in
-                    VStack(alignment: .leading) { Text(item["prompt"].string ?? "Remote task").lineLimit(2); Text("Last known: \(item["lastKnownRun"]["state"].string ?? "Unknown")").font(.caption).foregroundStyle(.secondary) }.tag(item["id"].string ?? "")
+                    HStack(alignment: .top, spacing: 10) {
+                        NativeHarnessIcon(harness: item["harness"].string ?? item["lastKnownRun"]["harness"].string ?? "", size: 24)
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text(item["prompt"].string ?? "Remote task").lineLimit(2)
+                            Text("Last known: \(item["lastKnownRun"]["state"].string ?? "Unknown")").font(.caption).foregroundStyle(.secondary)
+                        }
+                    }.padding(.vertical, 6).tag(item["id"].string ?? "")
                 }
-            }.frame(minWidth: 220, idealWidth: 280)
+            }
+        } detail: {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     if let id = current["id"].string {
@@ -185,9 +193,17 @@ struct NativeRemoteWorkView: View {
                         if !message.isEmpty { Text(message).foregroundStyle(.orange) }
                         if let result = current["lastKnownRun"]["result"].string { Text("Last observed result").font(.headline); Text(result).textSelection(.enabled); if current["lastKnownRun"]["resultTruncated"].bool == true { Text("Result shortened by the service.").font(.caption) } }
                         NativeRemoteApprovalsView(client: client, dispatch: current).id(id)
-                    } else { Text("Choose a remote task. No remote work is started by this view.").foregroundStyle(.secondary) }
+                        if current["lastKnownRun"]["state"].string == "completed" {
+                            Button(current["lastKnownRun"]["followUp"]["kind"].string == "review" ? "Fix findings on owner" : "Review work on owner", systemImage: "arrow.triangle.branch") {
+                                var source = current["lastKnownRun"].objectValue ?? [:]
+                                source["id"] = current["id"]; source["peerId"] = current["peerId"]
+                                onFollowUp(.object(source))
+                            }.disabled(working || !client.connected)
+                        }
+                        NativeChangesView(client: client, sourceID: id).id(id)
+                    } else { ContentUnavailableView("Select a remote task", systemImage: "desktopcomputer", description: Text("View work and results from your connected computers.")) }
                 }.padding().frame(maxWidth: .infinity, alignment: .leading)
-            }.frame(minWidth: 360)
+            }
         }.onChange(of: selected) { _, _ in observed = .null; message = "" }
         .onChange(of: client.projectID) { _, _ in selected = nil; observed = .null; message = "" }
     }

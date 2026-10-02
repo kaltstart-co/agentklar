@@ -42,6 +42,7 @@ export const sshPeerTransport: PeerTransport = (peer, request) => new Promise((r
   const finish = (error?: Error, reply?: Reply) => { if (done) return; done = true; clearTimeout(timer); child.kill(); error ? reject(error) : resolve(reply!); };
   const timer = setTimeout(() => finish(new PeerError("Peer did not acknowledge in time. Its owned worker may still be running; query this dispatch again.", 503)), 35_000);
   child.on("error", () => finish(new PeerError("SSH could not start. Check your existing SSH setup.", 503)));
+  child.stdin.on("error", () => finish(new PeerError("SSH peer command ended before the request was sent. Owner status is unknown; query the same dispatch again.", 503)));
   child.on("exit", () => { if (!done) finish(new PeerError("SSH peer command ended without a verified reply. Check SSH access, the remote command and the running owner service. Owner status is unknown.", 503)); });
   child.stdout.on("data", data => {
     output += data.toString();

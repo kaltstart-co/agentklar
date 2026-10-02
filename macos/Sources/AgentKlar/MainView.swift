@@ -1,20 +1,26 @@
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 
 struct MainView: View {
     @ObservedObject var client: AgentKlarClient
     @State private var section: String? = "Work"
+    @State private var choosingProject = false
+    @State private var choosingPicture = false
+    @State private var pictureProjectID = ""
+    @StateObject private var pictures = ProjectPictureStore()
     private let sections = [("Work", "checklist"), ("Instructions", "doc.text"), ("Context", "text.alignleft"),
                             ("Team", "person.2"), ("Models", "cpu"), ("Usage", "chart.bar"), ("Settings", "gear")]
     var body: some View {
         NavigationSplitView {
             VStack(spacing: 0) {
-                Picker("Project", selection: Binding(get: { client.projectID }, set: { id in Task { await client.selectProject(id) } })) {
-                    if client.projects.isEmpty { Text("No project").tag("") }
-                    ForEach(client.projects, id: \.self) { project in Text(project["name"].string ?? "Project").tag(project["id"].string ?? "") }
-                }.pickerStyle(.menu).disabled(!client.connected).padding()
-                List(selection: $section) { ForEach(sections, id: \.0) { item in Label(item.0, systemImage: item.1).tag(item.0) } }
-            }.navigationTitle("AgentKlar").navigationSplitViewColumnWidth(min: 190, ideal: 220)
+                projectSwitcher.padding(.horizontal, 12).padding(.vertical, 10)
+                List(selection: $section) {
+                    ForEach(sections, id: \.0) { item in
+                        HStack(spacing: 10) { Image(systemName: item.1).frame(width: 20); Text(item.0).lineLimit(1) }.tag(item.0)
+                    }
+                }.listStyle(.sidebar)
+            }.navigationTitle("AgentKlar").navigationSplitViewColumnWidth(min: 190, ideal: 220, max: 280)
         } detail: {
             VStack(spacing: 0) {
                 if !client.error.isEmpty {
@@ -49,16 +55,58 @@ struct MainView: View {
                     ToolbarItemGroup {
                         if client.busy { ProgressView().controlSize(.small) }
                         Button("Add project", systemImage: "folder.badge.plus", action: addProject).disabled(!client.connected || client.busy)
-                        Button("Refresh", systemImage: "arrow.clockwise") { Task { await client.refresh() } }.disabled(!client.connected || client.busy)
+                        if !["Work", "Models", "Usage"].contains(section ?? "Work") { Button("Refresh", systemImage: "arrow.clockwise") { Task { await client.refresh() } }.disabled(!client.connected || client.busy) }
                     }
                 }
-        }.disabled(client.busy).frame(minWidth: 900, minHeight: 600).task {
+        }.disabled(client.busy).frame(minWidth: 640, minHeight: 520)
+        .fileImporter(isPresented: $choosingProject, allowedContentTypes: [.folder], allowsMultipleSelection: false) { result in
+            switch result {
+            case .success(let folders):
+                if let folder = folders.first { Task { await client.registerProject(name: folder.lastPathComponent, path: folder.path) } }
+            case .failure: client.error = "The project folder could not be selected. Try Add project again."
+            }
+        }
+        .fileImporter(isPresented: $choosingPicture, allowedContentTypes: [.image], allowsMultipleSelection: false) { result in
+            switch result {
+            case .success(let files):
+                if let file = files.first { do { try pictures.save(file, projectID: pictureProjectID) } catch { client.error = error.localizedDescription } }
+            case .failure: client.error = "The project picture could not be selected. Try choosing an image again."
+            }
+        }
+        .task(id: client.projects.compactMap { $0["id"].string }.joined(separator: ":")) { pictures.load(client.projects.compactMap { $0["id"].string }) }
+        .onChange(of: client.requestedRunID) { _, id in if id != nil { section = "Work" } }
+        .task {
             if !client.connected { await client.connect() }
             while !Task.isCancelled {
                 do { try await Task.sleep(for: .seconds(2)) } catch { return }
                 await client.refresh()
             }
         }
+    }
+    private var projectSwitcher: some View {
+        HStack(spacing: 9) {
+            NativeProjectAvatar(projectID: client.projectID, name: client.project["name"].string ?? "Project", store: pictures)
+            Menu {
+            ForEach(client.projects, id: \.selfID) { project in
+                Button { if let id = project["id"].string { Task { await client.selectProject(id) } } } label: {
+                    if project["id"].string == client.projectID { Label(project["name"].string ?? "Project", systemImage: "checkmark") }
+                    else { Text(project["name"].string ?? "Project") }
+                }
+            }
+            Divider()
+            Button("Add project folder…", systemImage: "folder.badge.plus", action: addProject)
+            Button("Choose project picture…", systemImage: "photo") { pictureProjectID = client.projectID; choosingPicture = true }.disabled(client.projectID.isEmpty)
+            Button("Remove project picture", systemImage: "trash", role: .destructive) {
+                do { try pictures.remove(client.projectID) } catch { client.error = error.localizedDescription }
+            }.disabled(pictures.pictures[client.projectID] == nil)
+            Text("Project pictures stay on this Mac.")
+            } label: {
+                Text(client.project["name"].string ?? "Choose a project").lineLimit(1).truncationMode(.tail).frame(maxWidth: .infinity, alignment: .leading)
+            }.menuStyle(.borderlessButton).menuIndicator(.visible)
+                .frame(minWidth: 0, maxWidth: .infinity)
+                .accessibilityLabel("Project: " + (client.project["name"].string ?? "Choose a project"))
+        }.frame(maxWidth: .infinity).disabled(!client.connected)
+            .help("Switch projects or choose a project picture. Pictures stay on this Mac.")
     }
     private func confirmUpdate() {
         let alert = NSAlert(); alert.messageText = "Update the local service?"
@@ -67,7 +115,6 @@ struct MainView: View {
         if alert.runModal() == .alertFirstButtonReturn { Task { await client.updateService() } }
     }
     private func addProject() {
-        let panel = NSOpenPanel(); panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.allowsMultipleSelection = false
-        if panel.runModal() == .OK, let url = panel.url { Task { await client.registerProject(name: url.lastPathComponent, path: url.path) } }
+        choosingProject = true
     }
 }

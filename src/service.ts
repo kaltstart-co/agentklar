@@ -246,7 +246,10 @@ export function createService(
       throw error;
     }
   });
-  const changes = new Changes(store, home);
+  const changes = new Changes(store, home, workspace => activeRuns().some(run => {
+    const path = changeRunPath(run);
+    return !!path && overlaps(gitCheckout(path)?.root ?? path, workspace.path!);
+  }));
   function appliedView(applied: ChangeApply) {
     const quote = (value: string) => `'${value.replaceAll("'", "'\"'\"'")}'`;
     const continuations = ["codex", "claude"].flatMap((harness) => {
@@ -416,6 +419,8 @@ export function createService(
     (r.workerPid !== undefined && processGroupAlive(r.workerPid));
   const activeRuns = (projectId?: string) => store.runs().filter((r) => (!projectId || r.projectId === projectId) && active(r));
   const runPath = (r: Run) => r.workspace?.path || store.projects().find((p) => p.id === r.projectId)?.path;
+  const changeRunPath = (run: Run) => run.workspace?.path ||
+    (run.workspace?.kind === "worktree" ? run.workspace.plannedPath : undefined) || runPath(run);
   const overlaps = (a: string, b: string) => a === b || a.startsWith(b + "/") || b.startsWith(a + "/");
   const sameWorkspace = (a: Run, b: Run) => {
     if (a.workspace?.kind === "worktree" && b.workspace?.kind === "worktree" &&
@@ -1401,7 +1406,9 @@ export function createService(
     const target = linkedAtStart || (workspaceChoice === "project" ? {
       projectId: p.id, workspace: { kind: "project", path: p.path },
     } as Run : null);
-    const busyError = () => {
+    const busyError = (admissionRun = target) => {
+      const path = admissionRun && changeRunPath(admissionRun);
+      if (path && changes.blocks(gitCheckout(path)?.root ?? path)) return "Workspace has a changes handoff being applied. Retry after it finishes.";
       if (nativeWrites) return "A native settings or plugin change is still running. Retry after it finishes.";
       if (activeRuns(p.id).length >= 2) return "Project already has two active workers.";
       if (target && activeRuns().some((r) => sameWorkspace(r, target)))
@@ -1572,7 +1579,7 @@ export function createService(
       updatedAt: now,
       launchHash,
     };
-    const finalBusy = busyError();
+    const finalBusy = busyError(r);
     if (finalBusy) return c.json({ error: finalBusy }, 409);
     store.insertRun(r, data.idempotencyKey);
     store.event(
