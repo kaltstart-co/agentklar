@@ -14,7 +14,7 @@ The TypeScript service still owns projects, saved work, workers and approvals. I
 - Settings: connect a harness, choose a native installation, save the main harness, preview model/effort defaults, manage paired devices and check updates. Project photos are cached per Mac as normalized PNG files.
 - Remote work: choose a saved remote role or include connected computers in automatic selection; read compact owner status/results, request stop and review supported concrete remote approvals. Remote task selection never requests an unsupported local event tail.
 
-These controls are implemented in the beta.33 source build. Responsive action rows stack when space is narrow, and important Work actions stay in the native toolbar. Full native GUI acceptance and feature parity remain unverified. Open-main-harness guidance uses the terminal. Unknown approval kinds cannot be accepted in the native app. Worker completion is not human review.
+These controls are included in the beta.33 development preview. Responsive action rows stack when space is narrow, and important Work actions stay in the native toolbar. Full native GUI acceptance and feature parity remain unverified. Open-main-harness guidance uses the terminal. Unknown approval kinds cannot be accepted in the native app. Worker completion is not human review.
 
 Muse model refresh now also makes an independent native [`usage/read`](https://dev.meta.ai/docs/muse-code/changelog). It returns last-seen subscription windows with their original observation time, not a live balance. An empty observation stays unknown, and quota failure does not hide the model list. Complete account quota coverage remains unfinished.
 
@@ -49,8 +49,8 @@ Sparkle activation checks the signed-release marker, fixed feed, key and Apple D
 
 ## Verification limits
 
-The beta.33 native source package builds on Apple Silicon. The latest backend run passed 309 tests, and the standalone native boundary checks passed separately. Earlier Mac CI passed six XCTest cases; the new project-photo XCTest addition has not run yet, and its CI result is pending.
+The published beta.33 release passed [exact-source CI](https://github.com/kaltstart-co/agentklar/actions/runs/37012958180), including the native Apple Silicon build, eight XCTest cases and the standalone native boundary checks. The local Mac service run passed all 309 tests. Linux CI passed 305 service tests and skipped four checks that require macOS or the installed Antigravity CLI.
 
 The installed beta.33 GUI on the MacBook rendered the new Work, Models, Team, Settings, Context and Instructions screens. Captured screenshots show aligned sidebar icons, the compact project switcher, native toolbars, model cards and expandable details. Project-menu selection and the native image picker were also exercised in a temporary build. Image import completion and narrow-window interaction remain unverified. The computer-use connection closed during the remaining checks. The Mac mini GUI was not exercised.
 
-Full native GUI acceptance is pending, including narrow-window action layouts, project photos, worker starts and approvals, remote linked review/fix, Git handoff/recovery, coordinated control and configuration writes. No signing identity is available, so Developer ID distribution, notarization and a signed Sparkle download/install round trip remain unverified. See [validation evidence](VALIDATION.md) for the exact checks and limits.
+Full native GUI acceptance is pending, including narrow-window action layouts, project picture import, worker starts and approvals, remote linked review/fix, Git handoff/recovery, coordinated control and configuration writes. No signing identity is available, so Developer ID distribution, notarization and a signed Sparkle download/install round trip remain unverified. See [validation evidence](VALIDATION.md) for the exact checks and limits.
