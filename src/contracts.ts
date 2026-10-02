@@ -227,6 +227,7 @@ export type HarnessCatalog = {
   modelsStatus: "available" | "unavailable";
   modelsMessage: string | null;
   modelsTruncated: boolean;
+  connectedProviderIds?: string[];
   quota: AccountQuota;
 };
 export type CatalogSnapshot = {

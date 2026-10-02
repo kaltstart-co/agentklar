@@ -1799,6 +1799,20 @@ export function createService(
     return c.json(await peers.humanAnswer(c.req.param("dispatchId"),{...parsed.data,approvalId:c.req.param("approvalId")}) as object);
   });
   app.get("/api/peers/settings", c => c.json(peers.settings()));
+  app.get("/api/peers/:id/catalog", async c => {
+    c.header("Cache-Control", "no-store");
+    const id = c.req.param("id"), projectId = c.req.query("projectId");
+    if (!z.uuid().safeParse(id).success || !z.uuid().safeParse(projectId).success)
+      return c.json({ error: "Provide a valid saved peer and local project ID." }, 400);
+    if (!store.projects().some(project => project.id === projectId)) return c.json({ error: "Project not found" }, 404);
+    if (quiesced || stopping) return c.json({ error: "Local service is stopping." }, 503);
+    const mapping = peers.resolveMapping(projectId!, id);
+    const catalog = await peers.catalog(id);
+    if (quiesced || stopping) return c.json({ error: "Local service is stopping." }, 503);
+    if (JSON.stringify(peers.resolveMapping(projectId!, id)) !== JSON.stringify(mapping))
+      return c.json({ error: "Saved computer mapping changed. Choose the computer again." }, 409);
+    return c.json(catalog);
+  });
   for (const [operation, handler] of [["grant", (v: unknown) => peers.grant(v)], ["revoke", (v: unknown) => peers.revoke(v)], ["save", (v: unknown) => peers.saveConnection(v)], ["test", (v: unknown) => peers.test(v)]] as const)
     app.post(`/api/peers/settings/${operation}`, async c => {
       try { return c.json(await handler(await c.req.json())); }

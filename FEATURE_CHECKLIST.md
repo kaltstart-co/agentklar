@@ -15,7 +15,9 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 - [x] Team roles
 - [x] Role responsibilities
 - [x] Model pins
-- [x] Cost preference
+- [x] Routing preference
+- [x] Preference explanations
+- [x] Separate preference save
 - [x] Harness discovery
 - [x] Native source inventory
 - [x] Device identity
@@ -59,6 +61,7 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 - [x] Shared memory
 - [x] Project context
 - [x] Native model list
+- [x] Computer model view
 - [x] Claude worker sign-in status
 - [x] Muse model discovery
 - [x] Muse delegation
@@ -79,6 +82,7 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 
 ## Required, unfinished
 
+- [ ] OpenCode 2 adapter
 - [ ] Complete account quotas
 - [ ] Gemini and Cursor proof
 - [ ] ZCode worker

@@ -75,7 +75,16 @@ createInterface({input:process.stdin}).on('line', line => {
  const reply=result=>process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:request.id,result})+'\\n');
  if(request.method==='initialize')return reply({});
  if(request.method==='usage/read')return reply({});
- if(request.method==='model/list')return mode==='malformed' ? reply({models:{}}) : reply({source:mode==='fake'?'fakeCatalog':mode==='config'?'configCatalog':mode==='bundled'?'bundledCatalog':'providerCatalog',providerId:'muse',profileId:null,models:[row('muse-spark-1.3'),row('muse-spark-1.3-contributor'),row('muse-spark-1.3'),row('foreign','other')]});
+ if(request.method==='model/list') {
+  if(mode==='malformed')return reply({models:{}});
+  if(mode==='native-shape')return reply({source:'bundledCatalog',providerId:'meta',profileId:'tbh',models:[row('muse-spark-1.3-contributor','meta')]});
+  if(mode==='native-profile')return reply({source:'bundledCatalog',providerId:'meta',profileId:'tbh',models:[row('muse-spark-1.3-contributor','meta'),row('selected','meta','tbh'),row('muse-spark-1.3-contributor','meta'),row('foreign-provider','other'),row('foreign-profile','meta','other'),{...row('missing-profile','meta'),profileId:undefined}]});
+  if(mode==='no-profile')return reply({source:'providerCatalog',providerId:'muse',profileId:null,models:[row('foreign-profile','muse','other'),row('native')]});
+  if(mode==='empty')return reply({source:'bundledCatalog',providerId:'muse',profileId:null,models:[]});
+  if(mode==='foreign-only')return reply({source:'providerCatalog',providerId:'muse',profileId:'selected',models:[row('foreign-provider','other'),row('foreign-profile','muse','other')]});
+  if(mode==='invalid-only')return reply({source:'providerCatalog',providerId:'muse',profileId:null,models:[row('x'.repeat(121)),{...row('hidden'),hidden:true},{...row('missing-profile'),profileId:undefined}]});
+  return reply({source:mode==='fake'?'fakeCatalog':mode==='config'?'configCatalog':mode==='bundled'?'bundledCatalog':'providerCatalog',providerId:'muse',profileId:null,models:[row('muse-spark-1.3'),row('muse-spark-1.3-contributor'),row('muse-spark-1.3'),row('foreign','other')]});
+ }
  throw new Error('Unexpected method '+request.method);
 });
 `;
@@ -145,6 +154,43 @@ test("Muse probe reads native model and usage metadata and removes incompatible 
     assert.deepEqual(calls[2].params, {});
     assert.ok(calls.every((r) => !JSON.stringify(r).includes("session")));
     assertStopped(Number(readFileSync(log + ".pid", "utf8")), "Muse probe");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("Muse bundled rows without a declared profile use the selected native route", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "agentklar-muse-profile-"));
+  const file = join(dir, "muse.mjs");
+  writeFileSync(file, museFixture);
+  try {
+    for (const [mode, ids, truncated] of [
+      ["native-shape", ["muse-spark-1.3-contributor"], false],
+      ["native-profile", ["muse-spark-1.3-contributor", "selected"], true],
+      ["no-profile", ["native"], true],
+    ] as const) {
+      const log = join(dir, mode);
+      const result = await readMuseCatalog(process.execPath, dir, new AbortController().signal, [file, mode, log]);
+      assert.equal(result.modelsStatus, "available", mode);
+      assert.deepEqual(result.models.map((m) => m.id), ids, mode);
+      assert.equal(result.modelsTruncated, truncated, mode);
+      assertStopped(Number(readFileSync(log + ".pid", "utf8")), mode);
+    }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("Muse reports an empty or fully rejected native list as unavailable", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "agentklar-muse-empty-"));
+  const file = join(dir, "muse.mjs");
+  writeFileSync(file, museFixture);
+  try {
+    for (const mode of ["empty", "foreign-only", "invalid-only"]) {
+      const log = join(dir, mode);
+      const result = await readMuseCatalog(process.execPath, dir, new AbortController().signal, [file, mode, log]);
+      assert.equal(result.modelsStatus, "unavailable", mode);
+      assert.deepEqual(result.models, [], mode);
+      assert.equal(result.modelsTruncated, mode !== "empty", mode);
+      assert.match(result.modelsMessage!, /no usable models.*selected native provider and profile/i);
+      assertStopped(Number(readFileSync(log + ".pid", "utf8")), mode);
+    }
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 

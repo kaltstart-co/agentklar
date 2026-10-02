@@ -5,6 +5,9 @@ struct ModelUsageView: View {
     let section: String
     var active = true
     @State private var catalog: JSON = .null
+    @State private var computerID = ""
+    @State private var catalogScope: LoadScope?
+    @State private var loadID: UUID?
     @State private var working = false
     @State private var failure = ""
     @State private var search = ""
@@ -17,7 +20,23 @@ struct ModelUsageView: View {
         let model: JSON
         var harness: String { entry["harness"].string ?? "" }
     }
-    private var harnessEntries: [JSON] { catalog["harnesses"].array ?? [] }
+    private struct LoadScope: Hashable {
+        let projectID: String
+        let connected: Bool
+        let owner: JSON
+        let computerID: String
+        let peer: JSON
+    }
+    private var projectPeers: [JSON] {
+        (client.snapshot["peers"].array ?? []).filter { $0["projectId"].string == client.projectID }
+    }
+    private var selectedPeer: JSON { projectPeers.first { $0["id"].string == computerID } ?? .null }
+    private var scope: LoadScope {
+        LoadScope(projectID: client.projectID, connected: client.connected, owner: client.snapshot["device"], computerID: computerID, peer: selectedPeer)
+    }
+    private var computerName: String { computerID.isEmpty ? "This Mac" : (selectedPeer["label"].string ?? "Saved computer") }
+    private var visibleCatalog: JSON { catalogScope == scope ? catalog : .null }
+    private var harnessEntries: [JSON] { visibleCatalog["harnesses"].array ?? [] }
     private var modelRows: [CatalogModel] {
         harnessEntries.flatMap { entry in
             (entry["models"].array ?? []).enumerated().map { index, model in
@@ -39,6 +58,7 @@ struct ModelUsageView: View {
                 NativePageHeader(title: section, subtitle: section == "Models" ? "Models offered by your native harnesses." : "Reported work usage and account allowance.") {
                     if active { refreshActions.controlSize(.regular).labelStyle(.titleAndIcon) }
                 }
+                computerPicker
                 if section == "Models" {
                     VStack(alignment: .leading, spacing: 12) {
                         catalogControls
@@ -49,7 +69,9 @@ struct ModelUsageView: View {
                     benchmarkSummary
                 } else {
                     metadataStatus
-                    usageSection
+                    if computerID.isEmpty { usageSection }
+                    else { Text("Task token totals are available for This Mac. The allowance below comes from \(computerName).").font(NativeStyle.caption).foregroundStyle(.secondary) }
+                    Text("Account allowance · \(computerName)").font(NativeStyle.heading)
                     ForEach(harnessEntries, id: \.self) { entry in
                         Divider()
                         harnessLabel(entry["harness"].string ?? "")
@@ -61,19 +83,35 @@ struct ModelUsageView: View {
         .sheet(item: $selectedModel) { row in modelInspector(row) }
         .sheet(isPresented: $showingBenchmarks) { benchmarkInspector }
 
-        .task(id: client.projectID + ":" + String(client.connected)) {
-            catalog = .null; failure = ""; selectedModel = nil
-            while working { do { try await Task.sleep(for: .milliseconds(50)) } catch { return } }
-            if !Task.isCancelled { await load(refresh: false); await loadBenchmarks(refresh: false) }
+        .onChange(of: computerID) { _, _ in selectedModel = nil; showingBenchmarks = false }
+        .task(id: scope) {
+            catalog = .null; catalogScope = nil; failure = ""; selectedModel = nil; showingBenchmarks = false
+            loadID = nil; working = false
+            if !computerID.isEmpty, selectedPeer == .null { computerID = ""; return }
+            if !Task.isCancelled { await load(refresh: false) }
+            if !Task.isCancelled { await loadBenchmarks(refresh: false) }
+        }
+    }
+
+    private var computerPicker: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Picker("Computer", selection: $computerID) {
+                Text("This Mac").tag("")
+                ForEach(projectPeers, id: \.self) { peer in
+                    Text(peer["label"].string ?? "Saved computer").tag(peer["id"].string ?? "")
+                }
+            }.pickerStyle(.menu).accessibilityLabel("Computer for models and account allowance")
+            Text("Native models and account allowance from \(computerName).")
+                .font(NativeStyle.caption).foregroundStyle(.secondary)
         }
     }
 
     @ViewBuilder private var metadataStatus: some View {
-        if working { ProgressView("Reading native metadata…") }
+        if working { ProgressView("Reading native metadata from \(computerName)…") }
         if !failure.isEmpty { Label(failure, systemImage: "exclamationmark.triangle").foregroundStyle(.red).fixedSize(horizontal: false, vertical: true) }
-        if let checked = catalog["checkedAt"].string {
-            Label("Native metadata checked \(humanDate(checked))", systemImage: "clock").font(NativeStyle.caption).foregroundStyle(.secondary)
-        } else { Text("Native metadata has not been read for this project.").foregroundStyle(.secondary) }
+        if let checked = visibleCatalog["checkedAt"].string {
+            Label("\(computerName) · metadata checked \(humanDate(checked))", systemImage: "clock").font(NativeStyle.caption).foregroundStyle(.secondary)
+        } else { Text("Native metadata has not been read for this project on \(computerName).").foregroundStyle(.secondary) }
     }
 
     @ViewBuilder private var refreshActions: some View {
@@ -166,12 +204,29 @@ struct ModelUsageView: View {
             VStack(alignment: .leading, spacing: 12) {
                 ForEach(harnessEntries.filter { harnessFilter.isEmpty || $0["harness"].string == harnessFilter }, id: \.self) { entry in
                     let harness = entry["harness"].string ?? ""
-                    HStack {
-                        harnessLabel(harness)
-                        Spacer()
-                        if entry["modelsStatus"].string == "unavailable" { Text("List unavailable").font(NativeStyle.caption).foregroundStyle(.secondary) }
-                        if entry["modelsTruncated"].bool == true { Text("List shortened").font(NativeStyle.caption).foregroundStyle(.orange) }
-                        Button("Source details") { selectedModel = CatalogModel(id: "source:" + harness, entry: entry, model: .null) }
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            harnessLabel(harness)
+                            Spacer()
+                            Text("\((entry["models"].array ?? []).count) models").font(NativeStyle.caption).foregroundStyle(.secondary)
+                            if entry["modelsStatus"].string == "unavailable" { Text("List unavailable").font(NativeStyle.caption).foregroundStyle(.secondary) }
+                            if entry["modelsTruncated"].bool == true { Text("List shortened").font(NativeStyle.caption).foregroundStyle(.orange) }
+                            Button("Source details") { selectedModel = CatalogModel(id: "source:" + harness, entry: entry, model: .null) }
+                        }
+                        if harness == "opencode" {
+                            if let providers = entry["connectedProviderIds"].array {
+                                let ids = providers.compactMap(\.string)
+                                Text(ids.isEmpty ? "No providers connected in OpenCode on \(computerName)." : "Connected providers on \(computerName): \(ids.joined(separator: ", ")).")
+                                    .font(NativeStyle.caption).foregroundStyle(.secondary)
+                                if ids.isEmpty {
+                                    Text("Choose another computer above to read its connected providers and models.")
+                                        .font(NativeStyle.caption).foregroundStyle(.secondary)
+                                }
+                            }
+                            if let message = entry["modelsMessage"].string, !message.isEmpty {
+                                Text(message).font(NativeStyle.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
                     }
                 }
             }.padding(.top, 12)
@@ -180,7 +235,7 @@ struct ModelUsageView: View {
 
     private var usageSection: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Reported task usage").font(NativeStyle.heading)
+            Text("Reported task usage · This Mac").font(NativeStyle.heading)
             VStack(alignment: .leading, spacing: 16) {
                 let tokens = projectRuns.compactMap { $0["tokens"].number }.reduce(0, +)
                 ViewThatFits(in: .horizontal) {
@@ -214,6 +269,7 @@ struct ModelUsageView: View {
         VStack(spacing: 0) {
             HStack {
                 harnessLabel(row.harness)
+                Text(computerName).font(NativeStyle.caption).foregroundStyle(.secondary)
                 Spacer()
                 Button("Done") { selectedModel = nil }.keyboardShortcut(.cancelAction)
             }.padding(NativeStyle.pagePadding)
@@ -234,7 +290,7 @@ struct ModelUsageView: View {
                     if let message = row.entry["auth"]["message"].string { Text(message) }
                     if let message = row.entry["modelsMessage"].string { Text(message) }
                     Text("Native descriptions are metadata. Effective tools and model access remain unknown until checked in a native session.")
-                    if let checked = catalog["checkedAt"].string { Text("Metadata checked: \(checked)").textSelection(.enabled) }
+                    if let checked = visibleCatalog["checkedAt"].string { Text("Metadata checked: \(checked)").textSelection(.enabled) }
                     if row.entry["modelsTruncated"].bool == true { Text("Native list was shortened").foregroundStyle(.orange) }
                     if row.model != .null {
                         Divider()
@@ -367,18 +423,33 @@ struct ModelUsageView: View {
     }
     private func loadBenchmarks(refresh: Bool) async {
         guard client.connected, !benchmarkBusy else { return }
+        let captured = scope
         benchmarkBusy = true; benchmarkFailure = ""; defer { benchmarkBusy = false }
-        do { benchmarks = try await client.request(refresh ? "/benchmarks/refresh" : "/benchmarks", body: refresh ? [:] : nil) }
-        catch { benchmarkFailure = error.localizedDescription }
+        do {
+            let value = try await client.request(refresh ? "/benchmarks/refresh" : "/benchmarks", body: refresh ? [:] : nil)
+            if !Task.isCancelled, captured == scope, client.connected { benchmarks = value }
+        }
+        catch { if !Task.isCancelled, captured == scope, client.connected { benchmarkFailure = error.localizedDescription } }
     }
     private func load(refresh: Bool) async {
         guard client.connected, !client.projectID.isEmpty, !working else { return }
-        let project = client.projectID
-        working = true; failure = ""
-        defer { working = false }
+        let captured = scope, requestID = UUID()
+        guard captured.computerID.isEmpty || captured.peer != .null else { return }
+        loadID = requestID; working = true; failure = ""
+        defer { if loadID == requestID { working = false; loadID = nil } }
         do {
-            let value = try await client.request("/projects/\(project)/catalog", body: refresh ? [:] : nil)
-            if project == client.projectID { catalog = value }
-        } catch { if project == client.projectID { failure = error.localizedDescription } }
+            let value: JSON
+            if captured.computerID.isEmpty {
+                value = try await client.request("/projects/\(captured.projectID)/catalog", body: refresh ? [:] : nil)
+            } else {
+                value = try await client.request("/peers/\(captured.computerID)/catalog?projectId=\(captured.projectID)")
+            }
+            guard !Task.isCancelled, captured == scope, client.connected, loadID == requestID else { return }
+            let expectedProject = captured.computerID.isEmpty ? captured.projectID : captured.peer["remoteProjectId"].string
+            guard value == .null || value["projectId"].string == expectedProject else {
+                failure = "The catalog does not match the selected project and computer."; return
+            }
+            catalog = value; catalogScope = captured
+        } catch { if !Task.isCancelled, captured == scope, client.connected, loadID == requestID { failure = error.localizedDescription } }
     }
 }

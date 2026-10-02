@@ -6,10 +6,13 @@ struct TeamView: View {
     @State private var selectedRoleID: String?
     @State private var roles: [NativeRoleDraft] = []
     @State private var preference = "balanced"
+    @State private var savedPreference = "balanced"
     @State private var loadedProject = ""
+    @State private var projectGeneration = UUID()
     @State private var saving = false
     @State private var message = ""
     @State private var failed = false
+    @State private var showingRoutingDetails = false
     private var workers: [JSON] { client.harnesses.filter { $0["available"].bool == true && $0["workerSupported"].bool == true } }
     private var peers: [JSON] { (client.snapshot["peers"].array ?? []).filter { $0["projectId"].string == client.projectID } }
     private let remoteHarnesses = ["codex", "claude", "muse", "opencode", "gemini", "cursor-agent", "zcode"]
@@ -17,48 +20,136 @@ struct TeamView: View {
         if client.projectID.isEmpty {
             ContentUnavailableView("Choose a project", systemImage: "person.2", description: Text("Save roles and native model pins for this project."))
         } else {
-            VStack(alignment: .leading, spacing: 24) {
-                NativePageHeader(title: "Team", subtitle: "Saved roles, responsibilities and native model pins.") { teamActions }
-                ViewThatFits(in: .horizontal) {
-                    HStack(alignment: .top, spacing: 16) { preferenceControls }.fixedSize(horizontal: true, vertical: false)
-                    VStack(alignment: .leading, spacing: 8) { preferenceControls }
-                }
-                if !message.isEmpty { Text(message).foregroundStyle(failed ? .red : .secondary).fixedSize(horizontal: false, vertical: true).textSelection(.enabled) }
-                if roles.isEmpty {
-                    NativeEmptyState("Build your team", systemImage: "person.2", description: "Add roles for the work you delegate often.") {
-                        Button("Add role", systemImage: "plus") { addRole() }.disabled((workers.isEmpty && peers.isEmpty) || roles.count >= 30)
-                    }
-                } else {
-                    ViewThatFits(in: .horizontal) {
-                        HStack(alignment: .top, spacing: 24) {
-                            roster.frame(width: 220)
-                            selectedEditor.frame(minWidth: 320, maxWidth: .infinity)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    NativePageHeader(title: "Team", subtitle: "Saved roles, responsibilities and native model pins.") { teamActions }
+                    preferenceControls
+                    if !message.isEmpty { Text(message).foregroundStyle(failed ? .red : .secondary).fixedSize(horizontal: false, vertical: true).textSelection(.enabled) }
+                    if roles.isEmpty {
+                        NativeEmptyState("Build your team", systemImage: "person.2", description: "Add roles for the work you delegate often.") {
+                            Button("Add role", systemImage: "plus") { addRole() }.disabled((workers.isEmpty && peers.isEmpty) || roles.count >= 30)
                         }
-                        ScrollView {
+                    } else {
+                        ViewThatFits(in: .horizontal) {
+                            HStack(alignment: .top, spacing: 24) {
+                                roster.frame(width: 220, height: 360)
+                                selectedEditor.frame(minWidth: 320, maxWidth: .infinity)
+                            }
                             VStack(alignment: .leading, spacing: 16) {
                                 roster.frame(height: 160)
                                 selectedEditor
                             }
-                        }
-                    }.frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
-            }.font(NativeStyle.body).padding(NativeStyle.pagePadding).disabled(saving || !client.connected)
+                        }.frame(maxWidth: .infinity)
+                    }
+                }.font(NativeStyle.body).padding(NativeStyle.pagePadding).disabled(saving || !client.connected)
+            }
             .task(id: client.projectID) {
                 loadedProject = client.projectID
+                projectGeneration = UUID()
                 preference = client.project["preference"].string ?? "balanced"
+                savedPreference = preference
                 roles = (client.project["roles"].array ?? []).map(NativeRoleDraft.init)
                 selectedRoleID = roles.first?.id
                 message = ""
             }
         }
     }
-    @ViewBuilder private var preferenceControls: some View {
-        Picker("Routing preference", selection: $preference) {
-            Text("Economical").tag("economical"); Text("Balanced").tag("balanced"); Text("Best capability").tag("best")
-        }.fixedSize(horizontal: true, vertical: false)
-        Text(preferenceSummary).font(NativeStyle.caption).foregroundStyle(.secondary)
-        NativeDetailButton("About routing preference") {
-            Text("This preference guides automatic routing. Saved role and model pins stay fixed. Dollar cost is unknown; this setting does not enforce a budget.")
+    private var preferenceControls: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            NativeSectionTitle(title: "Routing preference", subtitle: "Choose how automatic routing selects a model for this project.")
+            HStack(alignment: .top, spacing: 12) { preferenceOptions }
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Rules for \(preferenceTitle)").font(NativeStyle.heading)
+                Text(preferenceRules).font(NativeStyle.caption).lineSpacing(3)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Text("Saved pins stay fixed. Blocked, unavailable or exhausted automatic choices are skipped. Allowance is stale after five minutes. No dollar budget is enforced.")
+                .font(NativeStyle.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 12) {
+                Button("Save preference") { Task { await save(preferenceOnly: true) } }
+                    .buttonStyle(.borderedProminent)
+                    .fixedSize()
+                    .disabled(loadedProject != client.projectID || preference == savedPreference)
+                Text(preference == savedPreference ? "Saved for this project." : "Unsaved preference.")
+                    .font(NativeStyle.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+                Button("Routing details") { showingRoutingDetails = true }.buttonStyle(.bordered)
+            }
+            Text("Save preference updates routing. Save team also saves your roles.")
+                .font(NativeStyle.caption).foregroundStyle(.secondary)
+        }
+        .sheet(isPresented: $showingRoutingDetails) { routingDetails }
+    }
+    @ViewBuilder private var preferenceOptions: some View {
+        preferenceOption("economical", title: "Economical", summary: "Uses efficient models for everyday work and stronger models for hard tasks.")
+        preferenceOption("balanced", title: "Balanced", summary: "Adjusts model strength to task difficulty and fresh remaining allowance.")
+        preferenceOption("best", title: "Best capability", summary: "Prefers the strongest reviewed tier, even when allowance is low.")
+    }
+    private func preferenceOption(_ value: String, title: String, summary: String) -> some View {
+        Button {
+            preference = value
+        } label: {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text(title).font(NativeStyle.heading)
+                    Spacer(minLength: 8)
+                    Image(systemName: preference == value ? "checkmark.circle.fill" : "circle")
+                        .foregroundStyle(preference == value ? Color.accentColor : Color.secondary)
+                }
+                Text(summary).font(NativeStyle.body).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(minWidth: 130, maxWidth: .infinity, alignment: .leading)
+            .frame(height: 96, alignment: .topLeading)
+            .padding(14)
+            .background(RoundedRectangle(cornerRadius: 10).fill(Color.accentColor.opacity(preference == value ? 0.09 : 0)))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(preference == value ? Color.accentColor : Color.secondary.opacity(0.3), lineWidth: preference == value ? 2 : 1))
+            .contentShape(RoundedRectangle(cornerRadius: 10))
+        }
+        .buttonStyle(.plain).foregroundStyle(.primary)
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(preference == value ? .isSelected : [])
+        .accessibilityValue(preference == value ? "Selected" : "Not selected")
+        .accessibilityHint(summary + " Select this preference, then choose Save preference or Save team.")
+    }
+    private var preferenceTitle: String {
+        switch preference {
+        case "economical": return "Economical"
+        case "best": return "Best capability"
+        default: return "Balanced"
+        }
+    }
+    private var preferenceRules: String {
+        switch preference {
+        case "economical":
+            return "Routine and standard tasks: efficient tier. Hard tasks: balanced tier.\nRemaining allowance does not change these targets."
+        case "best":
+            return "All task difficulties: capable tier.\nLow remaining allowance does not lower this target."
+        default:
+            return "Usual targets: routine = efficient; standard = balanced; hard = capable.\n20% or less remaining: efficient; hard tasks use balanced.\n50% or more remaining: capable; routine tasks use efficient."
+        }
+    }
+    private var routingDetails: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Text("Routing details").font(NativeStyle.title)
+                Spacer()
+                Button("Done") { showingRoutingDetails = false }.keyboardShortcut(.defaultAction)
+            }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    routingNote("Model groups", "Examples: efficient = Luna / Haiku; balanced = Sol / Sonnet; capable = Astra / Opus. These are reviewed policy groups. Actual quality and dollar cost are unverified. Routing uses the nearest suitable reviewed tier when its target is unavailable.")
+                    routingNote("Fresh allowance", "Balanced uses the lowest remaining percentage across a model's applicable native allowance windows. Data older than five minutes is ignored. If allowance is unknown, it uses the usual targets.")
+                    routingNote("Pins and recovery", "Task, role and computer pins stay fixed. Fresh blocked allowance stops a pinned choice. An exhausted allowance keeps the pin with a warning. A passed reset time does not confirm recovery; refresh native usage to check it.")
+                }.frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }.font(NativeStyle.body).padding(24).frame(width: 540, height: 380)
+    }
+    private func routingNote(_ title: String, _ text: String) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(title).font(NativeStyle.heading)
+            Text(text).font(NativeStyle.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
     private var roster: some View {
@@ -119,35 +210,39 @@ struct TeamView: View {
             }
         }
     }
-    private var preferenceSummary: String {
-        switch preference {
-        case "economical": return "Favor efficient workers for everyday work."
-        case "best": return "Favor the strongest suitable worker."
-        default: return "Balance capability with efficient use."
-        }
-    }
     private func harnessName(_ id: String) -> String {
         client.harnesses.first { $0["id"].string == id }?["name"].string ??
             ["codex": "Codex", "claude": "Claude Code", "muse": "Muse", "opencode": "OpenCode", "gemini": "Gemini", "cursor-agent": "Cursor", "zcode": "ZCode"][id] ?? (id.isEmpty ? "Choose harness" : id)
     }
     @ViewBuilder private var teamActions: some View {
         Button("Add role", systemImage: "plus") { addRole() }.disabled((workers.isEmpty && peers.isEmpty) || roles.count >= 30)
-        Button("Save team") { Task { await save() } }.buttonStyle(.borderedProminent).disabled(loadedProject != client.projectID)
+        Button("Save team") { Task { await save(preferenceOnly: false) } }.buttonStyle(.borderedProminent).disabled(loadedProject != client.projectID)
     }
     private func addRole() {
         let id = UUID().uuidString
         roles.append(NativeRoleDraft(id: id, name: "", harness: workers.first?["id"].string ?? "", model: "", responsibility: "", peerID: nil))
         selectedRoleID = id
     }
-    private func save() async {
+    private func save(preferenceOnly: Bool) async {
         guard !saving, loadedProject == client.projectID else { return }
         saving = true; failed = false; message = ""
         let id = loadedProject
+        let generation = projectGeneration
+        let submittedPreference = preference
+        var body: [String: Any] = ["preference": submittedPreference]
+        if !preferenceOnly { body["roles"] = roles.map(\.body) }
         do {
-            _ = try await client.request("/projects/\(id)", body: ["preference": preference, "roles": roles.map(\.body)], method: "PATCH")
+            _ = try await client.request("/projects/\(id)", body: body, method: "PATCH")
             await client.refresh()
-            if id == client.projectID { message = "Team saved." }
-        } catch { failed = true; message = error.localizedDescription }
+            if id == client.projectID && generation == projectGeneration {
+                savedPreference = submittedPreference
+                message = preferenceOnly ? "Routing preference saved." : "Roles and routing preference saved."
+            }
+        } catch {
+            if id == client.projectID && generation == projectGeneration {
+                failed = true; message = error.localizedDescription
+            }
+        }
         saving = false
     }
 }

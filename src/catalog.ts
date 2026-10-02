@@ -409,7 +409,10 @@ async function readJsonRpcCatalog(
         const seen = new Set<string>();
         for (const raw of response.models.slice(0, 100)) {
           const route = record(raw);
-          if (route?.providerId !== provider || route.profileId !== profile) {
+          // Bundled rows can leave their profile undeclared; the host's selected
+          // catalog profile still governs workers that send only a model id.
+          if (route?.providerId !== provider ||
+            (route.profileId !== null && route.profileId !== profile)) {
             result.modelsTruncated = true;
             continue;
           }
@@ -421,6 +424,10 @@ async function readJsonRpcCatalog(
           }
         }
         result.modelsTruncated ||= response.models.length > 100;
+        if (!result.models.length) {
+          result.modelsMessage = "Muse returned no usable models for its selected native provider and profile. Check your native CLI settings.";
+          return;
+        }
         result.modelsStatus = "available";
         result.modelsMessage = `Muse native model list${result.modelsTruncated ? " was shortened or omitted incompatible routes" : ""}. Listing does not verify sign-in or model access.`;
         return;

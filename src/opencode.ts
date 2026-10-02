@@ -102,9 +102,17 @@ export const connectOpenCode: OpenCodeConnect = async (command, cwd, spawned, na
   } catch { await close(); throw new Error("OpenCode local server could not start"); }
 };
 
+function connectedProviderIds(value: unknown): string[] {
+  const response = object(value);
+  const connected = Array.isArray(response?.connected) ? response.connected : [];
+  const providers = Array.isArray(response?.all) ? response.all : [];
+  const known = new Set(providers.map((provider: unknown) => id(object(provider)?.id)).filter(Boolean));
+  return [...new Set(connected.map((provider: unknown) => id(provider)).filter((provider: string | null): provider is string => !!provider && known.has(provider)))].slice(0, 100);
+}
+
 export function openCodeModels(value: unknown): CatalogModel[] {
   const response = object(value);
-  const connected = Array.isArray(response?.connected) ? response.connected.filter((p: unknown) => id(p)) : [];
+  const connected = connectedProviderIds(value);
   const providers = Array.isArray(response?.all) ? response.all : [];
   const models: CatalogModel[] = [];
   const seen = new Set<string>();
@@ -145,7 +153,9 @@ export async function readOpenCodeCatalog(command: string, cwd: string, signal: 
     close = host.close;
     if (signal.aborted) return unavailable("OpenCode model refresh was cancelled.");
     const result = await Promise.race([host.client.provider.list({ directory: cwd }), timeout(8000, "OpenCode model refresh timed out")]);
-    const models = openCodeModels(data(result));
+    const providerData = data(result);
+    const models = openCodeModels(providerData);
+    const providers = connectedProviderIds(providerData);
     // This endpoint has no agent/session scope. Show advertised names, keep
     // effective worker support unknown, and never use it to satisfy routing.
     if (typeof host.client.tool?.list === "function") {
@@ -158,7 +168,7 @@ export async function readOpenCodeCatalog(command: string, cwd: string, signal: 
       }
     }
     return { ...unavailable(models.length ? "Native OpenCode models from connected providers. Access and billing are not verified." : "No connected text-and-tool OpenCode models were confirmed."),
-      models, modelsStatus: models.length ? "available" : "unavailable", modelsTruncated: models.length >= 100 };
+      models, connectedProviderIds: providers, modelsStatus: models.length ? "available" : "unavailable", modelsTruncated: models.length >= 100 };
   } catch { return unavailable("OpenCode native model list could not be read. Check its CLI and provider setup."); }
   finally { signal.removeEventListener("abort", onAbort); await close?.().catch(() => {}); }
 }

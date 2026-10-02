@@ -101,8 +101,19 @@ test("OpenCode catalog keeps only connected text-and-tool models and no provider
       client: { provider: { list: async () => ({ data: models }) } } as any, close: async () => {}, exited: new Promise<void>(() => {}),
     }; });
   assert.equal(catalog.modelsStatus, "available");
+  assert.deepEqual(catalog.connectedProviderIds, ["opencode"]);
   assert.equal(catalog.models[0].isDefault, false);
   assert.equal(JSON.stringify(catalog).includes("PRIVATE"), false);
+});
+
+test("OpenCode connected provider metadata ignores unknown and malformed IDs", async () => {
+  const value = { ...models, connected: ["opencode", "opencode", "unknown", "bad\nvalue", { secret: "PRIVATE" }] };
+  const catalog = await readOpenCodeCatalog("fixture", "/tmp/project", new AbortController().signal, async () => ({
+    client: { provider: { list: async () => ({ data: value }) } } as any,
+    close: async () => {}, exited: new Promise<void>(() => {}),
+  }));
+  assert.deepEqual(catalog.connectedProviderIds, ["opencode"]);
+  assert.doesNotMatch(JSON.stringify(catalog), /PRIVATE|bad\\nvalue/);
 });
 
 test("OpenCode database metadata read is bounded and keeps raw native output out of records", async () => {
