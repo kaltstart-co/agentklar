@@ -5,7 +5,7 @@ import { AgentKlarUpdates } from "./AgentKlarUpdates.js";
 import { NativeInventory } from "./NativeInventory.js";
 import { ProjectHandoff } from "./ProjectHandoff.js";
 import { useEffect, useRef, useState } from "react";
-import { NativeSetupForm } from "./NativeSetupForm.js";
+import { GuidedSetup } from "./GuidedSetup.js";
 import { NativePreferences } from "./NativePreferences.js";
 import { NativeInstallations } from "./NativeInstallations.js";
 import { GitChanges } from "./GitChanges.js";
@@ -41,6 +41,7 @@ import type {
   WorkerAdvice,
   RunHandoff,
   MuseSubscriptionUsage,
+  OnboardingPreferences,
 } from "../src/contracts.js";
 
 type View = "Work" | "Instructions" | "Context" | "Team" | "Models" | "Usage" | "Settings";
@@ -100,7 +101,8 @@ const time = (value: string) =>
     minute: "2-digit",
   });
 export function App() {
-  const [view, setView] = useState<View>("Work");
+  const [view, setView] = useState<View>(() => location.hash === "#team" ? "Team" : ["#connections", "#devices", "#settings"].includes(location.hash) ? "Settings" : "Work");
+  useEffect(() => { document.title = local ? `AgentKlar · ${view}` : "AgentKlar · Install"; }, [view]);
   useEffect(() => { document.getElementById("main-content")?.scrollTo({ top: 0 }); }, [view]);
   const [snapshot, setSnapshot] = useState(empty);
   const [catalogs, setCatalogs] = useState<
@@ -113,6 +115,11 @@ export function App() {
     message: string;
   } | null>(null);
   const [projectId, setProjectId] = useState("");
+  const [onboarding, setOnboarding] = useState<OnboardingPreferences | null>(null);
+  const restoredProject = useRef(false);
+  const [setupDismissed, setSetupDismissed] = useState(false);
+  const [setupOpen, setSetupOpen] = useState(false);
+  const [devicesOpen, setDevicesOpen] = useState(location.hash === "#devices");
   const [runId, setRunId] = useState("");
   const [events, setEvents] = useState<RunEvent[]>([]);
   const [tailShortened, setTailShortened] = useState(false);
@@ -127,6 +134,9 @@ export function App() {
   const [error, setError] = useState("");
   const [connectionError, setConnectionError] = useState("");
   const [connected, setConnected] = useState(false);
+  useEffect(() => {
+    if (connected && view === "Settings" && devicesOpen) document.getElementById("connected-computers")?.scrollIntoView({ block: "start" });
+  }, [view, devicesOpen, connected]);
   const [loaded, setLoaded] = useState(!local);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
@@ -159,6 +169,7 @@ export function App() {
   const [roles, setRoles] = useState<Role[]>([]);
   const [preference, setPreference] = useState<Preference>("balanced");
   const project = snapshot.projects.find((p) => p.id === projectId);
+  const showGuidedSetup = connected && (!project || setupOpen || (!setupDismissed && !(onboarding?.projectId === projectId && onboarding.mainHarness) && !snapshot.runs.some(r => r.projectId === projectId)));
   const lead = snapshot.leads?.[projectId];
   const taskProject = snapshot.projects.find((p) => p.id === draftProjectId);
   const run = snapshot.runs.find(
@@ -300,12 +311,16 @@ export function App() {
   async function refresh() {
     if (!local) return;
     try {
-      const next = await api<Snapshot>("/snapshot");
+      const [next, saved] = await Promise.all([api<Snapshot>("/snapshot"), api<OnboardingPreferences>("/onboarding")]);
       setSnapshot(next);
+      setOnboarding(current => !current || saved.revision >= current.revision ? saved : current);
       setConnectionError("");
       setConnected(true);
       setLoaded(true);
+      const first = !restoredProject.current;
+      restoredProject.current = true;
       setProjectId((id) =>
+        first && next.projects.some(p => p.id === saved.projectId) ? saved.projectId! :
         next.projects.some((p) => p.id === id)
           ? id
           : next.projects[0]?.id || "",
@@ -315,6 +330,14 @@ export function App() {
       setLoaded(true);
       setConnectionError((e as Error).message);
     }
+  }
+  async function selectProject(id: string) {
+    setProjectId(id); setSetupDismissed(false); setSetupOpen(false);
+    if (!id || !onboarding) return;
+    try {
+      const value = await api<OnboardingPreferences>("/onboarding", { projectId: id, mainHarness: onboarding.projectId === id ? onboarding.mainHarness : null, expectedRevision: onboarding.revision }, "PUT");
+      setOnboarding(current => !current || value.revision >= current.revision ? value : current);
+    } catch (e) { setError((e as Error).message); void refresh(); }
   }
   useEffect(() => {
     if (!local) return;
@@ -494,6 +517,13 @@ export function App() {
     2,
   );
   const setup = <SetupGuide local={local} onSettings={() => setView("Settings")} onRetry={() => { setConnectionError(""); void refresh(); }} />;
+  const guidedSetup = <GuidedSetup key={projectId || "first-run"} project={project} projects={snapshot.projects} harnesses={snapshot.harnesses} preferences={onboarding} connected={connected} request={api}
+    onSaved={value => { setSetupOpen(true); setOnboarding(current => !current || value.revision >= current.revision ? value : current); }}
+    onProjectSelected={id => void selectProject(id)} onAddProject={() => setProjectModal(true)} onDone={() => { setSetupDismissed(true); setSetupOpen(false); setView("Work"); }} />;
+  if (!local) return <div className="download-page">
+    <header className="download-header"><a className="brand" href="/"><span className="brand-mark">a</span>AgentKlar</a><a href="https://github.com/kaltstart-co/agentklar/releases">Releases</a></header>
+    <main id="main-content">{setup}</main>
+  </div>;
   return (
     <div className="shell">
       <a className="skip-link" href="#main-content">Skip to main content</a>
@@ -515,7 +545,7 @@ export function App() {
           placeholder="Choose a project"
           value={projectId || null}
           data={snapshot.projects.map((p) => ({ value: p.id, label: p.name }))}
-          onChange={(id) => setProjectId(id || "")}
+          onChange={(id) => { if (id) void selectProject(id); }}
           disabled={!connected}
         />
         <button
@@ -565,7 +595,7 @@ export function App() {
             <div className="eyebrow">{project?.name || "YOUR WORKSPACE"}</div>
             <h1>{view}</h1>
           </div>
-          {view === "Work" && (
+          {view === "Work" && !showGuidedSetup && (
             <Button
               disabled={!connected || !project}
               onClick={() => openTask()}
@@ -617,6 +647,8 @@ export function App() {
           </div>
         ) : !connected && view !== "Settings" ? (
           setup
+        ) : connected && view === "Work" && showGuidedSetup ? (
+          guidedSetup
         ) : (
           <>
             {view === "Work" &&
@@ -1310,18 +1342,15 @@ export function App() {
               <section className="content-panel settings-panel">
                 <p className="page-description">Manage this computer and your native harness connections.</p>
                 {!connected ? <>{setup}<details className="settings-disclosure"><summary>Manual MCP connection</summary><div className="disclosure-body"><p className="hint">Use the local app to generate an entry for your computer.</p><pre>{snippet}</pre></div></details></> : <>
-                  <section className="settings-card"><NativeInstallations device={snapshot.device} request={api} /></section>
-                  <AgentKlarUpdates connected={connected} request={api} />
-                  <section className="settings-card">
-                    <div className="settings-heading"><div><h3>Native connection</h3><p className="hint">Preview the connection before adding it. Your harness keeps its own accounts and permissions.</p></div></div>
-                    {project ? <NativeSetupForm key={project.id} projectId={project.id} connected={connected} /> : <p className="hint">Add or select a project to connect Codex, Claude Code, Muse, OpenCode, or Antigravity.</p>}
-                  </section>
+                  {guidedSetup}
                   <div className="settings-advanced">
                     <h3>Advanced</h3>
                     <p className="hint">Inspect native files, manage other computers, or use manual startup.</p>
+                    <details className="settings-disclosure"><summary>This computer and native installations</summary><div className="disclosure-body"><NativeInstallations device={snapshot.device} request={api} /></div></details>
+                    <details className="settings-disclosure"><summary>AgentKlar updates</summary><div className="disclosure-body"><AgentKlarUpdates connected={connected} request={api} /></div></details>
                     {project && <details className="settings-disclosure" open={nativePreferencesOpen} onToggle={event => setNativePreferencesOpen(event.currentTarget.open)}><summary>Native defaults and plugin bundles</summary><div className="disclosure-body">{nativePreferencesOpen && <NativePreferences key={`preferences-${project.id}`} projectId={project.id} connected={connected} request={api} />}</div></details>}
                     {project && <NativeInventory key={`inventory-${project.id}`} projectId={project.id} connected={connected} request={api} />}
-                    <details className="settings-disclosure"><summary>Connected computers and remote approvals</summary><div className="disclosure-body"><Devices device={snapshot.device} projects={snapshot.projects} connected={connected} request={api} /></div></details>
+                    <details id="connected-computers" className="settings-disclosure" open={devicesOpen} onToggle={event => setDevicesOpen(event.currentTarget.open)}><summary>Connected computers and remote approvals</summary><div className="disclosure-body"><Devices device={snapshot.device} projects={snapshot.projects} connected={connected} request={api} /></div></details>
                     <details className="settings-disclosure"><summary>Startup and manual MCP setup</summary><div className="disclosure-body">
                       <h4>Start at login on macOS</h4><p className="hint">Stop the foreground service first. Keep the same custom home and port, if set.</p><pre>agentklar service install{"\n"}agentklar service open</pre>
                       <h4>Other MCP hosts</h4><pre>{snippet}</pre>
@@ -1350,6 +1379,12 @@ export function App() {
             void act(async () => {
               const p = await api<{ id: string }>("/projects", { name, path });
               setProjectId(p.id);
+              setSetupDismissed(false);
+              if (onboarding) {
+                const saved = await api<OnboardingPreferences>("/onboarding", { projectId: p.id, mainHarness: null, expectedRevision: onboarding.revision }, "PUT");
+                setOnboarding(current => !current || saved.revision >= current.revision ? saved : current);
+              }
+              await refresh();
               setProjectModal(false);
               setName("");
               setPath("");

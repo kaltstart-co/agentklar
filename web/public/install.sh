@@ -101,6 +101,7 @@ main() {
     "$cli" update
   fi
   printf 'AgentKlar is ready. Command: %s\n' "$cli"
+  printf 'For the terminal menu, run %s in an interactive terminal.\n' "$cli"
   echo "Register your project in the dashboard, then connect your signed-in native harness."
   if [ "$platform" = darwin ]; then
     "$cli" service install

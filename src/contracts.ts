@@ -332,6 +332,13 @@ export type InstructionSnapshot = {
 };
 
 export type SetupHarness = "codex" | "claude" | "muse" | "opencode" | "antigravity";
+export type OnboardingPreferences = {
+  revision: number;
+  projectId: string | null;
+  mainHarness: SetupHarness | null;
+  updatedAt: string | null;
+};
+export type OnboardingSnapshot = { preferences: OnboardingPreferences; projects: Project[]; harnesses: Harness[] };
 export type AntigravitySetupEntry = { command: string; args: string[]; env: Record<string, string>; disabled: false };
 export type SetupEntry = { type: "stdio"; command: string; args: string[]; env: Record<string, string> };
 export type OpenCodeSetupEntry = { type: "local"; command: string[]; environment: Record<string, string> };

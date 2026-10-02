@@ -723,3 +723,40 @@ summary:focus-visible { outline: 2px solid #6574df; outline-offset: -3px; border
 .page-content .settings-advanced > .hint { margin-bottom: 14px; }
 
 .instructions-panel { margin-bottom: 24px; }
+
+.guided-setup { max-width: 720px; width: 100%; border: 1px solid #e5e8ef; border-radius: 12px; padding: 24px; background: white; }
+.guided-heading { margin-bottom: 22px; }
+.guided-heading h2 { margin: 8px 0; font-size: 23px; letter-spacing: -0.5px; }
+.guided-heading p { margin: 0; }
+.guided-project { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 14px 16px; background: #f7f8fb; border-radius: 8px; }
+.guided-project > div { min-width: 0; }
+.guided-project > span { flex-shrink: 0; }
+.guided-project p { margin: 3px 0 0; overflow-wrap: anywhere; }
+.guided-section-heading { display: flex; justify-content: space-between; gap: 12px; align-items: center; margin: 20px 0 6px; }
+.guided-section-heading h3 { font-size: 13px; font-weight: 600; margin: 0; }
+.guided-harness { border-bottom: 1px solid #e9ebf1; }
+.guided-harness-row { display: flex; justify-content: space-between; align-items: center; gap: 16px; min-height: 72px; padding: 12px 0; }
+.guided-harness-row > div:first-child { min-width: 0; }
+.guided-harness-row strong { font-size: 14px; font-weight: 550; }
+.guided-harness-row p { margin: 4px 0 0; font-size: 12px; }
+.guided-connection-detail { padding: 8px 0 18px; }
+.guided-evidence { margin-top: 15px; font-size: 12px; }
+.guided-other + .guided-other { margin-top: 14px; }
+.guided-other p { margin: 4px 0 0; }
+.guided-footer { margin-top: 24px; padding-top: 20px; border-top: 1px solid #e9ebf1; }
+.guided-launch { margin-top: 16px; }
+.guided-launch pre { margin: 8px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.settings-panel > .guided-setup { max-width: none; }
+.download-page { height: 100dvh; overflow-y: auto; }
+.download-header { max-width: 832px; margin: 0 auto; display: flex; align-items: center; justify-content: space-between; padding: 24px 36px; }
+.download-header .brand { margin: 0; }
+.download-header > a:last-child { font-size: 12px; color: #6574aa; text-decoration: none; }
+.download-page main { height: auto; overflow: visible; max-width: 832px; margin: 0 auto; padding-top: 12px; }
+@media (max-width: 650px) {
+  .download-header, .download-page main { padding-left: 18px; padding-right: 18px; }
+  .guided-setup { padding: 18px; }
+  .guided-heading h2 { font-size: 21px; }
+  .guided-harness-row { gap: 10px; flex-wrap: wrap; }
+  .guided-harness-row > div:first-child { flex: 1 1 140px; }
+  .guided-section-heading { flex-wrap: wrap; }
+}

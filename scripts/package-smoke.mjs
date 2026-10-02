@@ -59,7 +59,11 @@ try {
   assert.ok(!existsSync(join(packageDir, "node_modules", "tsx")));
   assert.ok(!existsSync(join(packageDir, "node_modules", "vite")));
   assert.equal(run(cli, ["--version"], foreign), version);
-  assert.match(run(cli, ["--help"], foreign), /agentklar start/);
+  assert.match(run(cli, ["--help"], foreign), /agentklar setup \| start/);
+  const noninteractive = spawnSync(cli, ["setup"], { cwd: foreign, encoding: "utf8", timeout: 10000 });
+  assert.equal(noninteractive.status, 1);
+  assert.equal(noninteractive.stdout, "");
+  assert.match(noninteractive.stderr, /Setup needs an interactive terminal/);
 
   const port = await freePort();
   const env = { ...process.env, AGENTKLAR_HOME: home, AGENTKLAR_PORT: String(port) };

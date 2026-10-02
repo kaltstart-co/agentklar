@@ -10,9 +10,12 @@ async function request<T>(projectId: string, harness: SetupHarness, operation = 
   if (!response.ok) throw new Error(data.error || "Native MCP setup could not finish.");
   return data;
 }
-export function NativeSetupForm({ projectId, connected }: { projectId: string; connected: boolean }) {
+export function NativeSetupForm({ projectId, connected, initialHarness = "codex", showSelector = true, previewOnLoad = false, onStatus }: {
+  projectId: string; connected: boolean; initialHarness?: SetupHarness; showSelector?: boolean;
+  previewOnLoad?: boolean; onStatus?: (status: SetupStatus) => void;
+}) {
   const names = { codex: "Codex", claude: "Claude Code", muse: "Muse", opencode: "OpenCode", antigravity: "Antigravity" };
-  const [harness, setHarness] = useState<SetupHarness>("codex");
+  const [harness, setHarness] = useState<SetupHarness>(initialHarness);
   const [status, setStatus] = useState<SetupStatus | null>(null);
   const [preview, setPreview] = useState<SetupPreview | null>(null);
   const [busy, setBusy] = useState("");
@@ -25,7 +28,12 @@ export function NativeSetupForm({ projectId, connected }: { projectId: string; c
     setBusy("status"); setError(""); setPreview(null);
     try {
       const value = await request<SetupStatus>(projectId, harness);
-      if (id === generation.current && currentConnected.current) setStatus(value);
+      if (id !== generation.current || !currentConnected.current) return;
+      setStatus(value);
+      if (previewOnLoad && value.status === "missing") {
+        const next = await request<SetupPreview>(projectId, harness, "preview", {});
+        if (id === generation.current && currentConnected.current) setPreview(next);
+      }
     } catch (e) { if (id === generation.current && currentConnected.current) { setError((e as Error).message); setStatus(null); } }
     finally { if (id === generation.current) setBusy(""); }
   }
@@ -48,18 +56,18 @@ export function NativeSetupForm({ projectId, connected }: { projectId: string; c
         setPreview(null);
         setNotice(result.state === "applied" ? "AgentKlar entry added. Start or restart your native session to load it." : "AgentKlar entry removed. Restart your native session to unload it.");
         const value = await request<SetupStatus>(projectId, harness);
-        if (id === generation.current && currentConnected.current) setStatus(value);
+        if (id === generation.current && currentConnected.current) { setStatus(value); onStatus?.(value); }
       }
     } catch (e) {
       if (id !== generation.current || !currentConnected.current) return;
       setError((e as Error).message); setPreview(null);
-      try { const value = await request<SetupStatus>(projectId, harness); if (id === generation.current && currentConnected.current) setStatus(value); }
+      try { const value = await request<SetupStatus>(projectId, harness); if (id === generation.current && currentConnected.current) { setStatus(value); onStatus?.(value); } }
       catch { if (id === generation.current && currentConnected.current) setStatus(null); }
     } finally { if (id === generation.current) setBusy(""); }
   }
   return <Stack gap="sm">
-    <Select label="Native harness" value={harness} allowDeselect={false} disabled={Boolean(busy) && busy !== "status"}
-      data={[{ value: "codex", label: "Codex" }, { value: "claude", label: "Claude Code" }, { value: "muse", label: "Muse" }, { value: "opencode", label: "OpenCode" }, { value: "antigravity", label: "Antigravity (MCP host)" }]} onChange={(value) => setHarness(value as SetupHarness)} />
+    {showSelector && <Select label="Native harness" value={harness} allowDeselect={false} disabled={Boolean(busy) && busy !== "status"}
+      data={[{ value: "codex", label: "Codex" }, { value: "claude", label: "Claude Code" }, { value: "muse", label: "Muse" }, { value: "opencode", label: "OpenCode" }, { value: "antigravity", label: "Antigravity (MCP host)" }]} onChange={(value) => setHarness(value as SetupHarness)} />}
     <p className="hint">{harness === "claude" ? "Local project scope · only this project's Claude Code sessions." : `User scope · available to your ${names[harness]} projects.`} Setup adds MCP access. Your native session keeps its trust and permission settings.</p>
     {harness === "antigravity" && <p className="hint">Connects your native Antigravity session to AgentKlar. Start or restart agy to load the entry. Antigravity workers are unavailable.</p>}
     {harness === "opencode" && <p className="hint">Checks local config files. Restart OpenCode to load the entry.</p>}

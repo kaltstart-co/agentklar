@@ -16,6 +16,8 @@ import {
   createHash,
 } from "node:crypto";
 import {
+  accessSync,
+  constants,
   realpathSync,
   statSync,
   existsSync,
@@ -46,6 +48,7 @@ import { toolCapabilities } from "./capabilities.ts";
 import { ZCodeWorker } from "./zcode.ts";
 import { Instructions, InstructionError, instructionFileSchema, instructionPreviewSchema } from "./instructions.ts";
 import { NativeSetup, SetupError, type NativeSetupOptions } from "./setup.ts";
+import { Onboarding, onboardingPreferencesInput, onboardingProjectInput, onboardingSetupInput, setupHarness } from "./onboarding.ts";
 import { ProjectSkills, SkillError, skillPreviewInput, skillIdInput, skillRemoveInput } from "./skills.ts";
 import { NativePlugins, pluginPreviewInput } from "./plugins.ts";
 import { NativeSettings, NativeChangeError, nativeSettingHarness, nativeSettingInput, nativePreviewId, nativeChangeId } from "./native-settings.ts";
@@ -305,6 +308,34 @@ export function createService(
   }
   const personalSkills: Project = { id: "__personal_skills__", name: "Personal skills", path: personalHome, preference: "balanced", roles: [], createdAt: "" };
   const nativeSetup = new NativeSetup(store.db, home, port, { codex: nativeCommand, claude: claudeCommand, muse: museCommand, opencode: opencodeCommand, antigravity: executable("agy") }, setupOptions);
+  const onboarding = new Onboarding(store.db);
+  function registerProject(input: z.infer<typeof onboardingProjectInput>) {
+    let path: string;
+    try {
+      if (!isAbsolute(input.path)) throw new Error();
+      path = realpathSync(input.path);
+      if (!statSync(path).isDirectory()) throw new Error();
+    } catch { throw new SetupError("Project path must be an absolute existing folder.", 400); }
+    const prior = store.projects().find(p => p.path === path);
+    if (prior) return { project: prior, created: false };
+    const project: Project = { id: randomUUID(), name: input.name, path, preference: "balanced", roles: [], createdAt: new Date().toISOString() };
+    store.saveProject(project);
+    return { project, created: true };
+  }
+  function saveOnboarding(input: z.infer<typeof onboardingPreferencesInput>) {
+    if (quiesced || stopping) throw new SetupError("Local service is stopping.", 503);
+    if (!store.projects().some(p => p.id === input.projectId)) throw new SetupError("Project not found", 404);
+    if (input.mainHarness) {
+      const selected = selectedHarnesses().find(h => h.id === input.mainHarness && h.available && h.hostSupported);
+      try {
+        if (!selected?.executable || !statSync(selected.executable).isFile()) throw new Error();
+        accessSync(selected.executable, constants.X_OK);
+      } catch { throw new SetupError("Install this harness through its native setup first.", 422); }
+    }
+    const saved = onboarding.save(input);
+    if (!saved) throw new SetupError("Onboarding preferences changed. Refresh and try again.", 409);
+    return saved;
+  }
   const catalogs = new CatalogCache(catalogReader, { ...commands, antigravity: executable("agy") });
   const installedWorkers = () => Object.fromEntries(workerHarnesses.map(h => [h, !!commands[h]])) as Record<WorkerHarness, boolean>;
   const adviceSchema = recommendationSchema.extend({
@@ -460,10 +491,17 @@ export function createService(
     if (origin && !origins.has(origin))
       return c.json({ error: "Remote origins are not allowed" }, 403);
     if (c.req.path.startsWith("/api/operator/")) {
-      if (!operator || c.req.header("authorization") || c.req.header("origin") || c.req.header("cookie") ||
+      if (!operator || c.req.header("authorization") !== undefined || c.req.header("origin") !== undefined || c.req.header("cookie") !== undefined ||
           !matches(c.req.header("x-agentklar-operator-key"), operator.key) ||
           !matches(c.req.header("x-agentklar-service-id"), operator.id))
         return c.json({ error: "Local service operator required" }, 403);
+      if (c.req.path.startsWith("/api/operator/onboarding")) {
+        const mutation = c.req.method !== "GET";
+        if (quiesced || stopping) return c.json({ error: "Local service is stopping." }, 503);
+        if (mutation) mutations++;
+        try { await next(); } finally { if (mutation) mutations--; }
+        return;
+      }
       return next();
     }
     if (
@@ -479,6 +517,8 @@ export function createService(
         { error: operator ? "Run agentklar service open to open the local UI." : "Open the one-time setup URL printed by the local service." },
         401,
       );
+    if (c.req.path === "/api/onboarding" && (!ui || c.req.header("authorization") !== undefined || (c.req.method !== "GET" && (!origin || !origins.has(origin)))))
+      return c.json({ error: "Only the trusted local UI may read or save onboarding preferences" }, 403);
     if (/^\/api\/projects\/[^/]+\/control(?:\/recover)?$/.test(c.req.path) && c.req.method !== "GET" && (!ui || !!c.req.header("authorization") || !origin || !origins.has(origin)))
       return c.json({error:"Only the trusted local UI may change project control policy or recover a lead."},403);
     if (c.req.path.startsWith("/api/remote-approvals/") && (!ui || !origin || !origins.has(origin) || !!c.req.header("authorization")))
@@ -535,6 +575,41 @@ export function createService(
     return c.json(await checkUpdate());
   });
   app.get("/api/health", (c) => c.json({ ok: true }));
+  app.get("/api/onboarding", c => { c.header("Cache-Control", "no-store"); return c.json(onboarding.read()); });
+  app.put("/api/onboarding", async c => {
+    const parsed = onboardingPreferencesInput.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: "Provide a project, main harness and expected revision only." }, 400);
+    c.header("Cache-Control", "no-store");
+    return c.json(saveOnboarding(parsed.data));
+  });
+  app.get("/api/operator/onboarding", c => {
+    c.header("Cache-Control", "no-store");
+    return c.json({ preferences: onboarding.read(), projects: store.projects(), harnesses: selectedHarnesses() });
+  });
+  app.post("/api/operator/onboarding/preferences", async c => {
+    const parsed = onboardingPreferencesInput.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: "Provide a project, main harness and expected revision only." }, 400);
+    c.header("Cache-Control", "no-store");
+    return c.json(saveOnboarding(parsed.data));
+  });
+  app.post("/api/operator/onboarding/project", async c => {
+    const parsed = onboardingProjectInput.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: "Provide a name and absolute existing project folder." }, 400);
+    if (quiesced || stopping) return c.json({ error: "Local service is stopping." }, 503);
+    const result = registerProject(parsed.data);
+    return c.json(result.project, result.created ? 201 : 200);
+  });
+  app.post("/api/operator/onboarding/setup", async c => {
+    const parsed = onboardingSetupInput.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: "Provide the project, harness, operation and its saved ID only." }, 400);
+    const input = parsed.data, project = store.projects().find(p => p.id === input.projectId);
+    if (!project) return c.json({ error: "Project not found" }, 404);
+    c.header("Cache-Control", "no-store");
+    return c.json(await nativeOperation(async () => input.operation === "status" ? nativeSetup.status(project, input.harness)
+      : input.operation === "preview" ? nativeSetup.preview(project, input.harness)
+      : input.operation === "apply" ? nativeSetup.apply(project, input.harness, input.previewId)
+      : nativeSetup.undo(project, input.harness, input.changeId), input.operation === "apply" || input.operation === "undo"));
+  });
   app.get("/api/operator/status", (c) => {
     c.header("Cache-Control", "no-store");
     return c.json({ id: operator!.id, pid: process.pid, version: currentVersion, quiesced,
@@ -955,22 +1030,22 @@ export function createService(
   app.get("/api/projects/:id/setup/:harness", async (c) => {
     const project = store.projects().find((p) => p.id === c.req.param("id"));
     if (!project) return c.json({ error: "Project not found" }, 404);
-    const harness = z.enum(["codex", "claude", "muse", "opencode", "antigravity"]).safeParse(c.req.param("harness"));
+    const harness = setupHarness.safeParse(c.req.param("harness"));
     if (!harness.success) return c.json({ error: "Unknown native setup harness" }, 400);
     c.header("Cache-Control", "no-store");
-    return c.json(await nativeSetup.status(project, harness.data));
+    return c.json(await nativeOperation(() => nativeSetup.status(project, harness.data)));
   });
   for (const operation of ["preview", "apply", "undo"] as const)
     app.post(`/api/projects/:id/setup/:harness/${operation}`, async (c) => {
       const project = store.projects().find((p) => p.id === c.req.param("id"));
       if (!project) return c.json({ error: "Project not found" }, 404);
-      const harness = z.enum(["codex", "claude", "muse", "opencode", "antigravity"]).safeParse(c.req.param("harness"));
+      const harness = setupHarness.safeParse(c.req.param("harness"));
       if (!harness.success) return c.json({ error: "Unknown native setup harness" }, 400);
       const schema = operation === "preview" ? z.object({}).strict() : operation === "apply" ? z.object({ previewId: z.uuid() }).strict() : z.object({ changeId: z.uuid() }).strict();
       const parsed = schema.safeParse(await c.req.json().catch(() => null));
       if (!parsed.success) return c.json({ error: "Provide only the saved preview or managed change ID." }, 400);
       c.header("Cache-Control", "no-store");
-      return c.json(operation === "preview" ? await nativeSetup.preview(project, harness.data) : operation === "apply" ? await nativeSetup.apply(project, harness.data, (parsed.data as unknown as { previewId: string }).previewId) : await nativeSetup.undo(project, harness.data, (parsed.data as unknown as { changeId: string }).changeId));
+      return c.json(await nativeOperation(async () => operation === "preview" ? nativeSetup.preview(project, harness.data) : operation === "apply" ? nativeSetup.apply(project, harness.data, (parsed.data as unknown as { previewId: string }).previewId) : nativeSetup.undo(project, harness.data, (parsed.data as unknown as { changeId: string }).changeId), operation !== "preview"));
     });
   app.get("/api/projects/:id/instructions", (c) => {
     const project = store.projects().find((p) => p.id === c.req.param("id"));
@@ -1164,40 +1239,15 @@ export function createService(
     });
   });
   app.post("/api/projects", async (c) => {
-    const parsed = z
-      .object({
-        name: z.string().trim().min(1).max(120),
-        path: z.string().min(1).max(4096),
-      })
-      .strict()
-      .safeParse(await c.req.json().catch(() => null));
+    const parsed = onboardingProjectInput.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success)
       return c.json(
         { error: "Provide a name and absolute existing project folder." },
         400,
       );
-    try {
-      if (!isAbsolute(parsed.data.path)) throw new Error();
-      const path = realpathSync(parsed.data.path);
-      if (!statSync(path).isDirectory()) throw new Error();
-      const prior = store.projects().find((p) => p.path === path);
-      if (prior) return c.json(prior);
-      const p: Project = {
-        id: randomUUID(),
-        name: parsed.data.name,
-        path,
-        preference: "balanced",
-        roles: [],
-        createdAt: new Date().toISOString(),
-      };
-      store.saveProject(p);
-      return c.json(p, 201);
-    } catch {
-      return c.json(
-        { error: "Project path must be an absolute existing folder." },
-        400,
-      );
-    }
+    if (quiesced || stopping) return c.json({ error: "Local service is stopping." }, 503);
+    const result = registerProject(parsed.data);
+    return c.json(result.project, result.created ? 201 : 200);
   });
   app.patch("/api/projects/:id", async (c) => {
     const p = store.projects().find((p) => p.id === c.req.param("id"));

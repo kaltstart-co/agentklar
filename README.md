@@ -4,6 +4,8 @@ Keep your native coding harness. AgentKlar gives registered projects a shared lo
 
 This is a fresh TypeScript rewrite. The old Go application is preserved in Git at `archive/pre-rewrite-2026-10-01`. Old databases and configuration are never imported. A run marked **completed** means the worker finished. Review the changes in your normal editor and harness.
 
+The public website is an installation guide. The local service stores project work on each computer. CLI and GUI share that service. A desktop app is planned; the current release ships no macOS or Windows desktop binary.
+
 ## Install and start
 
 On macOS or Linux (ARM64 or x64), run:
@@ -16,6 +18,14 @@ The installer reuses Node 24 and npm when their global install folder is writabl
 
 On macOS it adds startup at login and opens a fresh private dashboard link. An unrelated startup job or a busy foreground service blocks setup without replacement. On Linux it starts the service in the current terminal and prints the private setup URL; keep that terminal open. The printed absolute AgentKlar command works in a new terminal even if `~/.local/bin` is outside your PATH. Its launcher and managed startup keep the selected npm prefix for future updates without editing your npm configuration. It installs no coding harness and changes no native sign-in or harness settings. Sign in to your coding harness normally, then connect it in Settings. Windows is unsupported.
 
+### Guided setup
+
+On macOS, run `agentklar` in an interactive terminal. The first visit asks for a project folder and an installed main harness. Review the native MCP entry before confirming it. Later visits open a short menu for your saved project: open the native harness, view work, manage your team, connect another harness or add a computer. `agentklar setup` opens the same guide. Project and main-harness choices are shared with the local GUI.
+
+The GUI guides project registration and shows installed harnesses first. Select **Connect**, review the change, then **Use as main**. **View work** returns to the dashboard. **Open main harness** shows the terminal command; the terminal menu launches the existing native executable with its normal account, defaults and permissions. A configured MCP entry does not prove sign-in, tools or remaining quota. New harness installations become available after tasks finish and AgentKlar restarts.
+
+The terminal picker currently needs a managed macOS service. On Linux, use `agentklar start` and its browser guide. Without an interactive terminal, bare `agentklar` prints usage, and `agentklar setup` prints guidance. MCP and peer commands keep their existing protocol output. Native worker approvals remain in the trusted GUI.
+
 For a manual install, use Node 24 and npm, then start the local service:
 
 ```sh
@@ -27,7 +37,7 @@ The install does not start a service, open a browser, or change native harness s
 
 For workers, use a supported native CLI and sign in through its normal setup first. Use the discovered executable path if the command is not on your shell PATH. For Claude Code, run that executable with `auth login`. No new model API key is required. An installed executable does not prove that you are signed in.
 
-**Settings → This computer** shows the service's computer name, platform, device ID, and current native CLI paths. **Find native installations** lists existing executable paths and versions, including supported app bundles. Choose an installation and **Save for next restart** to pin it on this computer. The running service keeps its current CLI until you restart after jobs finish. Workers, model reads, native MCP setup, and continuation use the same selected CLI. Normal updates at the chosen path remain usable; the chosen Claude Desktop installation follows its latest bundled Code version after restart. A missing selected installation blocks that worker until you review another installation. AgentKlar preserves native accounts and settings. Antigravity's `agy` CLI supports guarded User-scope MCP host setup; its worker adapter remains unavailable.
+**Settings → Advanced → This computer and native installations** shows the service's computer name, platform, device ID, and current native CLI paths. **Find native installations** lists existing executable paths and versions, including supported app bundles. Choose an installation and **Save for next restart** to pin it on this computer. The running service keeps its current CLI until you restart after jobs finish. Workers, model reads, native MCP setup, and continuation use the same selected CLI. Normal updates at the chosen path remain usable; the chosen Claude Desktop installation follows its latest bundled Code version after restart. A missing selected installation blocks that worker until you review another installation. AgentKlar preserves native accounts and settings. Antigravity's `agy` CLI supports guarded User-scope MCP host setup; its worker adapter remains unavailable.
 
 <details>
 <summary>Run from a source checkout</summary>

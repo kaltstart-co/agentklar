@@ -92,7 +92,7 @@ function portBusy(port: number): Promise<boolean> {
 }
 async function healthy(p: ReturnType<typeof paths>, entry: Install) {
   for (let i = 0; i < 16; i++) {
-    try { await operator(p, entry, "status"); return; } catch {}
+    try { await operatorRequest(p, entry, "status"); return; } catch {}
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
   throw new Error("launchd registered AgentKlar, but its health is unclear. Use status or inspect its private error log.");
@@ -144,20 +144,23 @@ export async function install(p: ReturnType<typeof paths>, control: typeof launc
   await healthy(p, entry);
   console.log("AgentKlar will start at login. Use `agentklar service open` to open it.");
 }
-async function operator(p: ReturnType<typeof paths>, entry: Install, route: string, body?: unknown) {
+export async function operatorRequest(p: { home: string }, entry: { id: string; port: number }, route: string, body?: unknown, limit = 4096) {
   const response = await fetch(`http://127.0.0.1:${entry.port}/api/operator/${route}`, {
     method: body === undefined ? "GET" : "POST",
     headers: { "connection": "close", "x-agentklar-operator-key": operatorKey(p.home), "x-agentklar-service-id": entry.id,
       ...(body === undefined ? {} : { "content-type": "application/json" }) },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-    signal: AbortSignal.timeout(2500),
+    signal: AbortSignal.timeout(route === "onboarding/setup" ? 35000 : 2500),
   });
-  let text = "";
+  const chunks: Buffer[] = [];
+  let bytes = 0;
   for await (const chunk of response.body || []) {
-    text += Buffer.from(chunk).toString("utf8");
-    if (text.length > 4096) throw new Error("Local service response is too large.");
+    const buffer = Buffer.from(chunk);
+    bytes += buffer.length;
+    if (bytes > limit) throw new Error("Local service response is too large.");
+    chunks.push(buffer);
   }
-  const value = JSON.parse(text) as Record<string, unknown>;
+  const value = JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>;
   if (response.status === 409) throw new Error(String(value.error));
   if (!response.ok) throw new Error("The service at this port is not this managed AgentKlar instance.");
   if (route === "status" && (value.id !== entry.id || !Number.isSafeInteger(value.pid) || Number(value.pid) <= 0 ||
@@ -165,17 +168,42 @@ async function operator(p: ReturnType<typeof paths>, entry: Install, route: stri
     throw new Error("The service at this port is not this managed AgentKlar instance.");
   return value;
 }
+export async function managedCliState(): Promise<"not-installed" | "stopped" | "running"> {
+  const p = paths(), entry = installed(p);
+  if (!entry) return "not-installed";
+  if (!launchctl(["print", p.target], false)) return "stopped";
+  const state = await operatorRequest(p, entry, "status");
+  if (state.quiesced) throw new Error("AgentKlar is paused. Finish its update or run `agentklar service start` before setup.");
+  return "running";
+}
+export async function managedOnboarding(route: string, body?: unknown): Promise<unknown> {
+  if (!["onboarding", "onboarding/project", "onboarding/preferences", "onboarding/setup"].includes(route))
+    throw new Error("Unsupported terminal setup operation.");
+  const p = paths(), entry = installed(p);
+  if (!entry || !launchctl(["print", p.target], false)) throw new Error("Start the managed AgentKlar service before setup.");
+  const state = await operatorRequest(p, entry, "status");
+  if (state.quiesced) throw new Error("AgentKlar is paused. Finish its update or resume it before setup.");
+  return operatorRequest(p, entry, route, body, 65536);
+}
+export async function openManagedDashboard(view: "work" | "team" | "connections" | "devices") {
+  const p = paths(), entry = installed(p);
+  if (!entry || !launchctl(["print", p.target], false)) throw new Error("Start AgentKlar before opening the dashboard.");
+  await operatorRequest(p, entry, "status");
+  const value = await operatorRequest(p, entry, "open", {}), url = String(value.url);
+  if (!new RegExp(`^http://127\\.0\\.0\\.1:${entry.port}/setup\\?token=[0-9a-f]{64}$`).test(url)) throw new Error("Invalid local setup URL.");
+  if (command("/usr/bin/open", [`${url}#${view}`]).status !== 0) throw new Error("Browser could not open. Use `agentklar service open`.");
+}
 async function stop(p: ReturnType<typeof paths>, entry: Install, force: boolean) {
   if (!launchctl(["print", p.target], false)) return console.log("AgentKlar is already stopped.");
   try {
-    await operator(p, entry, "status");
-  await operator(p, entry, "quiesce", { force });
+    await operatorRequest(p, entry, "status");
+  await operatorRequest(p, entry, "quiesce", { force });
   } catch (e) {
     if (!force) throw e;
     console.log("Managed service is unhealthy; forcing launchd to stop its registered job.");
   }
   try { launchctl(["bootout", p.target]); }
-  catch (e) { await operator(p, entry, "resume", {}).catch(() => {}); throw e; }
+  catch (e) { await operatorRequest(p, entry, "resume", {}).catch(() => {}); throw e; }
   await waitUnregistered(p.target);
   console.log("AgentKlar stopped until you start it or log in again.");
 }
@@ -193,7 +221,7 @@ export async function main(args = process.argv.slice(2)) {
   if (action === "status") {
     const registered = launchctl(["print", p.target], false);
     if (!registered) return console.log("Installed; stopped.");
-    try { const state = await operator(p, entry, "status"); console.log(`Installed; ${state.quiesced ? "paused for stop (run start to resume)" : "running"} on http://127.0.0.1:${entry.port}; ${state.activeRuns} active run(s).`); }
+    try { const state = await operatorRequest(p, entry, "status"); console.log(`Installed; ${state.quiesced ? "paused for stop (run start to resume)" : "running"} on http://127.0.0.1:${entry.port}; ${state.activeRuns} active run(s).`); }
     catch { console.log("Installed; registered with launchd; service health is unclear."); }
     return;
   }
@@ -203,9 +231,9 @@ export async function main(args = process.argv.slice(2)) {
       launchctl(["bootstrap", p.domain, p.plist]);
     }
     else {
-      const state = await operator(p, entry, "status").catch(() => null);
+      const state = await operatorRequest(p, entry, "status").catch(() => null);
       if (state) {
-        if (state.quiesced) { await operator(p, entry, "resume", {}); return console.log("AgentKlar resumed."); }
+        if (state.quiesced) { await operatorRequest(p, entry, "resume", {}); return console.log("AgentKlar resumed."); }
         return console.log("AgentKlar is already running.");
       }
       launchctl(["kickstart", p.target]);
@@ -216,7 +244,7 @@ export async function main(args = process.argv.slice(2)) {
   }
   if (action === "open") {
     if (!launchctl(["print", p.target], false)) throw new Error("AgentKlar is stopped. Run start first.");
-    const value = await operator(p, entry, "open", {});
+    const value = await operatorRequest(p, entry, "open", {});
     const url = String(value.url);
     if (!new RegExp(`^http://127\\.0\\.0\\.1:${entry.port}/setup\\?token=[0-9a-f]{64}$`).test(url)) throw new Error("Invalid local setup URL.");
     console.log(url);
@@ -264,7 +292,7 @@ export async function managedUpdate(expectedServer: string, recovery: string, ex
     throw new Error("Managed startup belongs to a different package. Inspect it before updating.");
   const running = saved?.running ?? launchctl(["print", p.target], false);
   if (running && !saved) {
-    const state = await operator(p, entry, "status");
+    const state = await operatorRequest(p, entry, "status");
     if (state.version !== expectedVersion || state.quiesced) throw new Error("The running service does not match this package, or is paused. Inspect status before updating.");
   }
   const marker = join(p.home, "update-maintenance.json");
@@ -280,12 +308,12 @@ export async function managedUpdate(expectedServer: string, recovery: string, ex
     stop: async () => {
       if (!launchctl(["print", p.target], false)) return;
       if (!marked) {
-        await operator(p, entry, "quiesce", { force: false });
+        await operatorRequest(p, entry, "quiesce", { force: false });
         try { writeFileSync(marker, text, { mode: 0o600, flag: "wx" }); identity = lstatSync(marker); marked = true; }
-        catch (error) { await operator(p, entry, "resume", {}).catch(() => {}); throw error; }
+        catch (error) { await operatorRequest(p, entry, "resume", {}).catch(() => {}); throw error; }
       }
       unchanged(); installed(p);
-      const state = await operator(p, entry, "status").catch(() => null);
+      const state = await operatorRequest(p, entry, "status").catch(() => null);
       if (state && (state.activeRuns !== 0 || !state.quiesced)) throw new Error("The service has active work or is not paused. Recovery was refused.");
       // The replacement starts paused under our unchanged marker, even when health fails.
       launchctl(["bootout", p.target]);
@@ -293,9 +321,9 @@ export async function managedUpdate(expectedServer: string, recovery: string, ex
     },
     start: async (version: string, commit?: () => void) => {
       if (saved && !marked) {
-        const state = await operator(p, entry, "status");
+        const state = await operatorRequest(p, entry, "status");
         if (state.version !== version) throw new Error("Committed service version changed.");
-        if (state.quiesced) await operator(p, entry, "resume", {});
+        if (state.quiesced) await operatorRequest(p, entry, "resume", {});
         return;
       }
       unchanged(); installed(p);
@@ -304,13 +332,13 @@ export async function managedUpdate(expectedServer: string, recovery: string, ex
         launchctl(["bootstrap", p.domain, p.plist]);
       }
       await healthy(p, entry);
-      const state = await operator(p, entry, "status");
+      const state = await operatorRequest(p, entry, "status");
       if (state.version !== version || state.quiesced !== true || state.activeRuns !== 0) throw new Error("Restarted service version or state did not match the update.");
       commit?.();
       unchanged(); unlinkSync(marker); marked = false;
-      try { await operator(p, entry, "resume", {}); }
+      try { await operatorRequest(p, entry, "resume", {}); }
       catch {
-        const resumed = await operator(p, entry, "status").catch(() => null);
+        const resumed = await operatorRequest(p, entry, "status").catch(() => null);
         if (!resumed || resumed.version !== version || resumed.quiesced) throw new Error("Update installed; resume is unclear. Run the printed recovery command to check and resume it.");
       }
     },

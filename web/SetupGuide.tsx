@@ -22,7 +22,7 @@ export function SetupGuide({ local, onRetry, onSettings }: {
         <CopyButton value={installer}>{({ copied, copy }) => <Button onClick={copy}>{copied ? "Copied" : "Copy install command"}</Button>}</CopyButton>
         {local && <Button variant="light" onClick={onRetry}>Try connection again</Button>}
       </Group>
-      <p className="hint installer-next">Paste this into your terminal. Follow the installer, then open the local setup link it prints.</p>
+      <p className="hint installer-next">Paste this into your terminal. Follow the installer, then use the local setup guide. On macOS, run <code>agentklar</code> for the terminal menu.</p>
     </div>
     <div className="setup-secondary">
       <details className="settings-disclosure"><summary>Start at login on macOS</summary>
@@ -36,7 +36,7 @@ export function SetupGuide({ local, onRetry, onSettings }: {
       </details>
       <details className="settings-disclosure"><summary>Connect your coding harness</summary>
         <div className="disclosure-body"><p className="hint">Open the local app and use Settings → Native connection to preview and add AgentKlar to your harness. Native sign-in and permissions stay in place.</p>
-          <Group><Button variant="light" onClick={onSettings}>Open connection settings</Button></Group>
+          {local && <Group><Button variant="light" onClick={onSettings}>Open connection settings</Button></Group>}
         </div>
       </details>
     </div>

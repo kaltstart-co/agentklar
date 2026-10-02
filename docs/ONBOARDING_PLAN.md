@@ -37,19 +37,19 @@ AgentKlar · My project
   Add a computer
 ```
 
-These are proposed actions, not commands implemented in beta.30. The native harness remains the everyday work interface. Team roles, model pins, cost preference and required tools stay available when needed. Adding another harness later uses the same connection flow.
+These actions are implemented in beta.31 for a managed macOS service. Linux uses the browser guide with its foreground service. The native harness remains the everyday work interface. Team roles, model pins, cost preference and required tools stay available when needed. Adding another supported harness uses the same connection flow; newly installed CLIs need a service restart after active work finishes.
 
 ## GUI
 
-One setup panel presents the same project and harness choices. Each harness row shows a clear status and one action: Connect, Check sign-in, Review change or Open. Work remains the default page after setup. Details such as instruction files, native defaults, plugins and remote approvals remain under advanced settings.
+One setup panel presents the same project and harness choices. Each harness row shows its checked MCP status and a next action: Connect, Review setup, Use as main or Manage. Open main harness shows terminal guidance; the terminal menu launches it. Work remains the default page after setup. Native sign-in remains inside each harness. Instruction files, native defaults, plugins and remote approvals remain under advanced settings.
 
 ## Build order
 
-- [ ] Shared setup state
-- [ ] Terminal picker
-- [ ] Guided GUI setup
-- [ ] Saved launch choices
-- [ ] New harness onboarding
+- [x] Shared setup state
+- [x] Terminal picker (macOS)
+- [x] Guided GUI setup
+- [x] Saved launch choices
+- [x] Additional harness connections
 
 Keep the existing React, Mantine and service. Use a small established terminal prompt library for keyboard selection; do not write another terminal renderer. CLI and GUI should reuse the guarded native setup logic. Keep concrete worker approvals in the trusted local UI; MCP gains no approval tool. Preserve existing explicit commands and noninteractive MCP/peer behavior.
 

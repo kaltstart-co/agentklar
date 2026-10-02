@@ -88,6 +88,14 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 
 Plan: [docs/ONBOARDING_PLAN.md](docs/ONBOARDING_PLAN.md).
 
-- [ ] Terminal picker
-- [ ] Guided GUI setup
-- [ ] Saved launch choices
+- [x] Terminal picker (macOS)
+- [x] Guided GUI setup
+- [x] Saved launch choices
+
+## Desktop app plan
+
+Plan: [docs/DESKTOP_PLAN.md](docs/DESKTOP_PLAN.md).
+
+- [ ] macOS app
+- [ ] Signed updates
+- [ ] Windows app
