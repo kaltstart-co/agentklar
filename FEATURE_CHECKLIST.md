@@ -83,3 +83,11 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 - [ ] Gemini and Cursor proof
 - [ ] ZCode worker
 - [ ] Antigravity worker
+
+## Next setup experience
+
+Plan: [docs/ONBOARDING_PLAN.md](docs/ONBOARDING_PLAN.md).
+
+- [ ] Terminal picker
+- [ ] Guided GUI setup
+- [ ] Saved launch choices
