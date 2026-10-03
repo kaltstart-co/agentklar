@@ -16,6 +16,11 @@ passes for the ad-hoc app. Package logs are
 `/private/tmp/agentklar-beta41-package.log` and
 `/private/tmp/agentklar-beta41-package-smoke.log`.
 
+GitHub CI also passed both jobs for commit `10a0820`: service check/test/build,
+package smoke, offline release gates, native build/tests/boundary checks and
+development packaging with full Xcode on ARM64.
+[Run 37108717439](https://github.com/kaltstart-co/agentklar/actions/runs/37108717439).
+
 | Gate | Current evidence | Needed to finish |
 | --- | --- | --- |
 | Account quotas | Native Codex/Claude reads; Muse last-seen and Antigravity grouped adapters | Verified account reads for the other providers; session tokens cannot substitute |
