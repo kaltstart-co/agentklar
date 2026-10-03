@@ -639,7 +639,7 @@ export const readCatalog: CatalogReader = async (
   harnesses: await Promise.all(
     ([...workerHarnesses, "antigravity"] as const).map(async (harness) => {
       const command = commands[harness];
-      if (harness === "gemini" || harness === "cursor-agent" || harness === "zcode") return {
+      if (harness === "cursor-agent" || harness === "zcode") return {
         ...empty(harness), quota: unavailableAccountQuota(harness, !!command), modelsMessage: command ? "Choose this harness explicitly to use its native default. Model pins are checked against the native session before a task starts. Automatic ranking is unavailable." : `${harness} CLI was not found. Its desktop app sign-in does not establish CLI sign-in.`,
       };
       if (!command)

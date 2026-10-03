@@ -19,7 +19,7 @@ test("MCP exposes saved routing policy and requires a human request in manual mo
     queueMicrotask(() => { callbacks.update({ state: "completed", result: "fixture result" }); callbacks.done(); });
     return { stop() {}, closed: Promise.resolve() };
   }, process.execPath, null, undefined, {}, undefined, {}, {}, null, {}, null, undefined,
-  { gemini: null, "cursor-agent": null, zcode: null });
+  { "cursor-agent": null, zcode: null });
   const http = serve({ fetch: service.app.fetch, hostname: "127.0.0.1", port });
   const server = createMcp(`http://127.0.0.1:${port}`, service.bearer);
   const client = new Client({ name: "delegation-test", version: "1" });

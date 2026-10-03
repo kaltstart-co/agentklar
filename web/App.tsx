@@ -188,7 +188,7 @@ export function App() {
   const workers = snapshot.harnesses.filter((h) => h.workerSupported);
   const selectedRole = taskProject?.roles.find((r) => r.id === roleId);
   const taskHarness = selectedRole?.harness || harness;
-  const nativeOnlyWorker = ["muse", "opencode", "gemini", "cursor-agent", "zcode"].includes(taskHarness);
+  const nativeOnlyWorker = ["muse", "opencode", "cursor-agent", "zcode"].includes(taskHarness);
   const remoteFollowUp = followUp ? snapshot.remoteDispatches?.find((item) => item.id === followUp.runId) : undefined;
   const remoteRole = Boolean(selectedRole?.peerId || remoteFollowUp);
   const followUpPeer = remoteFollowUp ? snapshot.peers?.find((p) => p.id === remoteFollowUp.peerId) : undefined;
@@ -1354,7 +1354,7 @@ export function App() {
                       <h4>Other MCP hosts</h4><pre>{snippet}</pre>
                     </div></details>
                     <details className="settings-disclosure"><summary>Installed harness support</summary><div className="disclosure-body">
-                      {snapshot.harnesses.map(h => <div className="harness" key={h.id}><div><strong className="harness-label"><HarnessIcon harness={h.id} size={20} />{h.name}</strong><p>{h.reason}</p>{h.executable && <p className="hint">Current CLI: {h.executable}</p>}</div><Badge color={h.available ? "teal" : "gray"} variant="light">{h.available ? "Installed" : "Not found"}</Badge><span>{h.workerSupported ? (["gemini", "cursor-agent", "zcode"].includes(h.id) ? "Experimental worker" : "Worker supported") : h.hostSupported ? "MCP host" : "Discovery only"}</span></div>)}
+                      {snapshot.harnesses.map(h => <div className="harness" key={h.id}><div><strong className="harness-label"><HarnessIcon harness={h.id} size={20} />{h.name}</strong><p>{h.reason}</p>{h.executable && <p className="hint">Current CLI: {h.executable}</p>}</div><Badge color={h.available ? "teal" : "gray"} variant="light">{h.available ? "Installed" : "Not found"}</Badge><span>{h.workerSupported ? (["cursor-agent", "zcode"].includes(h.id) ? "Experimental worker" : "Worker supported") : h.hostSupported ? "MCP host" : "Discovery only"}</span></div>)}
                       <p className="hint">Installed means the executable was found. Sign in through your native harness before starting a worker.</p>
                     </div></details>
                   </div>

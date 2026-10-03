@@ -1,7 +1,7 @@
 import type { ObservedSessionView } from "./observations.ts";
 import type { BenchmarkEvidence, TaskType } from "./benchmarks.ts";
 import type { ToolEvidence, ToolCapability } from "./capabilities.ts";
-export const workerHarnesses = ["codex", "claude", "muse", "opencode", "gemini", "cursor-agent", "zcode"] as const;
+export const workerHarnesses = ["codex", "claude", "muse", "opencode", "cursor-agent", "zcode"] as const;
 export type WorkerHarness = typeof workerHarnesses[number];
 export type Preference = "economical" | "balanced" | "best";
 export type RoutingTier = "efficient" | "balanced" | "capable";

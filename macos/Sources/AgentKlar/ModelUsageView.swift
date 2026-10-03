@@ -139,7 +139,6 @@ struct ModelUsageView: View {
         case "opencode": return "OpenCode"
         case "antigravity": return "Antigravity"
         case "muse": return "Muse"
-        case "gemini": return "Gemini CLI"
         case "cursor-agent": return "Cursor"
         case "zcode": return "ZCode"
         default: return id.isEmpty ? "Harness" : id.capitalized

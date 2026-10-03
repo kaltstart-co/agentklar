@@ -16,7 +16,7 @@ test("routing metadata authenticates before discovery and respects the maintenan
   let discoveries = 0;
   const operator = { id: randomUUID(), key: "fixture-operator-key" };
   const service = createService(join(root, "home"), 4333, () => { throw new Error("No worker allowed"); }, null, null,
-    async project => { discoveries++; return { projectId: project.id, checkedAt: new Date().toISOString(), harnesses: [] }; }, {}, operator, {}, {}, null, {}, null, undefined, { gemini: null, "cursor-agent": null, zcode: null });
+    async project => { discoveries++; return { projectId: project.id, checkedAt: new Date().toISOString(), harnesses: [] }; }, {}, operator, {}, {}, null, {}, null, undefined, { "cursor-agent": null, zcode: null });
   const project = { id: randomUUID(), name: "Routing auth", path: projectPath, preference: "balanced" as const, roles: [], createdAt: new Date().toISOString() };
   service.store.saveProject(project);
   const route = `/api/projects/${project.id}/routing-metadata`;
@@ -41,7 +41,7 @@ test("routing metadata authenticates before discovery and respects the maintenan
     const metadata = await response.json();
     assert.equal(metadata.projectId, project.id);
     assert.equal(metadata.baseCommit, git("rev-parse", "HEAD"));
-    assert.deepEqual(metadata.installed, { codex: false, claude: false, muse: false, opencode: false, gemini: false, "cursor-agent": false, zcode: false });
+    assert.deepEqual(metadata.installed, { codex: false, claude: false, muse: false, opencode: false, "cursor-agent": false, zcode: false });
     assert.equal(discoveries, 1);
     assert.equal(service.store.runs().length, 0);
   } finally { await service.close(); rmSync(root, { recursive: true, force: true }); }

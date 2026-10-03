@@ -14,10 +14,9 @@ test("every supported catalog harness declares a quota source or an honest nativ
     assert.ok(unknown.message);
     assert.match(unavailableAccountQuota(harness, false).message!, /executable was not found on this host/);
   }
-  for (const harness of ["opencode", "gemini", "cursor-agent", "zcode"] as const)
+  for (const harness of ["opencode", "cursor-agent", "zcode"] as const)
     assert.equal(accountQuotaCoverage[harness].source, null);
   assert.match(unavailableAccountQuota("opencode").message!, /session tokens and cost/);
-  assert.match(unavailableAccountQuota("gemini").message!, /\/stats model/);
 });
 
 test("an absent native CLI cannot claim its account quota was read", async () => {

@@ -14,7 +14,7 @@ async function fixture(reader?: (project: Project) => Promise<CatalogSnapshot>) 
   writeFileSync(f.command, `#!${process.execPath}\nimport {existsSync,writeFileSync} from 'node:fs';\nif(existsSync(${JSON.stringify(gate)})){writeFileSync(${JSON.stringify(entered)},'entered');while(existsSync(${JSON.stringify(gate)}))await new Promise(r=>setTimeout(r,5));}\nawait import(${JSON.stringify(resolve("tests/fixtures/native-config-plugin.mjs"))});\n`, { mode: 0o700 });
   let launches = 0;
   const service = createService(f.home, 4349, () => { launches++; return { stop() {}, closed: Promise.resolve() }; },
-    f.command, f.command, reader, { env: f.options.env }, undefined, {}, {}, null, {}, null, undefined, { gemini: null, "cursor-agent": null });
+    f.command, f.command, reader, { env: f.options.env }, undefined, {}, {}, null, {}, null, undefined, { "cursor-agent": null });
   const project = { ...f.project, id: randomUUID() }; service.store.saveProject(project);
   const opened = await service.app.request(service.setupUrl);
   const cookie = opened.headers.get("set-cookie")!.split(";")[0];

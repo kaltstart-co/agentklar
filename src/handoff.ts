@@ -18,7 +18,7 @@ export function runHandoff(run: Run, project: Project | undefined, busy: boolean
     command: null, notes: [] };
   const unavailable = (reason: string) => ({ ...packet, reason });
   if (!harness) return unavailable("This run has no supported native harness.");
-  if (harness === "gemini" || harness === "cursor-agent") return unavailable("This ACP session has no verified native CLI resume command. Continue in its native harness.");
+  if (harness === "cursor-agent") return unavailable("This ACP session has no verified native CLI resume command. Continue in its native harness.");
   if (harness === "zcode") return unavailable("This ZCode session has no verified native CLI resume command. Continue in ZCode.");
   if (["running", "needs_attention"].includes(run.state)) return unavailable("The worker is still active.");
   if (!["completed", "failed", "cancelled", "interrupted"].includes(run.state))

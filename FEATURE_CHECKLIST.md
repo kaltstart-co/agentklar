@@ -98,10 +98,10 @@ beta.33. Signed public release is pending. Evidence: [docs/VALIDATION.md](docs/V
 
 ## Required, unfinished
 
-Current blockers and acceptance steps: [validation](docs/VALIDATION.md#remaining-gates--beta41).
+Current blockers and acceptance steps: [validation](docs/VALIDATION.md#remaining-gates--beta42).
 
 - [ ] Complete account quotas
-- [ ] Gemini and Cursor proof
+- [ ] Cursor proof
 - [ ] ZCode worker
 - [ ] Antigravity worker
 - [ ] Automatic native activity observation
@@ -116,7 +116,7 @@ Plan: [docs/ONBOARDING_PLAN.md](docs/ONBOARDING_PLAN.md).
 
 ## Native Mac preview
 
-Plan: [docs/DESKTOP_PLAN.md](docs/DESKTOP_PLAN.md). Design: [docs/NATIVE_DESIGN.md](docs/NATIVE_DESIGN.md). Source beta.41 extends session visibility and release checks. Beta.40 is installed locally. Full GUI acceptance is pending. Evidence: [validation](docs/VALIDATION.md#remaining-gates--beta41).
+Plan: [docs/DESKTOP_PLAN.md](docs/DESKTOP_PLAN.md). Design: [docs/NATIVE_DESIGN.md](docs/NATIVE_DESIGN.md). Source beta.42 removes the separate Gemini CLI adapter and keeps Antigravity. Beta.40 is installed locally. Full GUI acceptance is pending. Evidence: [validation](docs/VALIDATION.md#remaining-gates--beta42).
 
 - [x] SwiftUI build
 - [x] Local boundary checks

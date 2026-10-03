@@ -3,7 +3,6 @@ import type { CSSProperties } from 'react';
 const icons: Record<string, string> = {
   claude: '/harness-icons/anthropic.svg',
   opencode: '/harness-icons/opencode.svg',
-  gemini: '/harness-icons/gemini.svg',
   'cursor-agent': '/harness-icons/cursor.svg',
 };
 

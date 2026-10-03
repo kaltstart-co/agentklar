@@ -20,7 +20,7 @@ struct TeamView: View {
     @State private var configuringPolicy = false
     private var workers: [JSON] { client.harnesses.filter { $0["available"].bool == true && $0["workerSupported"].bool == true } }
     private var peers: [JSON] { (client.snapshot["peers"].array ?? []).filter { $0["projectId"].string == client.projectID } }
-    private let remoteHarnesses = ["codex", "claude", "muse", "opencode", "gemini", "cursor-agent", "zcode"]
+    private let remoteHarnesses = ["codex", "claude", "muse", "opencode", "cursor-agent", "zcode"]
     var body: some View {
         if client.projectID.isEmpty {
             ContentUnavailableView("Choose a project", systemImage: "person.2", description: Text("Create roles for the work you delegate often."))
@@ -252,7 +252,7 @@ struct TeamView: View {
     }
     private func harnessName(_ id: String) -> String {
         client.harnesses.first { $0["id"].string == id }?["name"].string ??
-            ["codex": "Codex", "claude": "Claude Code", "muse": "Muse", "opencode": "OpenCode", "gemini": "Gemini", "cursor-agent": "Cursor", "zcode": "ZCode"][id] ?? (id.isEmpty ? "Choose harness" : id)
+            ["codex": "Codex", "claude": "Claude Code", "muse": "Muse", "opencode": "OpenCode", "cursor-agent": "Cursor", "zcode": "ZCode"][id] ?? (id.isEmpty ? "Choose harness" : id)
     }
     @ViewBuilder private var teamActions: some View {
         if !roles.isEmpty || savedRoleCount > 0 {

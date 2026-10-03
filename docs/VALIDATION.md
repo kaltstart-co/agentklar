@@ -2,13 +2,31 @@
 
 Verified across 2026-10-01 to 2026-10-03 using Node 24.21.0. The old application was not used.
 
-## Remaining gates — beta.41
+## Gemini removal — beta.42
 
-Source is beta.41; the installed local app and service remain beta.40. The ten
+The separate Gemini CLI is removed from installed-harness discovery, worker
+selection, quota coverage and native/browser model views. Antigravity (`agy`)
+keeps its model discovery, grouped limits and MCP setup. Its `.gemini` files and
+Google accounts are preserved. Older connected Macs may still send Gemini
+metadata; it is accepted for compatibility and excluded from current catalogs
+and routing. Historical runs and earlier evidence are retained.
+
+The Gemini CLI installed for beta.41 testing is removed from the development
+MacBook. Cursor remains installed. Source is beta.42; the installed app/service
+remain beta.40 and public downloads remain beta.33 until separately updated.
+All 357 service tests pass with zero failures or skips, including the older-owner
+metadata regression and Gemini task rejection. TypeScript checks, the production
+build and the Swift release build pass. Antigravity and Cursor executables remain
+installed; the AgentKlar-created Gemini executable link and package are gone.
+Cursor proof and the other release gates below remain unfinished.
+
+## Remaining gates — beta.42
+
+Source is beta.42; the installed local app and service remain beta.40. The ten
 remaining items are still unchecked. The changes below close specific gaps;
 they do not establish every native integration or public release gate.
 
-The combined run passes all 356 service tests with zero failures or skips,
+The beta.41 combined run passed all 356 service tests with zero failures or skips,
 TypeScript checks, production build, Swift release build, Foundation checks,
 nine offline release tests and package smoke with 27 MCP tools. The beta.41
 development app, ZIP and DMG built successfully; deep signature verification
@@ -24,7 +42,7 @@ development packaging with full Xcode on ARM64.
 | Gate | Current evidence | Needed to finish |
 | --- | --- | --- |
 | Account quotas | Native Codex/Claude reads; Muse last-seen and Antigravity grouped adapters | Verified account reads for the other providers; session tokens cannot substitute |
-| Gemini / Cursor proof | Official CLIs installed on MacBook; real ACP initialization passes | Native sign-in, then bounded real worker completion and permission tests |
+| Cursor proof | Official CLI installed on MacBook; real ACP initialization passes | Native sign-in, then bounded real worker completion and permission tests |
 | ZCode worker | Actual 0.16.9 session offers no model; refused before prompt | Configure an available model in native ZCode, then real worker proof |
 | Antigravity worker | Actual 1.2.16 rejects control_response before any turn | A supported native permission reply protocol |
 | Native observation | Claude hooks; browser and authorized remote signal views | Reviewed per-harness installers and owned-session filtering for more harnesses |
@@ -36,11 +54,12 @@ development packaging with full Xcode on ARM64.
 
 ### Worker prerequisites checked again
 
-Official Gemini CLI 0.62.0 and Cursor CLI 2026.10.01-e373342 are installed on the
-development MacBook. Existing discovery finds both with PATH `/usr/bin:/bin`.
-Their real ACP sessions reject startup because native authentication is missing.
-No model prompt, authenticate request or permission reply was sent. Sign in with
-`gemini` and `agent login`, respectively. The mini was not changed.
+The beta.41 checks installed Gemini CLI 0.62.0 and Cursor CLI
+2026.10.01-e373342 on the development MacBook. Both ACP sessions refused startup
+because native authentication was missing; no model prompt or authentication
+request was sent. Beta.42 removes that Gemini installation and adapter. Cursor
+remains installed and needs native `agent login` before a real worker test.
+The mini was not changed.
 
 ZCode 0.16.9 created an owned disposable session but returned no available model;
 the adapter refused before sending a prompt. Antigravity 1.2.16 returned an

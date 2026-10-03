@@ -59,13 +59,13 @@ export class AcpWorker {
   private termination?: NodeJS.Timeout;
   private escalation?: NodeJS.Timeout;
   constructor(command: string, private run: Run, private cwd: string, private callbacks: NativeCallbacks,
-    private harness: "gemini" | "cursor-agent", options: { args?: string[]; handshakeTimeoutMs?: number } = {}) {
+    options: { args?: string[]; handshakeTimeoutMs?: number } = {}) {
     this.closed = new Promise(resolve => { this.resolveClosed = resolve; });
     if (run.readOnly) {
       queueMicrotask(() => { this.finish("needs_attention", "This ACP worker cannot enforce read-only work. Choose Codex or Claude Code for a review."); callbacks.done(); this.resolveClosed(); });
       return;
     }
-    this.child = spawn(command, options.args ?? (harness === "gemini" ? ["--acp"] : ["acp"]), {
+    this.child = spawn(command, options.args ?? ["acp"], {
       cwd, stdio: "pipe", detached: process.platform !== "win32",
     });
     if (this.child.pid) callbacks.update({ workerPid: this.child.pid });

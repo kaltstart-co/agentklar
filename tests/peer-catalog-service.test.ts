@@ -23,7 +23,7 @@ function fixture() {
       quota: { status: "unavailable", message: "Native allowance unavailable", ordinaryUsageAllowed: null, buckets: [] },
     }] };
     return snapshot;
-  }, {}, undefined, {}, {}, null, {}, null, undefined, { gemini: null, "cursor-agent": null, zcode: null });
+  }, {}, undefined, {}, {}, null, {}, null, undefined, { "cursor-agent": null, zcode: null });
   const call = (service: typeof owner, port: number) => async (path: string, method = "GET", body?: unknown) => {
     const response = await service.app.request(`http://127.0.0.1:${port}${path}`, {
       method, headers: { Authorization: `Bearer ${service.bearer}`, "Content-Type": "application/json" },
@@ -40,7 +40,7 @@ function fixture() {
   };
   const source = createService(join(dir, "source"), sourcePort, factory, null, null,
     async project => ({ projectId: project.id, checkedAt: new Date().toISOString(), harnesses: [] }),
-    {}, undefined, {}, {}, null, {}, null, transport, { gemini: null, "cursor-agent": null, zcode: null });
+    {}, undefined, {}, {}, null, {}, null, transport, { "cursor-agent": null, zcode: null });
   const project = (service: typeof owner, name: string) => {
     const path = join(dir, name); mkdirSync(path);
     const value: Project = { id: randomUUID(), name, path, preference: "balanced", roles: [], createdAt: new Date().toISOString() };

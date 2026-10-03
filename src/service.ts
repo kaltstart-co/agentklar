@@ -185,8 +185,8 @@ export function createService(
       ? new MuseWorker(command, run, path, callbacks)
       : run.harness === "opencode"
       ? new OpenCodeWorker(command, run, path, callbacks, undefined, nativeEnv)
-      : run.harness === "gemini" || run.harness === "cursor-agent"
-      ? new AcpWorker(command, run, path, callbacks, run.harness)
+      : run.harness === "cursor-agent"
+      ? new AcpWorker(command, run, path, callbacks)
       : run.harness === "zcode"
       ? new ZCodeWorker(command.endsWith(".cjs") ? process.execPath : command, run, path, callbacks, command.endsWith(".cjs") ? { args: [command, "app-server", "--stdio"] } : {})
       : new NativeWorker(command, run, path, callbacks),
@@ -201,7 +201,7 @@ export function createService(
   leadOptions: { now?: () => number; wallNow?: () => number; leaseMs?: number } = {},
   opencodeCommand: string | null = executable("opencode"),
   peerTransport?: PeerTransport,
-  acpCommands: Partial<Record<"gemini" | "cursor-agent" | "zcode", string | null>> = {},
+  acpCommands: Partial<Record<"cursor-agent" | "zcode", string | null>> = {},
 ) {
   const startupMaintenance = readUpdateMaintenance(home, operator?.id);
   const personalHome = realpathSync(skillOptions.userHome ?? homedir());
@@ -231,7 +231,6 @@ export function createService(
   museCommand = devices.selected("muse", museCommand);
   opencodeCommand = devices.selected("opencode", opencodeCommand);
   const commands: Record<WorkerHarness, string | null> = { codex: nativeCommand, claude: claudeCommand, muse: museCommand, opencode: opencodeCommand,
-    gemini: devices.selected("gemini", acpCommands.gemini === undefined ? executable("gemini") : acpCommands.gemini),
     zcode: devices.selected("zcode", acpCommands.zcode === undefined ? executable("zcode") : acpCommands.zcode),
     "cursor-agent": devices.selected("cursor-agent", acpCommands["cursor-agent"] === undefined ? executable("cursor-agent") : acpCommands["cursor-agent"]),
   };

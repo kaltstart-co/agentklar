@@ -42,7 +42,6 @@ export function executables(
   if (name === "muse") candidates.push(join(home, ".local", "bin", "muse"));
   if (name === "agy") candidates.push(join(home, ".local", "bin", "agy"));
   if (name === "opencode") candidates.push(join(home, ".opencode", "bin", "opencode"), join(home, ".bun", "bin", "opencode"));
-  if (name === "gemini") candidates.push(join(home, ".local", "bin", "gemini"));
   if (name === "cursor-agent") {
     candidates.push(join(home, ".local", "bin", "cursor-agent"));
     for (const dir of pathEnv.split(delimiter).filter(Boolean)) {
@@ -66,7 +65,6 @@ export function harnesses(): Harness[] {
     ["codex", "Codex"],
     ["claude", "Claude Code"],
     ["muse", "Muse"],
-    ["gemini", "Gemini CLI"],
     ["cursor-agent", "Cursor"],
     ["opencode", "OpenCode"],
     ["antigravity", "Antigravity CLI"],
@@ -91,7 +89,7 @@ export function harnesses(): Harness[] {
               ? "Native MSP worker adapter; MCP host setup uses Muse settings"
             : id === "opencode"
               ? "Native OpenCode local server worker adapter; provider setup stays in OpenCode"
-            : id === "gemini" || id === "cursor-agent"
+            : id === "cursor-agent"
               ? "Native ACP worker adapter; uses existing CLI sign-in, explicit native model choices and concrete approvals"
             : id === "antigravity"
               ? "Native Antigravity CLI found; worker support unavailable until its adapter is verified"

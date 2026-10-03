@@ -51,7 +51,7 @@ function fixture(mode: string, patch: Partial<Run> = {}) {
   const worker = new AcpWorker(process.execPath, run, dir, {
     update: value => {run={...run,...value};}, event: (_kind,text) => {events.push(text);},
     approval: (value,answer) => {approvals.push({value,answer});}, done:()=>{done++;},
-  }, mode==="cursor"?"cursor-agent":"gemini", { args:[script,mode,log],handshakeTimeoutMs:1000 });
+  }, { args:[script,mode,log],handshakeTimeoutMs:1000 });
   return { worker, approvals, run:()=>run,events,done:()=>done,wire:()=>readFileSync(log,"utf8").trim().split('\n').filter(Boolean).map(line=>JSON.parse(line)),clean:()=>rmSync(dir,{recursive:true,force:true}) };
 }
 async function until(check:()=>boolean) { for(let n=0;n<200;n++){if(check())return;await new Promise(resolve=>setTimeout(resolve,10));}assert.fail("Timed out"); }
@@ -106,7 +106,7 @@ test("process exit after ACP closed cannot orphan a SIGTERM-resistant descendant
   writeFileSync(log, ""); writeFileSync(script, fake);
   writeFileSync(owner, `import {AcpWorker} from ${JSON.stringify(new URL("../src/acp.ts", import.meta.url).href)};
 const run={id:'run',projectId:'project',prompt:'test',readOnly:false,state:'running',result:'',tokens:null,createdAt:'now',updatedAt:'now'};
-const worker=new AcpWorker(process.execPath,run,${JSON.stringify(dir)},{update(){},event(){},approval(){},done(){}},'gemini',{args:[${JSON.stringify(script)},'survivor',${JSON.stringify(log)}]});
+const worker=new AcpWorker(process.execPath,run,${JSON.stringify(dir)},{update(){},event(){},approval(){},done(){}},{args:[${JSON.stringify(script)},'survivor',${JSON.stringify(log)}]});
 await worker.closed; process.exit(0);\n`);
   let descendant: number | undefined;
   const child = spawn(process.execPath, ["--import", "tsx", owner], { stdio: ["ignore", "pipe", "pipe"] });

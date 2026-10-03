@@ -272,7 +272,7 @@ SOFTWARE.
 
 # Simple Icons harness marks
 
-Bundled Anthropic, OpenCode, Google Gemini and Cursor marks are from Simple Icons v16, distributed under CC0-1.0. Source: https://github.com/simple-icons/simple-icons
+Bundled Anthropic, OpenCode and Cursor marks are from Simple Icons v16, distributed under CC0-1.0. Source: https://github.com/simple-icons/simple-icons
 License: https://creativecommons.org/publicdomain/zero/1.0/
 Brand attribution and fallback details: docs/HARNESS_ICONS.md. Logos remain subject to their brand guidelines.
 

@@ -200,6 +200,25 @@ test("routing metadata is scoped to saved device/project/base and rejects stale 
  } finally {await f.coordinator.close();await f.owner.close();rmSync(f.dir,{recursive:true,force:true});}
 });
 
+test("older owner Gemini metadata is accepted but excluded from catalogs and routing", async () => {
+  const f = fixture();
+  try {
+    const catalog = { projectId: f.remoteProject.id, checkedAt: new Date().toISOString(),
+      harnesses: [{ harness: "gemini", models: [] }, { harness: "antigravity", models: [] }, { harness: "codex", models: [] }] };
+    const body = { deviceId: f.remoteDevice.id, projectId: f.remoteProject.id, baseCommit: f.baseCommit,
+      catalog, installed: { codex: true, claude: false, gemini: true } };
+    const peers = new Peers(f.coordinator.store, f.localDevice, async () => ({ status: 200, body: {} }),
+      async (_peer, request) => ({ status: 200, body: request.operation === "catalog" ? catalog : body }));
+    assert.deepEqual((await peers.catalog(f.peer.id)).harnesses.map(row => row.harness), ["antigravity", "codex"]);
+    const routing = await peers.routing(f.peer.id, f.baseCommit);
+    assert.deepEqual(routing.installed, { codex: true, claude: false });
+    assert.deepEqual(routing.catalog.harnesses.map(row => row.harness), ["antigravity", "codex"]);
+    await assert.rejects(f.peers.start({ peerId: f.peer.id, idempotencyKey: "removed-gemini", baseCommit: f.baseCommit,
+      task: { prompt: "must not start", harness: "gemini" } }));
+    assert.equal(f.starts, 0);
+  } finally { await f.close(); }
+});
+
 test("separate human capability binds exact parent grant and durable source action replay", async () => {
  const f=fixture();
  try {

@@ -114,7 +114,7 @@ export class Peers {
     const peer = this.peer(uuid.parse(peerId));
     const snapshot = await this.send(peer, this.request(peer, "catalog")) as CatalogSnapshot;
     if (snapshot?.projectId !== peer.remoteProjectId || !Array.isArray(snapshot.harnesses)) throw new PeerError("Catalog does not match the saved remote project.", 502);
-    return snapshot;
+    return { ...snapshot, harnesses: snapshot.harnesses.filter(row => row.harness as string !== "gemini") };
   }
   async routing(peerId: string, baseCommit: string): Promise<RecommendationSource> {
     const peer = this.peer(uuid.parse(peerId));
@@ -122,8 +122,9 @@ export class Peers {
     if (body?.deviceId !== peer.deviceId || body.projectId !== peer.remoteProjectId || body.baseCommit !== baseCommit || body.catalog?.projectId !== peer.remoteProjectId || !Array.isArray(body.catalog.harnesses)) throw new PeerError("Routing metadata does not match the saved device, project and Git base.", 409);
     const checked = Date.parse(body.catalog.checkedAt), now = Date.now();
     if (!Number.isFinite(checked) || checked > now || now - checked > 5 * 60_000) throw new PeerError("Remote catalog is stale; refresh its native model evidence.", 409);
-    const installed = z.object({codex:z.boolean(),claude:z.boolean(),muse:z.boolean().optional(),opencode:z.boolean().optional(),gemini:z.boolean().optional(),"cursor-agent":z.boolean().optional(),zcode:z.boolean().optional()}).strict().parse(body.installed);
-    return {catalog:body.catalog, installed, device:{id:peer.deviceId,label:peer.label,peerId:peer.id}};
+    // Older owners can still send Gemini CLI metadata. Accept it only to discard it.
+    const {gemini: _legacyGemini, ...installed} = z.object({codex:z.boolean(),claude:z.boolean(),muse:z.boolean().optional(),opencode:z.boolean().optional(),gemini:z.boolean().optional(),"cursor-agent":z.boolean().optional(),zcode:z.boolean().optional()}).strict().parse(body.installed);
+    return {catalog:{...body.catalog,harnesses:body.catalog.harnesses.filter(row => row.harness as string !== "gemini")}, installed, device:{id:peer.deviceId,label:peer.label,peerId:peer.id}};
   }
   async test(input: unknown) {
     const { peerId } = z.object({ peerId: uuid }).strict().parse(input), peer = this.peer(peerId);
