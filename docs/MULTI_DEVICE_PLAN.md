@@ -58,3 +58,32 @@ Implemented workflow: automatic candidates for explicit separate-worktree tasks 
 Full product target still requires:
 
 - Real two-device SSH lifecycle, permissions and native worker validation on supported platforms. Windows remains unverified.
+
+## Planned remote project and harness setup
+
+Added on 3 October 2026. Both features remain unfinished.
+
+### GUI flow
+
+1. Connect the Mac and verify its saved device identity.
+2. Choose **New project**, select that Mac, name the project and choose its remote parent folder. Review the full destination before creation. Register the new folder on that Mac and open it in a workspace tab labelled with its computer. A remote-only workspace must be usable without a local project folder.
+3. Choose **Connect a harness** for that computer and project. Discover the owner's installed harnesses and show their setup state.
+4. Review the exact native configuration file, scope and change. Apply the reviewed change, then check the MCP connection. Preserve each harness's native authentication and permission flow. Model access and tools need separate native verification.
+
+### Implementation boundary
+
+Current peer grants require an existing project mapping and cannot create projects or modify native configuration. Add a separate, explicitly enabled device setup permission for trusted GUI actions. Keep project task grants scoped to their existing work. MCP and workers receive no setup permission. The owner service performs destination validation, project registration and harness-specific preview/apply/undo.
+
+Project creation uses a durable request ID. Retrying after a lost response returns the same created project. Refuse existing destinations, unsafe paths and changed owner identity. If registration fails after folder creation, record that state and offer a clear recovery action. Remote configuration changes use the exact preview and the existing stale-file checks and receipts.
+
+### Acceptance
+
+- [ ] Create from another Mac
+- [ ] Open remote-only workspace
+- [ ] Connect owner's harness
+- [ ] Check native MCP connection
+- [ ] Retry without duplicates
+- [ ] Handle offline or revoked access
+- [ ] Preview, apply and undo
+
+Use two real Macs and a disposable project. Keep the existing live agent sessions running during these checks.

@@ -93,6 +93,8 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 - [ ] Gemini and Cursor proof
 - [ ] ZCode worker
 - [ ] Antigravity worker
+- [ ] Remote project creation
+- [ ] Remote harness connections
 
 ## Next setup experience
 

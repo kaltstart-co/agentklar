@@ -54,3 +54,12 @@ One setup panel presents the same project and harness choices. Each harness row 
 Keep the existing React, Mantine and service. Use a small established terminal prompt library for keyboard selection; do not write another terminal renderer. CLI and GUI should reuse the guarded native setup logic. Keep concrete worker approvals in the trusted local UI; MCP gains no approval tool. Preserve existing explicit commands and noninteractive MCP/peer behavior.
 
 Acceptance: fresh setup, repeat setup, adding a harness, interrupted setup recovery, unknown tools/quotas and an optional second computer. Verify real native behavior separately from discovery and UI fixtures.
+
+## Planned setup on connected Macs
+
+These are pending product features, added on 3 October 2026.
+
+- **New project:** choose This Mac or a connected Mac, enter a name, choose a location on that Mac and review the destination. Create the folder and register the project on its owner. The resulting workspace opens in a project tab with its computer name; a local checkout is optional.
+- **Connect a harness:** choose a computer and project, then show the harnesses installed on that computer. Review the exact MCP configuration change and apply it through the trusted GUI. Show a checked connection state and the next action for any missing installation or sign-in.
+
+Use the selected Mac's installations, accounts, native scope rules and permissions. Remote project creation must work before a project mapping exists. Existing project pairing cannot be its prerequisite. See the [remote setup contract](MULTI_DEVICE_PLAN.md#planned-remote-project-and-harness-setup).
