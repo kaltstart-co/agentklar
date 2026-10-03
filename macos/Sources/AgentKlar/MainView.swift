@@ -162,28 +162,7 @@ struct MainView: View {
         ScrollView(.horizontal) {
             HStack(spacing: 4) {
                 ForEach(openProjectIDs, id: \.self) { id in
-                    let project = remoteProjects[id]?.project ?? client.projects.first { $0["id"].string == id } ?? .null
-                    HStack(spacing: 8) {
-                      Button { activate(id) } label: {
-                        HStack(spacing: 9) {
-                            NativeProjectAvatar(projectID: id, name: project["name"].string ?? "Project", store: pictures, size: 20)
-                            Text((project["name"].string ?? "Project") + (remoteProjects[id].map { " · " + ($0.connection["label"].string ?? "Remote Mac") } ?? "")).lineLimit(1)
-                                .truncationMode(.tail).frame(maxWidth: .infinity, alignment: .leading)
-                                .font(.system(size: 13, weight: activeProject == id ? .medium : .regular))
-                        }
-                      }.buttonStyle(.plain).help(project["name"].string ?? "Project")
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .accessibilityLabel("Project tab: " + (project["name"].string ?? "Project"))
-                        .accessibilityAddTraits(activeProject == id ? .isSelected : [])
-                      Button { closeProject(id) } label: { Image(systemName: "xmark").font(.system(size: 10)).foregroundStyle(.secondary) }
-                        .buttonStyle(.plain).accessibilityLabel("Close project: " + (project["name"].string ?? "Project"))
-                    }.padding(.horizontal, 12).frame(width: 196, height: 34)
-                        .background(activeProject == id ? Color.primary.opacity(0.06) : .clear, in: RoundedRectangle(cornerRadius: 7))
-                        .overlay(RoundedRectangle(cornerRadius: 7).stroke(activeProject == id ? Color.primary.opacity(0.08) : .clear))
-                        .contextMenu {
-                            Button("Change project picture…") { pictureProjectID = id; showingPicture = true }
-                            Button("Close project") { closeProject(id) }
-                        }
+                    projectTabRow(id)
                 }
             Button { showingProjects = true } label: {
                 Image(systemName: "plus").font(.system(size: 16)).frame(width: 28, height: 28)
@@ -191,6 +170,41 @@ struct MainView: View {
                 .disabled(!client.connected || client.busy)
             }.padding(.vertical, 6)
         }.scrollIndicators(.hidden).padding(.horizontal, 20).frame(height: 48).overlay(alignment: .bottom) { Divider() }
+    }
+    private func projectTabName(_ id: String) -> String {
+        let project = remoteProjects[id]?.project ?? client.projects.first { $0["id"].string == id } ?? .null
+        return project["name"].string ?? "Project"
+    }
+    private func projectTabTitle(_ id: String, name: String) -> String {
+        guard let remote = remoteProjects[id] else { return name }
+        return name + " · " + (remote.connection["label"].string ?? "Remote Mac")
+    }
+    private func projectTabLabel(_ id: String, name: String) -> some View {
+        HStack(spacing: 9) {
+            NativeProjectAvatar(projectID: id, name: name, store: pictures, size: 20)
+            Text(projectTabTitle(id, name: name)).lineLimit(1)
+                .truncationMode(.tail).frame(maxWidth: .infinity, alignment: .leading)
+                .font(.system(size: 13, weight: activeProject == id ? .medium : .regular))
+        }
+    }
+    private func projectTabRow(_ id: String) -> some View {
+        let name = projectTabName(id)
+        return HStack(spacing: 8) {
+            Button { activate(id) } label: { projectTabLabel(id, name: name) }
+                .buttonStyle(.plain).help(name)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityLabel("Project tab: " + name)
+                .accessibilityAddTraits(activeProject == id ? .isSelected : [])
+            Button { closeProject(id) } label: {
+                Image(systemName: "xmark").font(.system(size: 10)).foregroundStyle(.secondary)
+            }.buttonStyle(.plain).accessibilityLabel("Close project: " + name)
+        }.padding(.horizontal, 12).frame(width: 196, height: 34)
+            .background(activeProject == id ? Color.primary.opacity(0.06) : .clear, in: RoundedRectangle(cornerRadius: 7))
+            .overlay(RoundedRectangle(cornerRadius: 7).stroke(activeProject == id ? Color.primary.opacity(0.08) : .clear))
+            .contextMenu {
+                Button("Change project picture…") { pictureProjectID = id; showingPicture = true }
+                Button("Close project") { closeProject(id) }
+            }
     }
     private var matchingProjects: [JSON] {
         let query = projectSearch.trimmingCharacters(in: .whitespacesAndNewlines)
