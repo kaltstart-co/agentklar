@@ -1,6 +1,10 @@
 # Multi-device AgentKlar: first contract
 
-Accepted staged contract. The first workflow milestone is implemented and checked with isolated services and browser fixtures. Real two-computer setup remains unverified. Each device runs its own AgentKlar service and native workers. A user's main harness keeps its normal workflow and delegates to saved roles on either device through the same local MCP bridge.
+Accepted staged contract. The first workflow milestone has isolated fixtures and
+separate real SSH evidence recorded in [validation](VALIDATION.md). Beta.38 adds
+owner-folder project setup. Each device runs its own AgentKlar service and
+native workers. A user's main harness keeps its normal workflow and delegates
+to saved roles through its local MCP bridge.
 
 ## Transport and setup
 
@@ -42,11 +46,11 @@ Native approvals can be answered in the owner's trusted dashboard or through sep
 3. Test two isolated service homes with a fake transport and workers: local role and remote role run simultaneously; remote status/usage appear in coordinator; native approval remains pending until owner UI answers.
 4. Drop transport after owner acceptance but before acknowledgement. Reconnect using the same ID: exactly one worker exists. Test stale status, revoked grants, changed-input replay, wrong peer identity, unsupported version, owner restart and cancellation scope.
 5. Test identical Git base, missing commit, wrong mapping and dirty/untracked differences. Test patch digest/base mismatch, rejected unsupported files, clean application and conflicts without modifying the original checkout.
-6. Run TypeScript, tests, build and package smoke. A real MacBook/Mac mini SSH and native worker check is a later setup step. Two services on one machine cannot prove real network or setup behavior; this does not block the isolated milestone release.
+6. Run TypeScript, tests, build and package smoke. Record real MacBook/Mac mini SSH and native worker checks separately. Two services on one machine cannot prove real network or native setup behavior.
 
 First verified outcome: a native lead delegates one local task and one task to another service; each uses its own selected harness/model and checkout, both statuses are visible, a connection loss does not duplicate or stop work, and review stays with the owning checkout.
 
-Current package targets macOS/Linux with Node 24; background startup uses macOS launchd. Windows installation, worker lifecycle, SSH paths and background startup are unverified and excluded from the first supported slice. Real SSH and native inference remain unverified; this does not block development or isolated service tests here.
+Current package targets macOS/Linux with Node 24; background startup uses macOS launchd. Windows installation, worker lifecycle, SSH paths and background startup remain unverified. Exact real SSH and native execution checks are recorded in validation; they do not establish every supported harness or platform.
 
 
 ## Current implementation milestone
@@ -57,33 +61,61 @@ Implemented workflow: automatic candidates for explicit separate-worktree tasks 
 
 Full product target still requires:
 
-- Real two-device SSH lifecycle, permissions and native worker validation on supported platforms. Windows remains unverified.
+- Wider device, permission and harness acceptance. Windows remains unverified.
 
-## Planned remote project and harness setup
+## Remote project and harness setup — beta.38
 
-Added on 3 October 2026. Both features remain unfinished.
+Implemented in the local preview on 3 October 2026. Both services need the
+beta.38 setup protocol. The global CLI and normal Mac mini service remain
+beta.33; the real setup check used a separate temporary owner service.
 
 ### GUI flow
 
-1. Connect the Mac and verify its saved device identity.
-2. Choose **New project**, select that Mac, name the project and choose its remote parent folder. Review the full destination before creation. Register the new folder on that Mac and open it in a workspace tab labelled with its computer. A remote-only workspace must be usable without a local project folder.
-3. Choose **Connect a harness** for that computer and project. Discover the owner's installed harnesses and show their setup state.
-4. Review the exact native configuration file, scope and change. Apply the reviewed change, then check the MCP connection. Preserve each harness's native authentication and permission flow. Model access and tools need separate native verification.
+1. On the owner, share a parent folder with a specific source device ID. Import
+   its private setup code on the source Mac using an existing SSH host.
+2. Verify the owner identity and load its projects inside that folder. Choose
+   **New project**, enter names and review the owner destination. Creation saves
+   a stable project UUID on the owner.
+3. Open its computer-labeled project tab. No local project is registered or
+   mirrored. This tab currently shows owner information and harness setup.
+4. Choose an installed owner harness. Review its exact config file, scope and
+   MCP entry, then explicitly **Apply connection**. **Remove managed connection**
+   uses the existing guarded undo.
+5. Start a native session on the owner to check tool discovery. That session
+   check remains unverified for this new setup flow. Config status alone does
+   not prove native sign-in, model access or loaded tools.
 
 ### Implementation boundary
 
-Current peer grants require an existing project mapping and cannot create projects or modify native configuration. Add a separate, explicitly enabled device setup permission for trusted GUI actions. Keep project task grants scoped to their existing work. MCP and workers receive no setup permission. The owner service performs destination validation, project registration and harness-specific preview/apply/undo.
+Ordinary project grants still cannot create projects or change native config.
+The separate private setup grant permits trusted GUI actions inside one owner
+folder and is tied to the source device. It can be revoked. Human session and
+exact-origin checks protect setup actions; MCP and workers gain no setup
+permission. The owner validates its folder identity, performs registration and
+uses the existing harness preview/apply/undo logic. A User-scope MCP change may
+apply across the owner's projects; the preview shows that scope.
 
-Project creation uses a durable request ID. Retrying after a lost response returns the same created project. Refuse existing destinations, unsafe paths and changed owner identity. If registration fails after folder creation, record that state and offer a clear recovery action. Remote configuration changes use the exact preview and the existing stale-file checks and receipts.
+Project creation uses one durable request UUID. Retrying identical input after a
+lost reply returns the same project; changed input conflicts. Existing
+destinations, unsafe paths and changed owner/folder identities are rejected.
+Recorded creation progress supports retry after registration interruption.
+Remote config changes keep exact previews, stale-file checks and receipts.
 
 ### Acceptance
 
-- [ ] Create from another Mac
-- [ ] Open remote-only workspace
-- [ ] Connect owner's harness
-- [ ] Check native MCP connection
-- [ ] Retry without duplicates
-- [ ] Handle offline or revoked access
-- [ ] Preview, apply and undo
+- [x] Real SSH project creation
+- [x] Stable creation replay
+- [x] Owner-scoped project listing
+- [x] Remote-only tab implementation
+- [x] OpenCode preview/apply/undo
+- [x] Scope and revocation fixtures
+- [ ] Native remote tool discovery
+- [ ] Full remote GUI acceptance
 
-Use two real Macs and a disposable project. Keep the existing live agent sessions running during these checks.
+Real MacBook-to-mini evidence: `/tmp/agentklar-beta38-remote-proof.json`. An
+isolated owner created and registered one project; replay returned the same
+project. OpenCode preview/apply/status/undo preserved an unrelated sentinel and
+removed the managed entry after undo. No model inference, worker runs or
+approvals occurred. Temporary services and scratch files were cleaned up. This
+does not prove remote native session discovery, full GUI acceptance or signed
+distribution.

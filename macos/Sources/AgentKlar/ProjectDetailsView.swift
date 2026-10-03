@@ -41,96 +41,6 @@ struct ProjectDetailsView: View {
     }
 }
 
-private struct NativeContextEditor: View {
-    @ObservedObject var client: AgentKlarClient
-    @State private var revision: Int?
-    @State private var loadedProject = ""
-    @State private var brief = ""
-    @State private var memory = ""
-    @State private var handoff = ""
-    @State private var busy = false
-    @State private var message = ""
-    @State private var failed = false
-    @State private var reload = false
-    @State private var selectedDocument = "Brief"
-    @State private var showingHandoff = false
-    private var documentBinding: Binding<String> {
-        switch selectedDocument {
-        case "Memory": return $memory
-        case "Next steps": return $handoff
-        default: return $brief
-        }
-    }
-    var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            NativePageHeader(title: "Context", subtitle: "Shared notes for this project and its agents.") { contextActions }
-            if !message.isEmpty { Text(message).foregroundStyle(failed ? .red : .secondary).fixedSize(horizontal: false, vertical: true).textSelection(.enabled) }
-            NativePageTabs(selection: $selectedDocument, items: ["Brief", "Memory", "Next steps"])
-            TextEditor(text: documentBinding).font(NativeStyle.document).lineSpacing(4)
-                .scrollContentBackground(.hidden)
-                .padding(20).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-                .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: NativeStyle.cornerRadius))
-                .overlay(RoundedRectangle(cornerRadius: NativeStyle.cornerRadius).strokeBorder(.quaternary))
-                .overlay(alignment: .topLeading) {
-                    if documentBinding.wrappedValue.isEmpty {
-                        Text(documentPlaceholder).font(NativeStyle.document).lineSpacing(4).foregroundStyle(.tertiary)
-                            .padding(.horizontal, 25).padding(.vertical, 28)
-                            .allowsHitTesting(false).accessibilityHidden(true)
-                    }
-                }
-                .accessibilityLabel(selectedDocument)
-                .disabled(revision == nil || loadedProject != client.projectID)
-            HStack {
-                Text(revision.map { "Saved revision \($0)" } ?? "Loading context…")
-                Spacer()
-                Button("Switch main harness…") { showingHandoff = true }.buttonStyle(.plain).foregroundStyle(.tint)
-            }.font(NativeStyle.caption).foregroundStyle(.secondary)
-        }.font(NativeStyle.body).frame(maxWidth: NativeStyle.contentWidth, maxHeight: .infinity, alignment: .leading)
-            .padding(NativeStyle.pagePadding).frame(maxWidth: .infinity, maxHeight: .infinity).disabled(busy || !client.connected)
-        .sheet(isPresented: $showingHandoff) {
-            NativeDetailPage(title: "Switch main harness") { NativeProjectHandoffView(client: client) }
-        }
-        .confirmationDialog("Replace this draft with the latest saved context?", isPresented: $reload, titleVisibility: .visible) {
-            Button("Reload latest") { Task { await load() } }; Button("Cancel", role: .cancel) {}
-        }
-        .task(id: client.projectID) { await load() }
-    }
-    private var documentPlaceholder: String {
-        switch selectedDocument {
-        case "Memory": return "Keep useful decisions, lessons and project facts here."
-        case "Next steps": return "Write what to do next, open questions and anything the next agent should know."
-        default: return "Describe this project, its goal and what good work looks like."
-        }
-    }
-    @ViewBuilder private var contextActions: some View {
-        Button { reload = true } label: { Image(systemName: "arrow.clockwise") }
-            .buttonStyle(.plain).foregroundStyle(.secondary).help("Reload saved context…").accessibilityLabel("Reload saved context")
-        Button("Save context") { Task { await save() } }.buttonStyle(.borderedProminent).disabled(revision == nil || loadedProject != client.projectID)
-    }
-    private func load() async {
-        let id = client.projectID; guard !id.isEmpty else { return }
-        busy = true; message = ""; failed = false
-        if loadedProject != id { revision = nil }
-        do {
-            let value = try await client.request("/projects/\(id)/context")
-            guard client.projectID == id else { busy = false; return }
-            revision = value["revision"].number.map(Int.init); loadedProject = id
-            brief = value["brief"].string ?? ""; memory = value["memory"].string ?? ""; handoff = value["handoff"].string ?? ""
-        } catch { failed = true; message = error.localizedDescription }
-        busy = false
-    }
-    private func save() async {
-        guard !busy, let revision, loadedProject == client.projectID else { return }
-        busy = true; message = ""; failed = false
-        let id = loadedProject
-        do {
-            let value = try await client.request("/projects/\(id)/context", body: ["brief": brief, "memory": memory, "handoff": handoff, "expectedRevision": revision], method: "PUT")
-            if client.projectID == id { self.revision = value["revision"].number.map(Int.init); message = "Context saved." }
-        } catch { failed = true; message = "\(error.localizedDescription) Your draft is still here. Reload latest to replace it before retrying." }
-        busy = false
-    }
-}
-
 private struct NativeInstructionEditor: View {
     @ObservedObject var client: AgentKlarClient
     @State private var file = "agents"
@@ -317,10 +227,11 @@ struct NativeDetailButton<Content: View>: View {
 
 struct NativeDetailPage<Content: View>: View {
     let title: String
+    let height: CGFloat
     let content: Content
     @Environment(\.dismiss) private var dismiss
-    init(title: String, @ViewBuilder content: () -> Content) {
-        self.title = title; self.content = content()
+    init(title: String, height: CGFloat = 560, @ViewBuilder content: () -> Content) {
+        self.title = title; self.height = height; self.content = content()
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -328,6 +239,6 @@ struct NativeDetailPage<Content: View>: View {
             Divider()
             ScrollView { VStack(alignment: .leading, spacing: 12) { content }.frame(maxWidth: .infinity, alignment: .leading) }
         }.font(NativeStyle.body).foregroundStyle(.primary).controlSize(.regular)
-            .padding(NativeStyle.pagePadding).frame(width: 640, height: 560)
+            .padding(NativeStyle.pagePadding).frame(width: 640, height: height)
     }
 }

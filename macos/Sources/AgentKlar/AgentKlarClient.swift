@@ -83,7 +83,7 @@ private final class LocalSessionDelegate: NSObject, URLSessionTaskDelegate, @unc
         var request = URLRequest(url: try LocalBoundary.apiURL(path, origin: origin))
         request.httpMethod = method
         request.timeoutInterval = Self.requestTimeout(path)
-        if method != "GET" { request.setValue(origin.absoluteString, forHTTPHeaderField: "Origin") }
+        request.setValue(origin.absoluteString, forHTTPHeaderField: "Origin")
         if let body { request.setValue("application/json", forHTTPHeaderField: "Content-Type"); request.httpBody = try JSONSerialization.data(withJSONObject: body) }
         let writing = method != "GET"
         if writing {
@@ -212,7 +212,7 @@ private final class LocalSessionDelegate: NSObject, URLSessionTaskDelegate, @unc
         if parts.contains("skills") { return 135 }
         if parts.contains("plugins") || parts.contains("recommend") || path == "/tasks/start" { return 120 }
         if parts.contains("native-settings") { return 60 }
-        if parts.contains("changes") || parts.contains("remote-approvals") || parts.contains("peers") || parts.first == "runs" { return 60 }
+        if parts.contains("changes") || parts.contains("remote-approvals") || parts.contains("remote-settings") || parts.contains("peers") || parts.first == "runs" { return 60 }
         return parts.contains("setup") ? 35 : 20
     }
 }

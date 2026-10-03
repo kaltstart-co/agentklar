@@ -10,6 +10,7 @@ import { z } from "zod";
 import { startSchema, contextUpdateSchema } from "./service.ts";
 import { recommendationSchema } from "./recommend.ts";
 import { clientSourceHeader, mcpClientSource } from "./launch-source.ts";
+import { workReportSchema } from "./activity.ts";
 export function requestClientSource(envelope: Record<string, unknown> | undefined, legacyClient: () => unknown) {
   return mcpClientSource(envelope === undefined ? legacyClient() : envelope[CLIENT_INFO_META_KEY]);
 }
@@ -167,6 +168,18 @@ Read project context and existing runs; claim project_lead when coordinating and
     ({ projectId, limit, cursor, remoteLimit, remoteCursor }) =>
       call(`/api/projects/${projectId}/runs?limit=${limit}${cursor ? `&cursor=${cursor}` : ""}${remoteLimit ? `&remoteLimit=${remoteLimit}` : ""}${remoteCursor ? `&remoteCursor=${remoteCursor}` : ""}`),
   );
+  server.registerTool("work_report", {
+    description: "When the user asks to track work in AgentKlar, report the task you are doing in your current harness without delegating. Keep one activityId for the task; use a new reportId and the returned revision for each progress update. Retry a lost reply with the same exact report. Title, state, summary and result are harness-reported notes, not verified execution or usage. Never include credentials or full transcripts. This starts no worker and grants no approvals.",
+    inputSchema: workReportSchema,
+  }, (args, ctx: ServerContext) => {
+    const envelope = ctx.mcpReq.envelope as Record<string, unknown> | undefined;
+    const source = requestClientSource(envelope, () => server.server.getClientVersion());
+    return call("/api/work/report", "POST", args, clientSourceHeader(source));
+  });
+  server.registerTool("project_work_list", {
+    description: "Read the latest 100 harness-reported tasks for a project, including revisions for subsequent work_report updates. These are task notes; they do not prove a native session is still running. AgentKlar workers are listed separately by project_runs_list.",
+    inputSchema: z.object({ projectId: z.uuid() }).strict(),
+  }, ({projectId}) => call(`/api/projects/${projectId}/work`));
   server.registerTool(
     "project_lead",
     {
@@ -353,10 +366,12 @@ Read project context and existing runs; claim project_lead when coordinating and
     "project_context_read",
     {
       description:
-        "Read the latest manually saved brief, memory and handoff for a registered project. Revision 0 means no context has been saved.",
-      inputSchema: z.object({ projectId: z.uuid() }).strict(),
+        "Read saved project context. Revision 0 means none saved. For long documents select section brief, memory or handoff and follow nextOffset, keeping the same revision across pages; reread if it changes. This avoids truncated context. Full reads remain available for short context.",
+      inputSchema: z.object({ projectId: z.uuid(), section:z.enum(["brief","memory","handoff"]).optional(),
+        offset:z.number().int().min(0).max(32000).optional(),limit:z.number().int().min(1).max(12000).optional(),
+      }).strict().refine(v=>v.section!==undefined || (v.offset===undefined&&v.limit===undefined), "Paging needs a context section."),
     },
-    ({ projectId }) => call(`/api/projects/${projectId}/context`),
+    ({ projectId,section,offset,limit }) => call(`/api/projects/${projectId}/context${section ? `?section=${section}&offset=${offset??0}&limit=${limit??12000}` : ""}`),
   );
   server.registerTool(
     "project_context_update",

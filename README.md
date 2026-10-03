@@ -14,6 +14,22 @@ The Mac client is written in SwiftUI. It uses native sidebar navigation, menus, 
 
 The current Apple Silicon build is a development preview. Public signing and automatic app updates need an Apple Developer ID certificate. See [build and installation steps](docs/MACOS_APP.md), including the native features still being added. The terminal installer below remains available.
 
+Beta.38 is installed locally as a development preview. Its signed public release
+is pending. The global CLI and normal Mac mini service remain beta.33.
+
+### Try the beta.38 preview
+
+- In **Context → Memory**, search or edit one saved entry, then **Save context**.
+- In **Instructions → Skills and plugins**, view installed skills; **Add skill** opens a separate review sheet.
+- Tell a connected native harness: **“Track this task in AgentKlar; keep working here.”**
+- In **Settings → Devices → Remote project setup**, share a folder on its owner Mac, then connect from your other Mac.
+
+Reported native work is saved progress text. It does not start a worker or
+automatically monitor that harness. Remote setup has real SSH proof; loading
+AgentKlar tools inside a new remote native session still needs verification.
+Remote-only tabs currently offer **Connections** and **Manage Macs**. They do
+not yet show reported native notes in Work. See the [setup checklist](docs/ONBOARDING_PLAN.md#setup-on-connected-macs--beta38).
+
 On macOS or Linux (ARM64 or x64), run:
 
 ```sh
@@ -135,6 +151,25 @@ Open **Context** to save a project brief, decisions and lessons, and next steps.
 
 Each save creates a revision. If another harness saves first, the UI keeps your draft and shows a conflict. **Load latest (replaces draft)** loads that newer revision. New tasks use saved project context by default; turn off **Use project context** to skip it. Each task retains the exact context used at launch. Open its **Project context** disclosure to inspect that snapshot. Unsaved edits apply after you save them.
 
+In the beta.38 native app, **Memory** lists entries from `## Title` headings.
+Search titles and notes, select an entry, or use **Add memory**. Title changes,
+edits and deletions remain drafts until **Save context**. Existing text without
+these headings stays under **Existing notes**. **Edit full document** keeps the
+whole document available; AgentKlar does not convert old notes automatically.
+
+## Track work in your current harness
+
+Ask **“Track this task in AgentKlar; keep working here.”** The connected harness
+uses `work_report` for short progress and result notes while continuing its
+normal work. `project_work_list` finds the saved task and revision after a
+reconnect. It lists the latest 100 reports for the selected project.
+
+The native Work page separates **Reported by your harness** from **AgentKlar
+workers**. A reported `finished` state is the harness's claim. Reports do not
+prove that a session is running, checks passed, or usage was measured. They
+start no delegated worker and grant no approval. AgentKlar does not collect all
+native harness activity, transcripts or token counts.
+
 ## Native project instructions
 
 Open **Instructions** and choose **AGENTS.md** (shared by Codex, Muse and OpenCode) or **CLAUDE.md** (Claude Code; Muse and OpenCode fallback). AgentKlar shows the status and actual path of that file in the project root. Select **Load file**, edit the text, then **Preview changes** to read the before and after. **Apply change** writes that file. Files must fit within 32 KiB of UTF-8 text. Nothing is saved automatically.
@@ -155,9 +190,13 @@ Open **Settings → Advanced → Native defaults and plugin bundles**. Preview o
 
 ## Skills
 
-Open **Instructions → Skills**. Choose **This project** or **All projects on this computer**, then choose the shared `.agents/skills` or Claude `.claude/skills` folder. Personal skills can be managed even before adding a project. Codex uses `.agents/skills`; Claude Code uses `.claude/skills`; [OpenCode can read both](https://opencode.ai/docs/skills/) at project and personal scope unless native compatibility is disabled. [Muse can read both project folders](https://meta-models.github.io/muse-code-sdk/next/guides/extend/skills/); its personal loading is not verified here. Personal targets use the default `~/.agents/skills` or `~/.claude/skills` folder in your home directory; custom native profiles may use other folders. Enter a GitHub `owner/repo` (optionally `#ref`) and one exact skill name. **Preview skill** shows the target folder, source hash, full `SKILL.md` text, and every file and folder with sizes. **Install reviewed skill** copies those exact staged bytes into the chosen folder. Native trust, compatibility, and activation still decide whether a skill loads. Start a new native session to check.
+Open **Instructions → Skills and plugins**. Choose **This project** or **All projects on this computer**, then choose the shared `.agents/skills` or Claude `.claude/skills` folder. Personal skills can be managed even before adding a project. Codex uses `.agents/skills`; Claude Code uses `.claude/skills`; [OpenCode can read both](https://opencode.ai/docs/skills/) at project and personal scope unless native compatibility is disabled. [Muse can read both project folders](https://meta-models.github.io/muse-code-sdk/next/guides/extend/skills/); its personal loading is not verified here. Personal targets use the default `~/.agents/skills` or `~/.claude/skills` folder in your home directory; custom native profiles may use other folders. Enter a GitHub `owner/repo` (optionally `#ref`) and one exact skill name. **Preview skill** shows the target folder, source hash, full `SKILL.md` text, and every file and folder with sizes. **Install reviewed skill** copies those exact staged bytes into the chosen folder. Native trust, compatibility, and activation still decide whether a skill loads. Start a new native session to check.
 
-The optional **Use AgentKlar workflow** shortcut fills the source and name for the pinned [AgentKlar workflow skill](skills/agentklar-workflow/SKILL.md). It helps a connected harness check existing work, choose when to delegate, use saved cost preference, and review worker results. The shortcut only fills the form. You still choose the folder and scope, preview the full skill, and install it yourself. It does not change native sign-in, model choice, permissions, or project memory.
+The beta.38 native page starts with an installed overview and search. **Add
+skill** and **Add plugin** have separate sheets, so installing something does
+not replace the overview. Installed metadata still does not prove activation.
+
+The optional **Use AgentKlar workflow skill** shortcut fills `kaltstart-co/agentklar#main` and the [AgentKlar workflow skill](skills/agentklar-workflow/SKILL.md) name. It follows `main`; each preview shows the resolved commit and exact staged files before installation. It helps a connected harness report native work, choose when to delegate, use saved cost preference, and review worker results. The shortcut only fills the form. You still choose the folder and scope, preview the full skill, and install it yourself. It does not change native sign-in, model choice, permissions, or project memory.
 
 For a managed skill, choose **Preview upstream update**. AgentKlar stages the same saved repository, ref and skill name. Review the upstream text and file list alongside the current install, then choose **Apply reviewed update**. A matching tree shows **Already up to date** and makes no project write. A pinned ref stays pinned; updating does not select a newer tag.
 

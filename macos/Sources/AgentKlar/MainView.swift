@@ -10,6 +10,8 @@ struct MainView: View {
     @State private var openProjectIDs: [String] = []
     @State private var initializedTabs = false
     @AppStorage("AgentKlar.openProjectTabs") private var savedProjectTabs = ""
+    @State private var remoteProjects: [String: (connection: JSON, project: JSON)] = [:]
+    @State private var showingRemoteSetup = false
     @State private var choosingProject = false
     @State private var showingProjects = false
     @State private var projectSearch = ""
@@ -27,13 +29,21 @@ struct MainView: View {
             VStack(alignment: .leading, spacing: 0) {
                 Label("AgentKlar", systemImage: "square.stack.3d.up").font(.system(size: 14, weight: .semibold))
                     .padding(.horizontal, 20).padding(.top, 18).padding(.bottom, 20)
-                VStack(spacing: 4) {
-                    ForEach(sections.dropLast(), id: \.0) { item in
-                        sidebarLink(item)
-                    }
-                }.padding(.horizontal, 10)
-                Spacer()
-                sidebarLink(("Settings", "gearshape")).padding(.horizontal, 10)
+                if remoteProjects[activeProject] != nil {
+                    Label("Connections", systemImage: "link")
+                        .font(NativeStyle.body).foregroundStyle(.tint).padding(.horizontal, 20).padding(.vertical, 12)
+                    Button { showingRemoteSetup = true } label: {
+                        Label("Manage Macs", systemImage: "desktopcomputer")
+                            .frame(maxWidth: .infinity, alignment: .leading).padding(10).contentShape(Rectangle())
+                    }.buttonStyle(.plain).padding(.horizontal, 10)
+                    Spacer()
+                } else {
+                    VStack(spacing: 4) {
+                        ForEach(sections.dropLast(), id: \.0) { item in sidebarLink(item) }
+                    }.padding(.horizontal, 10)
+                    Spacer()
+                    sidebarLink(("Settings", "gearshape")).padding(.horizontal, 10)
+                }
                 Label(client.connected ? "Connected" : client.busy ? "Connecting…" : "Connection needed",
                       systemImage: client.connected ? "checkmark.circle" : "circle.dotted")
                     .font(NativeStyle.caption).foregroundStyle(.secondary).padding(18)
@@ -54,6 +64,14 @@ struct MainView: View {
                                     .allowsHitTesting(activeProject == id)
                                     .accessibilityElement(children: .contain)
                                     .accessibilityHidden(activeProject != id)
+                            }
+                        }
+                        ForEach(remoteProjects.keys.sorted(), id: \.self) { id in
+                            if let remote = remoteProjects[id] {
+                                NativeRemoteProjectView(client: client, connection: remote.connection, project: remote.project)
+                                    .frame(width: space.size.width, height: space.size.height, alignment: .topLeading)
+                                    .opacity(activeProject == id ? 1 : 0).disabled(activeProject != id)
+                                    .allowsHitTesting(activeProject == id).accessibilityHidden(activeProject != id)
                             }
                         }
                         if activeProject.isEmpty {
@@ -88,13 +106,20 @@ struct MainView: View {
         }
         .sheet(isPresented: $showingPicture) { pictureEditor }
         .sheet(isPresented: $showingProjects) { projectChooser }
+        .sheet(isPresented: $showingRemoteSetup) {
+            NativeDetailPage(title: "Connected Macs") {
+                NativeRemoteSetupView(client: client) { connection, project in
+                    openRemote(connection, project); showingRemoteSetup = false
+                }
+            }
+        }
         .onChange(of: client.hasLoadedWorkspace) { _, loaded in if loaded { initializeTabs() } }
         .onChange(of: projectIDs) { _, ids in
             pictures.load(ids)
             workspaces = workspaces.filter { ids.contains($0.key) }
-            openProjectIDs = openProjectIDs.filter { ids.contains($0) }
-            if initializedTabs { savedProjectTabs = openProjectIDs.joined(separator: ",") }
-            if initializedTabs && !ids.contains(activeProject) {
+            openProjectIDs = openProjectIDs.filter { ids.contains($0) || remoteProjects[$0] != nil }
+            if initializedTabs { savedProjectTabs = openProjectIDs.filter { remoteProjects[$0] == nil }.joined(separator: ",") }
+            if initializedTabs && !ids.contains(activeProject) && remoteProjects[activeProject] == nil {
                 if let next = openProjectIDs.last { activate(next, persist: false) } else { activeProject = "" }
             }
         }
@@ -133,12 +158,12 @@ struct MainView: View {
         ScrollView(.horizontal) {
             HStack(spacing: 4) {
                 ForEach(openProjectIDs, id: \.self) { id in
-                    let project = client.projects.first { $0["id"].string == id } ?? .null
+                    let project = remoteProjects[id]?.project ?? client.projects.first { $0["id"].string == id } ?? .null
                     HStack(spacing: 8) {
                       Button { activate(id) } label: {
                         HStack(spacing: 9) {
                             NativeProjectAvatar(projectID: id, name: project["name"].string ?? "Project", store: pictures, size: 20)
-                            Text(project["name"].string ?? "Project").lineLimit(1)
+                            Text((project["name"].string ?? "Project") + (remoteProjects[id].map { " · " + ($0.connection["label"].string ?? "Remote Mac") } ?? "")).lineLimit(1)
                                 .truncationMode(.tail).frame(maxWidth: .infinity, alignment: .leading)
                                 .font(.system(size: 13, weight: activeProject == id ? .medium : .regular))
                         }
@@ -196,9 +221,14 @@ struct MainView: View {
                 }.frame(maxWidth: .infinity, alignment: .leading).padding(4)
             }.frame(maxWidth: .infinity, maxHeight: .infinity)
             Divider()
-            Button("Add project folder…", systemImage: "folder.badge.plus") {
-                showingProjects = false; choosingProject = true
-            }.buttonStyle(.bordered)
+            HStack {
+                Button("Add project folder…", systemImage: "folder.badge.plus") {
+                    showingProjects = false; choosingProject = true
+                }.buttonStyle(.bordered)
+                Button("Projects on another Mac…", systemImage: "desktopcomputer") {
+                    showingProjects = false; showingRemoteSetup = true
+                }.buttonStyle(.bordered)
+            }
         }
         .font(NativeStyle.body).controlSize(.regular).padding(NativeStyle.pagePadding)
         .frame(minWidth: 480, idealWidth: 600, minHeight: 400, idealHeight: 500)
@@ -237,16 +267,24 @@ struct MainView: View {
             }
         }
     }
+    private func openRemote(_ connection: JSON, _ project: JSON) {
+        guard let connectionID = connection["id"].string, let projectID = project["id"].string else { return }
+        let id = "remote:" + connectionID + ":" + projectID
+        remoteProjects[id] = (connection, project)
+        if !openProjectIDs.contains(id) { openProjectIDs.append(id) }
+        activeProject = id
+    }
     private func activate(_ id: String, persist: Bool = true) {
+        if remoteProjects[id] != nil { activeProject = id; return }
         guard !id.isEmpty, projectIDs.contains(id) else { activeProject = ""; return }
         if workspaces[id] == nil { workspaces[id] = client.workspace(for: id) }
-        if !openProjectIDs.contains(id) { openProjectIDs.append(id); savedProjectTabs = openProjectIDs.joined(separator: ",") }
+        if !openProjectIDs.contains(id) { openProjectIDs.append(id); savedProjectTabs = openProjectIDs.filter { remoteProjects[$0] == nil }.joined(separator: ",") }
         activeProject = id
         if persist && client.connected && client.projectID != id { Task { await client.selectProject(id) } }
     }
     private func closeProject(_ id: String) {
         openProjectIDs.removeAll { $0 == id }
-        savedProjectTabs = openProjectIDs.joined(separator: ",")
+        savedProjectTabs = openProjectIDs.filter { remoteProjects[$0] == nil }.joined(separator: ",")
         if activeProject == id {
             if let next = openProjectIDs.last { activate(next) } else { activeProject = "" }
         }

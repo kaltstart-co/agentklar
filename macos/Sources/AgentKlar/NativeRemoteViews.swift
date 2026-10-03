@@ -21,6 +21,7 @@ struct NativeDevicesView: View {
     @State private var humanExport = ""
     @State private var generation = 0
     @State private var connecting = false
+    @State private var remoteSetup = false
     private var peers: [JSON] { settings["peers"].array ?? [] }
     private var projects: [JSON] { settings["projects"].array ?? [] }
 
@@ -49,12 +50,14 @@ struct NativeDevicesView: View {
                     }
                 }
                 HStack(spacing: 20) {
+                    Button("Remote project setup") { remoteSetup = true }
                     NativeDetailButton("Share a project") { shareForm }
                     NativeDetailButton("Approval sharing") { approvalForm }
                 }.buttonStyle(.plain).foregroundStyle(.tint)
                 operationFeedback
             }.frame(maxWidth: .infinity, alignment: .leading)
         }.font(NativeStyle.body).controlSize(.regular).disabled(working || !client.connected)
+        .sheet(isPresented: $remoteSetup) { NativeDetailPage(title: "Remote project setup") { NativeRemoteSetupView(client: client) } }
         .sheet(isPresented: $connecting) {
             NativeDetailPage(title: "Connect a computer") { connectForm }
         }

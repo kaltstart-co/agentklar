@@ -47,6 +47,8 @@ import { recommendationSchema, recommendWorker, recommendWorkers, type Recommend
 import { toolCapabilities } from "./capabilities.ts";
 import { ZCodeWorker } from "./zcode.ts";
 import { Instructions, InstructionError, instructionFileSchema, instructionPreviewSchema } from "./instructions.ts";
+import { RemoteSetup } from "./remote-setup.ts";
+import { Activities, ActivityError, workReportSchema } from "./activity.ts";
 import { NativeSetup, SetupError, type NativeSetupOptions } from "./setup.ts";
 import { Onboarding, onboardingPreferencesInput, onboardingProjectInput, onboardingSetupInput, setupHarness } from "./onboarding.ts";
 import { ProjectSkills, SkillError, skillPreviewInput, skillIdInput, skillRemoveInput } from "./skills.ts";
@@ -96,9 +98,9 @@ function projectRun(r: Run): ProjectRun {
 }
 export const contextUpdateSchema = z
   .object({
-    brief: z.string().max(2000),
-    memory: z.string().max(4000),
-    handoff: z.string().max(2000),
+    brief: z.string().max(8000),
+    memory: z.string().max(32000),
+    handoff: z.string().max(8000),
     expectedRevision: z
       .number()
       .int()
@@ -210,6 +212,7 @@ export function createService(
     throw e;
   }
   store.db.exec("CREATE TABLE IF NOT EXISTS benchmark_cache (id INTEGER PRIMARY KEY CHECK(id=1), snapshot TEXT NOT NULL)");
+  const activities = new Activities(store);
   let cachedBenchmarks: unknown;
   try {
     const row = store.db.prepare("SELECT snapshot FROM benchmark_cache WHERE id=1").get() as { snapshot: string } | undefined;
@@ -315,6 +318,7 @@ export function createService(
   const personalSkills: Project = { id: "__personal_skills__", name: "Personal skills", path: personalHome, preference: "balanced", roles: [], createdAt: "" };
   const nativeSetup = new NativeSetup(store.db, home, port, { codex: nativeCommand, claude: claudeCommand, muse: museCommand, opencode: opencodeCommand, antigravity: executable("agy") }, setupOptions);
   const onboarding = new Onboarding(store.db);
+  const remoteSetup = new RemoteSetup(store, devices.device, nativeSetup, selectedHarnesses, peerTransport, nativeOperation);
   function registerProject(input: z.infer<typeof onboardingProjectInput>) {
     let path: string;
     try {
@@ -491,7 +495,7 @@ export function createService(
     !!a &&
     Buffer.byteLength(a) === Buffer.byteLength(b) &&
     timingSafeEqual(Buffer.from(a), Buffer.from(b));
-  app.onError((e, c) => c.json({ error: e.message }, e instanceof ControlError || e instanceof ApprovalError || e instanceof PeerError || e instanceof ChangeError || e instanceof RoutingPresetError ? e.status as 400 : e instanceof InstructionError || e instanceof SetupError || e instanceof SkillError || e instanceof NativeChangeError ? e.status : 500));
+  app.onError((e, c) => c.json({ error: e.message }, e instanceof ActivityError || e instanceof ControlError || e instanceof ApprovalError || e instanceof PeerError || e instanceof ChangeError || e instanceof RoutingPresetError ? e.status as 400 : e instanceof InstructionError || e instanceof SetupError || e instanceof SkillError || e instanceof NativeChangeError ? e.status : 500));
   app.use("*", async (c, next) => {
     const host = c.req.header("host") || new URL(c.req.url).host;
     if (![`127.0.0.1:${port}`, "127.0.0.1:5173"].includes(host))
@@ -526,6 +530,9 @@ export function createService(
         { error: operator ? "Run agentklar service open to open the local UI." : "Open the one-time setup URL printed by the local service." },
         401,
       );
+    if (c.req.path.startsWith("/api/remote-settings") && (!ui || !!c.req.header("authorization") || !origin || !origins.has(origin)))
+      return c.json({error:"Only the trusted local UI with its exact Origin may manage remote setup."},403);
+    if (c.req.path === "/api/peer-setup" && !mcp) return c.json({error:"Owner bridge authentication required."},403);
     if (c.req.path === "/api/onboarding" && (!ui || c.req.header("authorization") !== undefined || (c.req.method !== "GET" && (!origin || !origins.has(origin)))))
       return c.json({ error: "Only the trusted local UI may read or save onboarding preferences" }, 403);
     if (/^\/api\/projects\/[^/]+\/control(?:\/recover)?$/.test(c.req.path) && c.req.method !== "GET" && (!ui || !!c.req.header("authorization") || !origin || !origins.has(origin)))
@@ -1179,9 +1186,18 @@ export function createService(
   });
   app.get("/api/projects/:id/context", (c) => {
     const id = c.req.param("id");
-    return store.projects().some((p) => p.id === id)
-      ? c.json(store.context(id))
-      : c.json({ error: "Project not found" }, 404);
+    if (!store.projects().some(p => p.id === id)) return c.json({ error: "Project not found" }, 404);
+    const context = store.context(id);
+    if (Object.keys(c.req.query()).length === 0) return c.json(context);
+    const page = z.object({ section:z.enum(["brief","memory","handoff"]),
+      offset:z.coerce.number().int().min(0).max(32000).default(0),
+      limit:z.coerce.number().int().min(1).max(12000).default(12000),
+    }).strict().safeParse(c.req.query());
+    if (!page.success) return c.json({error:"Choose a context section and valid page bounds."},400);
+    const {section,offset,limit} = page.data, text = context[section];
+    const next = Math.min(text.length, offset + limit);
+    return c.json({projectId:id,revision:context.revision,section,offset,
+      text:text.slice(offset,next),nextOffset:next < text.length ? next : null,updatedAt:context.updatedAt});
   });
   app.put("/api/projects/:id/context", async (c) => {
     const id = c.req.param("id");
@@ -1235,6 +1251,7 @@ export function createService(
     return c.json({
       projects: store.projects(),
       runs: store.runs().map(compactRun),
+      activities: activities.list(),
       approvals: store.approvals(),
       device: devices.device,
       peers: peers.settings().peers,
@@ -1246,6 +1263,19 @@ export function createService(
         return lead ? [[p.id, publicLead(lead)]] : [];
       })),
     });
+  });
+  app.get("/api/projects/:id/work", c => {
+    const id = c.req.param("id");
+    if (!store.projects().some(p => p.id === id)) return c.json({ error: "Project not found." }, 404);
+    c.header("Cache-Control", "no-store");
+    return c.json({ activities: activities.list(id) });
+  });
+  app.post("/api/work/report", async c => {
+    if (c.req.header("authorization") !== `Bearer ${bearer}`)
+      return c.json({ error: "Only a connected harness may report its current work." }, 403);
+    const parsed = workReportSchema.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: "Provide a project, task ID, report ID, revision and compact progress report." }, 400);
+    return c.json(activities.report(parsed.data, sourceFromHeader(c.req.header("x-agentklar-mcp-client"))));
   });
   app.post("/api/projects", async (c) => {
     const parsed = onboardingProjectInput.safeParse(await c.req.json().catch(() => null));
@@ -1806,6 +1836,11 @@ export function createService(
     const receipt = approvalActions.local(c.req.param("id"),data?.decision);
     return c.json({ ok:true,receipt });
   });
+  app.get("/api/remote-settings", c => {c.header("Cache-Control","no-store"); return c.json(remoteSetup.settings());});
+  for (const [operation, handler] of [["grant", (v:unknown)=>remoteSetup.grant(v)], ["save",(v:unknown)=>remoteSetup.saveConnection(v)], ["revoke",(v:unknown)=>remoteSetup.revoke(v)], ["remove",(v:unknown)=>remoteSetup.remove(v)]] as const)
+    app.post(`/api/remote-settings/${operation}`, async c => {try {c.header("Cache-Control","no-store");return c.json(handler(await c.req.json().catch(()=>null)));}catch(error){if(error instanceof z.ZodError)return c.json({error:"Invalid remote setup settings."},400);throw error;}});
+  app.post("/api/remote-settings/:id/call",async c=>{try {c.header("Cache-Control","no-store");return c.json(await remoteSetup.call(c.req.param("id"),await c.req.json().catch(()=>null)));}catch(error){if(error instanceof z.ZodError)return c.json({error:"Invalid remote setup operation."},400);throw error;}});
+  app.post("/api/peer-setup",async c=>{try {c.header("Cache-Control","no-store");const reply=await remoteSetup.owner(await c.req.json().catch(()=>null));return c.json(reply.body,reply.status as 200);}catch(error){if(error instanceof z.ZodError)return c.json({error:"Invalid owner setup request."},400);throw error;}});
   app.get("/api/peers/settings/human", c => c.json(peers.humanSettings()));
   for (const [operation, handler] of [["grant", (v: unknown) => peers.humanGrant(v)], ["save", (v: unknown) => peers.humanSave(v)], ["revoke", (v: unknown) => peers.humanRevoke(v)], ["remove", (v: unknown) => peers.humanRemove(v)]] as const)
     app.post(`/api/peers/settings/human/${operation}`, async c => {

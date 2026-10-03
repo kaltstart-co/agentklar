@@ -2,6 +2,10 @@ import SwiftUI
 
 struct NativeExtensionsView: View {
     @ObservedObject var client: AgentKlarClient
+    @State private var scopeGeneration = UUID()
+    @State private var showingSkill = false
+    @State private var showingPlugin = false
+    @State private var search = ""
     @State private var skillScope = "project"
     @State private var harness = "codex"
     @State private var source = ""
@@ -23,6 +27,12 @@ struct NativeExtensionsView: View {
     private var skillBase: String { skillScope == "personal" ? "/skills" : projectBase + "/skills" }
     private var skillAvailable: Bool { skillScope == "personal" || !client.projectID.isEmpty }
 
+    private var visibleSkills: [JSON] {
+        skills.filter { row in
+            row["harness"].string == harness || row["harness"].string == nil
+        }.filter { search.isEmpty || ($0["name"].string ?? "").localizedCaseInsensitiveContains(search) }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             skillsSection
@@ -36,6 +46,12 @@ struct NativeExtensionsView: View {
         }
         .font(NativeStyle.body).controlSize(.regular).frame(maxWidth: .infinity, alignment: .leading)
         .disabled(working || client.busy || !client.connected)
+        .sheet(isPresented: $showingSkill) {
+            NativeDetailPage(title: skillPreview["updateInstallId"].string == nil ? "Add skill" : "Update skill", height: skillPreview["id"].string == nil ? 380 : 560) { skillForm }
+        }
+        .sheet(isPresented: $showingPlugin) {
+            NativeDetailPage(title: "Add workflow plugin", height: pluginPreview["id"].string == nil ? 280 : 480) { pluginForm }
+        }
         .onChange(of: source) { _, _ in skillPreview = .null }
         .onChange(of: skillName) { _, _ in skillPreview = .null }
         .confirmationDialog("Remove this unchanged managed skill?", isPresented: $confirmsRemoval, titleVisibility: .visible) {
@@ -45,23 +61,26 @@ struct NativeExtensionsView: View {
             Button("Cancel", role: .cancel) { pendingRemoval = .null }
         } message: { Text("\(pendingRemoval["name"].string ?? "Skill")\n\(pendingRemoval["path"].string ?? "")\nRemoval is allowed only while the managed files remain unchanged.") }
         .task(id: scope) {
-            let captured = scope
+            scopeGeneration = UUID()
+            let captured = scope, generation = scopeGeneration
             if draftOwner != owner {
                 draftOwner = owner
                 source = ""; skillName = ""
             }
             skills = []; plugins = .null; inventory = .null; skillPreview = .null; pluginPreview = .null
-            pendingRemoval = .null; confirmsRemoval = false; failure = ""; notice = ""
+            pendingRemoval = .null; confirmsRemoval = false; showingSkill = false; showingPlugin = false; search = ""; failure = ""; notice = ""
             while working { do { try await Task.sleep(for: .milliseconds(50)) } catch { return } }
-            if !Task.isCancelled, captured == scope, client.connected { await refresh() }
+            if !Task.isCancelled, captured == scope, generation == scopeGeneration, client.connected { await refresh() }
         }
     }
 
     private var skillsSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("Skills").font(NativeStyle.heading)
+                Text("Installed skills").font(NativeStyle.heading)
                 Spacer()
+                Button("Add skill", systemImage: "plus") { skillPreview = .null; showingSkill = true }
+                    .buttonStyle(.borderedProminent).disabled(!skillAvailable)
                 Button("Refresh", systemImage: "arrow.clockwise") { Task { await refresh() } }
                     .accessibilityLabel("Refresh skills and plugin status")
             }
@@ -70,25 +89,14 @@ struct NativeExtensionsView: View {
                     Text("Project").tag("project")
                     Text("Personal").tag("personal")
                 }.pickerStyle(.menu)
-                Picker("Folder", selection: $harness) { Text("Codex / shared").tag("codex"); Text("Claude Code").tag("claude") }
+                Picker("App", selection: $harness) { Text("Codex / shared").tag("codex"); Text("Claude Code").tag("claude") }
                     .pickerStyle(.menu).accessibilityLabel("Native skill folder")
             }
             Text(skillScope == "project" ? "For this project. Your native harness decides what loads." : "For your native home. Other profiles may use different folders.")
                 .font(NativeStyle.caption).foregroundStyle(.secondary)
             if !skillAvailable { Text("Choose a project, or use Personal scope.") }
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    TextField("GitHub source", text: $source, prompt: Text("owner/repo#ref")).textFieldStyle(.roundedBorder)
-                    TextField("Exact skill name", text: $skillName, prompt: Text("lowercase-skill-name")).textFieldStyle(.roundedBorder)
-                }
-                HStack {
-                    Button("AgentKlar workflow") { source = "kaltstart-co/agentklar#v0.1.0-beta.26"; skillName = "agentklar-workflow" }
-                        .buttonStyle(.plain).foregroundStyle(.tint).accessibilityLabel("Use AgentKlar workflow skill")
-                    Button("Preview skill") { Task { await skillAction("preview", body: ["harness": harness, "source": source.trimmingCharacters(in: .whitespacesAndNewlines), "name": skillName.trimmingCharacters(in: .whitespacesAndNewlines)]) } }.disabled(source.isEmpty || skillName.isEmpty)
-                }
-            }.disabled(!skillAvailable)
-            if skillPreview["id"].string != nil { skillReview }
-            ForEach(skills, id: \.self) { row in
+            NativeSearchField(placeholder: "Search installed skills", text: $search)
+            ForEach(visibleSkills, id: \.self) { row in
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(alignment: .firstTextBaseline) {
                         Text(row["name"].string ?? "Skill").font(NativeStyle.heading)
@@ -114,8 +122,39 @@ struct NativeExtensionsView: View {
                 }.padding(.vertical, 6)
                 Divider()
             }
-            if skills.isEmpty { Text("No skills loaded.").font(NativeStyle.caption).foregroundStyle(.secondary) }
+            if visibleSkills.isEmpty { Text(search.isEmpty ? "No skills found in this scope and app. Add a skill to get started." : "No skills match your search.").font(NativeStyle.caption).foregroundStyle(.secondary) }
         }
+    }
+
+    private var skillForm: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("\(skillScope == "personal" ? "Personal" : "This project") · \(harness == "claude" ? "Claude Code" : "Codex / shared")")
+                .font(NativeStyle.caption).foregroundStyle(.secondary)
+            if skillPreview["updateInstallId"].string == nil {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("GitHub source").font(NativeStyle.heading)
+                    TextField("owner/repo#ref", text: $source).textFieldStyle(.roundedBorder)
+                    Text("Repository and version, for example owner/repo#v1.0.").font(NativeStyle.caption).foregroundStyle(.secondary)
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Skill name").font(NativeStyle.heading)
+                    TextField("lowercase-skill-name", text: $skillName).textFieldStyle(.roundedBorder)
+                }
+                Button("Use AgentKlar workflow skill") { source = "kaltstart-co/agentklar#main"; skillName = "agentklar-workflow" }
+                    .buttonStyle(.plain).foregroundStyle(.tint)
+                Button("Preview skill") {
+                    Task { await skillAction("preview", body: ["harness": harness, "source": source.trimmingCharacters(in: .whitespacesAndNewlines), "name": skillName.trimmingCharacters(in: .whitespacesAndNewlines)]) }
+                }.disabled(source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || skillName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+            if skillPreview["id"].string != nil { skillReview }
+            actionStatus
+        }.disabled(working || client.busy || !client.connected || !skillAvailable)
+    }
+
+    @ViewBuilder private var actionStatus: some View {
+        if working { ProgressView("Working…").controlSize(.small) }
+        if !notice.isEmpty { Text(notice).foregroundStyle(.secondary) }
+        if !failure.isEmpty { Label(failure, systemImage: "exclamationmark.triangle").foregroundStyle(.red).textSelection(.enabled) }
     }
 
     private var skillReview: some View {
@@ -147,7 +186,12 @@ struct NativeExtensionsView: View {
 
     private var pluginsSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Workflow plugin").font(NativeStyle.heading)
+            HStack {
+                Text("Workflow plugin").font(NativeStyle.heading)
+                Spacer()
+                Button("Add plugin", systemImage: "plus") { pluginPreview = .null; showingPlugin = true }
+                    .disabled(client.projectID.isEmpty || plugins["available"].bool != true)
+            }
             Text("Claude Code · This project · Reload plugins or start a new session after installing.")
                 .font(NativeStyle.caption).foregroundStyle(.secondary)
             if client.projectID.isEmpty { Text("Choose a project to manage its plugin.") }
@@ -155,8 +199,12 @@ struct NativeExtensionsView: View {
                 Label("Plugin commands unavailable", systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
                 if let message = plugins["message"].string { Text(message).font(NativeStyle.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
             }
+            if plugins == .null, !client.projectID.isEmpty {
+                Text("Plugin status unknown. Refresh to check.").font(NativeStyle.caption).foregroundStyle(.secondary)
+            } else if plugins["available"].bool == true, (plugins["changes"].array ?? []).filter({ $0["state"].string != "undone" }).isEmpty {
+                Text("No managed workflow plugin installed.").font(NativeStyle.caption).foregroundStyle(.secondary)
+            }
             HStack {
-                Button("Preview plugin") { Task { await pluginAction("preview") } }.disabled(client.projectID.isEmpty || plugins["available"].bool != true)
                 if plugins != .null {
                     NativeDetailButton("Plugin details") {
                         Text("A versioned native Claude plugin with the AgentKlar workflow skill. Individual skills stay separate.")
@@ -164,17 +212,6 @@ struct NativeExtensionsView: View {
                         code(plugins)
                     }.buttonStyle(.plain).foregroundStyle(.tint)
                 }
-            }
-            if pluginPreview["id"].string != nil {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("\(pluginPreview["name"].string ?? "Plugin") · \(pluginPreview["version"].string ?? "Unknown version")").font(NativeStyle.heading)
-                    Text(pluginPreview["scope"].string ?? "Unknown scope").font(NativeStyle.caption).foregroundStyle(.secondary)
-                    let counts = pluginPreview["capabilities"]
-                    Text("\((counts["skills"].array ?? []).count) skills · \(Int(counts["agents"].number ?? 0)) agents · \(Int(counts["hooks"].number ?? 0)) hooks · \(Int(counts["mcpServers"].number ?? 0)) MCP servers")
-                    Text("Native permissions still apply.").font(NativeStyle.caption).foregroundStyle(.secondary)
-                    NativeDetailButton("Review plugin") { code(pluginPreview) }.buttonStyle(.plain).foregroundStyle(.tint)
-                    Button("Install reviewed native plugin") { Task { await pluginAction("apply") } }.buttonStyle(.borderedProminent)
-                }.padding(10).background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
             }
             ForEach((plugins["changes"].array ?? []).filter { $0["state"].string != "undone" }, id: \.self) { receipt in
                 VStack(alignment: .leading, spacing: 6) {
@@ -201,6 +238,28 @@ struct NativeExtensionsView: View {
                 Divider()
             }
         }
+    }
+
+    private var pluginForm: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("AgentKlar workflow").font(NativeStyle.heading)
+            Text("Claude Code · This project").font(NativeStyle.caption).foregroundStyle(.secondary)
+            Text("Adds the versioned AgentKlar workflow plugin. Preview its components before installing.")
+            Button("Preview plugin") { Task { await pluginAction("preview") } }
+                .disabled(client.projectID.isEmpty || plugins["available"].bool != true)
+            if pluginPreview["id"].string != nil {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("\(pluginPreview["name"].string ?? "Plugin") · \(pluginPreview["version"].string ?? "Unknown version")").font(NativeStyle.heading)
+                    Text(pluginPreview["scope"].string ?? "Unknown scope").font(NativeStyle.caption).foregroundStyle(.secondary)
+                    let counts = pluginPreview["capabilities"]
+                    Text("\((counts["skills"].array ?? []).count) skills · \(Int(counts["agents"].number ?? 0)) agents · \(Int(counts["hooks"].number ?? 0)) hooks · \(Int(counts["mcpServers"].number ?? 0)) MCP servers")
+                    Text("Native permissions still apply.").font(NativeStyle.caption).foregroundStyle(.secondary)
+                    NativeDetailButton("Review plugin") { code(pluginPreview) }.buttonStyle(.plain).foregroundStyle(.tint)
+                    Button("Install reviewed native plugin") { Task { await pluginAction("apply") } }.buttonStyle(.borderedProminent)
+                }.padding(10).background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+            }
+            actionStatus
+        }.disabled(working || client.busy || !client.connected)
     }
 
     private var inventorySection: some View {
@@ -231,37 +290,40 @@ struct NativeExtensionsView: View {
     private func code(_ value: JSON) -> some View { Text(value.prettyText).font(.system(size: 12, design: .monospaced)).textSelection(.enabled) }
     private func refresh() async {
         guard !working, client.connected else { return }
+        let generation = scopeGeneration
         let captured = scope, skillsPath = skillBase, projectPath = projectBase, hasProject = !client.projectID.isEmpty, hasSkills = skillAvailable
         working = true; failure = ""; skillPreview = .null; pluginPreview = .null
         defer { working = false }
         if hasSkills {
-            do { let next = try await client.request(skillsPath); if captured == scope, client.connected { skills = next["skills"].array ?? [] } }
-            catch { if captured == scope, client.connected { skills = []; failure = error.localizedDescription } }
+            do { let next = try await client.request(skillsPath); if captured == scope, generation == scopeGeneration, client.connected { skills = next["skills"].array ?? [] } }
+            catch { if captured == scope, generation == scopeGeneration, client.connected { skills = []; failure = error.localizedDescription } }
         }
-        if hasProject, captured == scope, client.connected, !Task.isCancelled {
-            do { let next = try await client.request(projectPath + "/plugins"); if captured == scope, client.connected { plugins = next } }
-            catch { if captured == scope, client.connected { plugins = .null; failure = error.localizedDescription } }
+        if hasProject, captured == scope, generation == scopeGeneration, client.connected, !Task.isCancelled {
+            do { let next = try await client.request(projectPath + "/plugins"); if captured == scope, generation == scopeGeneration, client.connected { plugins = next } }
+            catch { if captured == scope, generation == scopeGeneration, client.connected { plugins = .null; failure = error.localizedDescription } }
         }
     }
     private func skillAction(_ operation: String, body: [String: Any]) async {
         guard !working, !client.busy, client.connected, skillAvailable else { return }
+        let generation = scopeGeneration
         let captured = scope, path = skillBase
         working = true; failure = ""; notice = ""
         defer { working = false }
         do {
             let next = try await client.request(path + "/" + operation, body: body)
-            if captured == scope, client.connected {
-                if operation == "preview" || operation == "preview-update" { skillPreview = next }
+            if captured == scope, generation == scopeGeneration, client.connected {
+                if operation == "preview" || operation == "preview-update" { skillPreview = next; showingSkill = true }
                 else { skillPreview = .null; pendingRemoval = .null; notice = next["unchanged"].bool == true ? "Already up to date." : "Managed skill changed. Start a new native session to load the change." }
             }
-        } catch { if captured == scope, client.connected { failure = error.localizedDescription; skillPreview = .null } }
-        if !operation.hasPrefix("preview"), captured == scope, client.connected {
-            do { let next = try await client.request(path); if captured == scope, client.connected { skills = next["skills"].array ?? [] } }
-            catch { if captured == scope, client.connected { skills = []; failure = error.localizedDescription } }
+        } catch { if captured == scope, generation == scopeGeneration, client.connected { failure = error.localizedDescription; skillPreview = .null } }
+        if !operation.hasPrefix("preview"), captured == scope, generation == scopeGeneration, client.connected {
+            do { let next = try await client.request(path); if captured == scope, generation == scopeGeneration, client.connected { skills = next["skills"].array ?? [] } }
+            catch { if captured == scope, generation == scopeGeneration, client.connected { skills = []; failure = error.localizedDescription } }
         }
     }
     private func pluginAction(_ operation: String, changeID: String? = nil) async {
         guard !working, !client.busy, client.connected, !client.projectID.isEmpty else { return }
+        let generation = scopeGeneration
         let captured = scope, path = projectBase + "/plugins"
         var body: [String: Any] = [:]
         if operation == "apply" { guard let id = pluginPreview["id"].string else { return }; body = ["previewId": id] }
@@ -270,23 +332,24 @@ struct NativeExtensionsView: View {
         defer { working = false }
         do {
             let next = try await client.request(path + "/" + operation, body: body)
-            if captured == scope, client.connected {
+            if captured == scope, generation == scopeGeneration, client.connected {
                 if operation == "preview" { pluginPreview = next }
                 else { pluginPreview = .null; notice = "Managed plugin changed. Reload native plugins or start a new native session." }
             }
-        } catch { if captured == scope, client.connected { failure = error.localizedDescription; pluginPreview = .null } }
+        } catch { if captured == scope, generation == scopeGeneration, client.connected { failure = error.localizedDescription; pluginPreview = .null } }
         // A failed native command may still leave an owned, retryable cleanup receipt.
-        if operation != "preview", captured == scope, client.connected {
-            do { let next = try await client.request(path); if captured == scope, client.connected { plugins = next } }
-            catch { if captured == scope, client.connected { plugins = .null; failure = error.localizedDescription } }
+        if operation != "preview", captured == scope, generation == scopeGeneration, client.connected {
+            do { let next = try await client.request(path); if captured == scope, generation == scopeGeneration, client.connected { plugins = next } }
+            catch { if captured == scope, generation == scopeGeneration, client.connected { plugins = .null; failure = error.localizedDescription } }
         }
     }
     private func loadInventory() async {
         guard !working, client.connected, !client.projectID.isEmpty else { return }
+        let generation = scopeGeneration
         let captured = scope, path = projectBase + "/native-inventory"
         working = true; failure = ""
         defer { working = false }
-        do { let next = try await client.request(path); if captured == scope, client.connected { inventory = next } }
-        catch { if captured == scope, client.connected { inventory = .null; failure = error.localizedDescription } }
+        do { let next = try await client.request(path); if captured == scope, generation == scopeGeneration, client.connected { inventory = next } }
+        catch { if captured == scope, generation == scopeGeneration, client.connected { inventory = .null; failure = error.localizedDescription } }
     }
 }

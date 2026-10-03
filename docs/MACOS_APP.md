@@ -100,3 +100,20 @@ The app now uses one shared font scale, page gutter, reading width, tab style an
 The beta.37 development preview is installed on the MacBook. All 325 service tests, TypeScript checks, production and Swift builds, Foundation checks and package smoke passed. GUI review covered the seven main destinations, role/preset editing, long Context text, model refresh/filter/search and detail sheets. The screen-control connection failed during Connections review. Small-window checks, long project names, new task options and the remaining Settings tabs still need review. See [the design checklist](NATIVE_DESIGN.md) and [exact validation limits](VALIDATION.md).
 
 The existing background service remains beta.35, idle and outside maintenance. No worker, approval, team save or native connection apply was performed. The Mac mini and global CLI were not updated. This is a local preview; signed public distribution and full GUI acceptance remain pending.
+
+## Memory, work reports and remote setup — beta.38
+
+The MacBook app and its background components are now beta.38. Memory has
+searchable entries and individual editors. Skills and plugins have an installed
+overview and separate, compact installation forms. Native harnesses can report
+opted-in work through MCP; Work shows these notes separately from monitored
+workers. Remote setup supports owner-folder project creation and guarded harness
+connection changes, without a local project mirror.
+
+All 332 service tests, TypeScript, production and Swift builds, Foundation checks
+and installed package smoke passed. A real isolated two-Mac SSH check covered
+creation replay and OpenCode configuration preview, apply and undo. Existing
+projects, history, saved context and native config hashes remained unchanged.
+The normal mini service and global CLI remain beta.33. Full GUI acceptance,
+remote native tool discovery and signed public updates remain open. See the
+[beta.38 evidence](VALIDATION.md#native-task-reporting-and-remote-setup--beta38).

@@ -1,6 +1,59 @@
 # Validation evidence
 
-Verified on 2026-10-01 and 2026-10-02 using Node 24.21.0. The old application was not used.
+Verified across 2026-10-01 to 2026-10-03 using Node 24.21.0. The old application was not used.
+
+## Native task reporting and remote setup — beta.38
+
+The local native app and its owned service are beta.38. The global CLI and
+normal Mac mini service remain beta.33. Signed public release is pending;
+local installation is not evidence of signing, notarization or full GUI acceptance.
+
+The native Memory view treats `## Title` sections as entries, with title/body
+search and an individual editor. Add, rename, delete and body edits stay in the
+draft until Save context. Existing unheaded text and the full document editor
+remain available. Installed skills now have a searchable overview; Add skill
+and Add plugin open separate sheets.
+
+`work_report` and `project_work_list` let a connected harness record opted-in
+work while continuing its native session. The UI labels these notes **Reported
+by your harness**, separately from **AgentKlar workers**. Fixtures verify
+durable revisions, same-report replay, project/source ownership, authenticated
+source requirements and that reports create no workers. Reported progress and
+`finished` are claims, not monitored execution, passing checks or measured
+tokens. Automatic observation of all harness activity is not implemented.
+
+Remote setup uses a separate source-device grant for an owner folder. Fixtures
+cover identity/scope checks, revocation, creation replay, registration retry,
+lost acknowledgement, replaced-parent protection and trusted UI authentication.
+The owner performs native setup changes using the existing preview/apply/undo
+receipts. Native tabs open an owner project without registering a local mirror;
+Connections and Manage Macs expose project and harness setup. Reported native
+notes are not yet displayed in remote Work.
+
+Real SSH MacBook-to-mini proof is saved at
+`/tmp/agentklar-beta38-remote-proof.json`. A temporary isolated owner running
+Node 24.21.0 verified its identity, created and registered one project, listed
+it, and returned that same project after replay. OpenCode preview/apply/status/
+undo preserved a sentinel and removed the AgentKlar entry after undo. The owner
+recorded zero runs and zero approvals; no model inference occurred. Its owned
+service was stopped and scratch files removed. No normal mini service or global
+CLI update was part of that check.
+
+The current service suite passed 332 tests. Package smoke sent working then
+finished reports through the installed MCP bridge, read revision 2 and client
+identity, and confirmed that workers stayed at zero. Native GUI inspection
+covered a Memory add draft, search and reload without saving context; installed
+skills and the compact Add skill/Add plugin forms; and the remote chooser and Connect Mac form.
+The actual reported row/detail and full remote creation/config flow were not
+exercised through the native GUI. The latter has service/real SSH evidence.
+
+After the local service update, backup comparisons showed unchanged project,
+run, event, approval and saved context hashes and native configs. Device identity stayed the
+same; service version was beta.38 with zero active runs. Actual tool discovery
+inside a new remote native MCP session remains unverified, as recorded in the
+proof file. Config state alone does not prove a session loaded the tools,
+native sign-in, model entitlement or worker execution. Signed release and
+broader GUI/device acceptance remain open.
 
 ## Native management and worker metadata — beta.30
 

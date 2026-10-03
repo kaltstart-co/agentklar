@@ -7,5 +7,5 @@ out="$(mktemp -d)"
 trap 'rm -rf "$out"' EXIT
 swiftc -sdk "$sdk" -target arm64-apple-macos14.0 -swift-version 5 -parse-as-library \
   "$root/Sources/AgentKlar/JSON.swift" "$root/Sources/AgentKlar/LocalRuntime.swift" \
-  "$root/Sources/AgentKlar/AgentKlarClient.swift" "$root/Tests/LocalChecks/Checks.swift" -o "$out/checks"
+  "$root/Sources/AgentKlar/AgentKlarClient.swift" "$root/Sources/AgentKlar/NativeMemoryDocument.swift" "$root/Tests/LocalChecks/Checks.swift" -o "$out/checks"
 "$out/checks"

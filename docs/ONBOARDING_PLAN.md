@@ -55,11 +55,33 @@ Keep the existing React, Mantine and service. Use a small established terminal p
 
 Acceptance: fresh setup, repeat setup, adding a harness, interrupted setup recovery, unknown tools/quotas and an optional second computer. Verify real native behavior separately from discovery and UI fixtures.
 
-## Planned setup on connected Macs
+## Beta.38 everyday checklist
 
-These are pending product features, added on 3 October 2026.
+- [ ] Open a registered project.
+- [ ] Add or edit a Memory entry; save the shared context.
+- [ ] Check installed skills; use Add skill for a separate review.
+- [ ] Ask: “Track this task in AgentKlar; keep working here.”
+- [ ] Check the report under Reported by your harness.
 
-- **New project:** choose This Mac or a connected Mac, enter a name, choose a location on that Mac and review the destination. Create the folder and register the project on its owner. The resulting workspace opens in a project tab with its computer name; a local checkout is optional.
-- **Connect a harness:** choose a computer and project, then show the harnesses installed on that computer. Review the exact MCP configuration change and apply it through the trusted GUI. Show a checked connection state and the next action for any missing installation or sign-in.
+The harness reports short notes through MCP without delegating. A report is not
+monitored execution or measured usage. Automatic observation of all native work
+is not implemented.
 
-Use the selected Mac's installations, accounts, native scope rules and permissions. Remote project creation must work before a project mapping exists. Existing project pairing cannot be its prerequisite. See the [remote setup contract](MULTI_DEVICE_PLAN.md#planned-remote-project-and-harness-setup).
+## Setup on connected Macs — beta.38
+
+Both Macs need the beta.38-compatible setup service. The normal mini service
+and global CLI remain beta.33; this preview does not update them automatically.
+
+1. On the owner Mac, open **Settings → Devices → Remote project setup → Share folder on this Mac**.
+2. Enter the other Mac's device ID, choose a parent folder and create a private setup code.
+3. On the other Mac, use **Connect Mac** with its existing SSH host and that code. Verify the owner.
+4. Choose **New project**, enter a project and folder name, then create it inside the shared folder. An interrupted reply uses **Retry same project request**.
+5. Open the owner project tab. Choose an installed owner harness, review its config path, scope and entry, then explicitly apply the connection.
+6. Open a native session on the owner to check that its AgentKlar tools load. This last step remains unverified for the new remote setup flow.
+
+Project creation and OpenCode preview/apply/status/undo passed a real isolated
+MacBook-to-mini SSH check. The remote tab needs no local project mirror; it
+currently presents owner-project and harness setup. Native sign-in and
+permissions remain on the owner. This is a locally installed development
+preview; signed public release and full GUI acceptance are pending. See the
+[remote setup contract](MULTI_DEVICE_PLAN.md#remote-project-and-harness-setup--beta38).

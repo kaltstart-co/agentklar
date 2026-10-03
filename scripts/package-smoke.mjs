@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import { readFileSync, existsSync, mkdtempSync, mkdirSync, realpathSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
@@ -97,6 +98,25 @@ try {
   const runs = await client.callTool({ name: "project_runs_list", arguments: { projectId: project.id } });
   assert.equal(runs.isError, false);
   assert.deepEqual(JSON.parse(runs.content[0].text), { projectId: project.id, runs: [], nextCursor: null, hasMore: false });
+  const activityId = randomUUID();
+  const report = { projectId: project.id, activityId, reportId: randomUUID(), expectedRevision: 0,
+    title: "Package reporting check", state: "working", summary: "Testing the installed MCP reporting path." };
+  const firstReport = await client.callTool({ name: "work_report", arguments: report });
+  assert.equal(firstReport.isError, false);
+  assert.equal(JSON.parse(firstReport.content[0].text).revision, 1);
+  const finishedReport = await client.callTool({ name: "work_report", arguments: {
+    ...report, reportId: randomUUID(), expectedRevision: 1, state: "finished", result: "Report delivered through MCP." } });
+  assert.equal(finishedReport.isError, false);
+  const work = await client.callTool({ name: "project_work_list", arguments: { projectId: project.id } });
+  assert.equal(work.isError, false);
+  const reported = JSON.parse(work.content[0].text);
+  assert.equal(reported.activities.length, 1);
+  assert.equal(reported.activities[0].source.clientName, "package-smoke");
+  assert.equal(reported.activities[0].state, "finished");
+  assert.equal(reported.activities[0].revision, 2);
+  const untouchedRuns = await client.callTool({ name: "project_runs_list", arguments: { projectId: project.id } });
+  assert.equal(untouchedRuns.isError, false);
+  assert.deepEqual(JSON.parse(untouchedRuns.content[0].text).runs, []);
   const leadStatus = await client.callTool({ name: "project_lead", arguments: { projectId: project.id, action: "status" } });
   assert.equal(leadStatus.isError, false);
   assert.equal(JSON.parse(leadStatus.content[0].text).lead, null);

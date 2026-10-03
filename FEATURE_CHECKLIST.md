@@ -1,6 +1,8 @@
 # Fresh implementation checklist
 
-Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALIDATION.md).
+Only the new implementation is listed. Checked items have source and bounded
+validation; full native GUI acceptance remains open. Beta.38 is a local preview,
+with signed public release pending. Evidence: [docs/VALIDATION.md](docs/VALIDATION.md).
 
 ## Working
 
@@ -12,6 +14,9 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 - [x] Antigravity grouped quotas
 
 - [x] Project folders
+- [x] Remote project creation
+- [x] Remote setup folder grants
+- [x] Remote harness setup changes
 - [x] Team roles
 - [x] Role responsibilities
 - [x] Model pins
@@ -49,6 +54,7 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 - [x] Native approvals
 - [x] Shared remote human approvals
 - [x] Run history
+- [x] Opt-in native work reports
 - [x] Project run discovery
 - [x] Launch source labels
 - [x] Active lead presence (advisory)
@@ -93,8 +99,8 @@ Only the new implementation is listed. Evidence: [docs/VALIDATION.md](docs/VALID
 - [ ] Gemini and Cursor proof
 - [ ] ZCode worker
 - [ ] Antigravity worker
-- [ ] Remote project creation
-- [ ] Remote harness connections
+- [ ] Remote native MCP session
+- [ ] Automatic native activity observation
 
 ## Next setup experience
 
@@ -106,13 +112,16 @@ Plan: [docs/ONBOARDING_PLAN.md](docs/ONBOARDING_PLAN.md).
 
 ## Native Mac preview
 
-Plan: [docs/DESKTOP_PLAN.md](docs/DESKTOP_PLAN.md). Design: [docs/NATIVE_DESIGN.md](docs/NATIVE_DESIGN.md). Beta.37 is a local development preview; full GUI acceptance is pending. Evidence: [native Mac notes](docs/MACOS_APP.md#verification-limits).
+Plan: [docs/DESKTOP_PLAN.md](docs/DESKTOP_PLAN.md). Design: [docs/NATIVE_DESIGN.md](docs/NATIVE_DESIGN.md). Beta.38 is a local development preview; full GUI acceptance is pending. Evidence: [beta.38 validation](docs/VALIDATION.md#native-task-reporting-and-remote-setup--beta38).
 
 - [x] SwiftUI build
 - [x] Local boundary checks
 - [x] Native GUI smoke
 - [x] Project workspace tabs
 - [x] Large document editors
+- [x] Memory entries and search
+- [x] Installed skills overview
+- [x] Remote-only project tabs
 - [x] Flat native pages
 - [x] Shared visual styles
 - [x] Team workspace

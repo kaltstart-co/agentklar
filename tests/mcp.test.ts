@@ -70,7 +70,7 @@ test("SDK stdio wire lists and calls tools; closing MCP leaves service worker al
     assert.equal(service.store.runs().length, 0);
     assert.equal(catalogReads, 0);
     const list = await client.listTools();
-    assert.equal(list.tools.length, 25);
+    assert.equal(list.tools.length, 27);
     const startTool = list.tools.find(tool => tool.name === "task_start")!;
     const declaration = startTool.inputSchema.properties?.delegation as { const?: string; enum?: string[] };
     assert.deepEqual(declaration.const ? [declaration.const] : declaration.enum, ["requested"]);

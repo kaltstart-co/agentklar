@@ -6,6 +6,15 @@ import CryptoKit
         if !value() { throw LocalError.message(message) }
     }
     @MainActor static func main() async throws {
+        let memory = "Legacy 🧠 notes\r\n\r\n## Decision one\r\nKeep café.\r\n\r\n## Decision two\r\nOther notes."
+        let document = NativeMemoryDocument(memory)
+        try expect(document.entries.count == 2 && document.body(-1) == "Legacy 🧠 notes", "Memory headings or legacy prefix changed")
+        let changed = document.replacingBody(0, with: "Changed notes.")
+        try expect(changed == memory.replacingOccurrences(of: "Keep café.", with: "Changed notes."), "Editing one memory changed other text")
+        try expect(document.replacingBody(0, with: document.body(0)) == memory, "Unchanged memory was reserialized")
+        try expect(NativeMemoryDocument("No headings 🧠").body(-1) == "No headings 🧠", "Legacy memory lost text")
+        let longMemory = "## Long memory\n" + String(repeating: "Project fact. ", count: 2000)
+        try expect(NativeMemoryDocument(longMemory).body(0).count == longMemory.count - "## Long memory\n".count, "Long memory shortened")
         let value = try JSONDecoder().decode(JSON.self, from: Data(#"{"zero":0,"false":false,"unknown":null}"#.utf8))
         try expect(value["zero"].number == 0 && value["false"].bool == false && value["unknown"].number == nil, "JSON values changed")
         let link = "http://127.0.0.1:4317/setup?token=" + String(repeating: "a", count: 64)

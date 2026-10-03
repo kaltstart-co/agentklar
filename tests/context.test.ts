@@ -31,7 +31,9 @@ async function request(
         ? { Cookie: ui, Origin: "http://127.0.0.1:4317" }
         : { Authorization: `Bearer ${service.bearer}` }),
     },
-    ...(body === undefined ? {} : { body: JSON.stringify(requestedTaskBody(path, body)) }),
+    ...(body === undefined
+      ? {}
+      : { body: JSON.stringify(requestedTaskBody(path, body)) }),
   });
 }
 
@@ -89,9 +91,9 @@ test("context validation, atomic conflicts, project isolation and restart persis
       0,
     );
     for (const invalid of [
-      { ...saved, brief: "b".repeat(2001) },
-      { ...saved, memory: "m".repeat(4001) },
-      { ...saved, handoff: "h".repeat(2001) },
+      { ...saved, brief: "b".repeat(8001) },
+      { ...saved, memory: "m".repeat(32001) },
+      { ...saved, handoff: "h".repeat(8001) },
       { ...saved, expectedRevision: -1 },
       { ...saved, expectedRevision: 0.5 },
       { ...saved, expectedRevision: Number.MAX_SAFE_INTEGER },
@@ -375,4 +377,128 @@ test("both native adapters receive identical bounded context and preserve native
     preset: "claude_code",
   });
   assert.deepEqual(options.settingSources, ["user", "project", "local"]);
+});
+
+test("long Unicode context pages reconstruct saved content and launches retain complete snapshots", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "agentklar-context-pages-")),
+    launches: Run[] = [];
+  const service = createService(
+    join(dir, "state"),
+    4317,
+    (_, run, __, callbacks) => {
+      launches.push(run);
+      return {
+        stop() {
+          callbacks.done();
+        },
+        closed: Promise.resolve(),
+      };
+    },
+    process.execPath,
+  );
+  try {
+    const p = await (
+      await request(service, "/api/projects", "POST", {
+        name: "Long context",
+        path: dir,
+      })
+    ).json();
+    const path = `/api/projects/${p.id}/context`,
+      text = {
+        brief: "Brief 🌱 ".repeat(650),
+        memory: "Memory हिन्दी 🌍 漢字\n".repeat(1200),
+        handoff: "Handoff ✨ ".repeat(500),
+      };
+    assert.ok(text.memory.length > 4000);
+    assert.ok(text.memory.length <= 32000);
+    assert.equal(
+      (await request(service, path, "PUT", { ...text, expectedRevision: 0 }))
+        .status,
+      200,
+    );
+    for (const section of ["brief", "memory", "handoff"] as const) {
+      let reconstructed = "",
+        offset = 0;
+      let time: string | undefined;
+      for (let pageCount = 0; pageCount < 100; pageCount++) {
+        const response = await request(
+          service,
+          `${path}?section=${section}&offset=${offset}&limit=997`,
+        );
+        assert.equal(response.status, 200);
+        const page = await response.json();
+        assert.equal(page.projectId, p.id);
+        assert.equal(page.section, section);
+        assert.equal(page.offset, offset);
+        assert.equal(page.revision, 1);
+        if (time === undefined) time = page.updatedAt;
+        assert.equal(page.updatedAt, time);
+        assert.ok(page.text.length <= 997);
+        reconstructed += page.text;
+        if (page.nextOffset === null) break;
+        assert.ok(page.nextOffset > offset);
+        offset = page.nextOffset;
+      }
+      assert.equal(reconstructed, text[section]);
+      const empty = await (
+        await request(
+          service,
+          `${path}?section=${section}&offset=${text[section].length}&limit=100`,
+        )
+      ).json();
+      assert.equal(empty.text, "");
+      assert.equal(empty.nextOffset, null);
+    }
+    for (const query of [
+      "section=unknown",
+      "section=memory&offset=-1",
+      "section=memory&offset=1.5",
+      "section=memory&limit=0",
+      "section=memory&limit=12001",
+      "section=memory&offset=abc",
+      "section=memory&limit=abc",
+    ])
+      assert.equal(
+        (await request(service, `${path}?${query}`)).status,
+        400,
+        query,
+      );
+    const launched = await (
+      await request(service, "/api/tasks/start", "POST", {
+        projectId: p.id,
+        prompt: "Use full context",
+        idempotencyKey: "long-context",
+      })
+    ).json();
+    assert.equal(launched.contextRevision, 1);
+    assert.equal(launches.length, 1);
+    assert.equal(launches[0].contextSnapshot!.memory, text.memory);
+    assert.equal(launches[0].contextSnapshot!.brief, text.brief);
+    assert.equal(launches[0].contextSnapshot!.handoff, text.handoff);
+    assert.equal(
+      (
+        await request(service, path, "PUT", {
+          ...text,
+          memory: "Later context",
+          expectedRevision: 1,
+        })
+      ).status,
+      200,
+    );
+    assert.equal(
+      service.store.run(launched.id)!.contextSnapshot!.memory,
+      text.memory,
+    );
+    assert.equal(
+      (
+        await (
+          await request(service, `${path}?section=memory&offset=0&limit=100`)
+        ).json()
+      ).revision,
+      2,
+    );
+  } finally {
+    await service.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

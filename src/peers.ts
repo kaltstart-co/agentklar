@@ -10,6 +10,7 @@ import { changePacketSchema, type ChangePacket } from "./changes.ts";
 import { gitBase } from "./workspace.ts";
 import { z } from "zod";
 import {humanEnvelopeSchema,humanAnswerSchema,type HumanEnvelope,type HumanCall,type HumanGrant,type HumanConfiguration} from "./peer-human.ts";
+import type { SetupEnvelope } from "./remote-setup.ts";
 
 const uuid = z.uuid();
 const nodePath = z.string().startsWith("/").max(1000).refine(value => !/[\0\r\n]/.test(value));
@@ -28,7 +29,8 @@ export type PeerEnvelope = z.infer<typeof envelope>;
 export type PeerConnection = z.infer<typeof peerSaveSchema> & { id: string; lastObservedAt?: string; lastError?: string };
 type Device = { id: string; label: string; platform: string };
 type Reply = { status: number; body: unknown };
-export type PeerTransport = (peer: PeerConnection, request: PeerEnvelope | HumanEnvelope) => Promise<Reply>;
+export type PeerTransportConnection = Pick<PeerConnection, "id" | "label" | "deviceId" | "sshHost" | "command" | "nodePath">;
+export type PeerTransport = (peer: PeerTransportConnection, request: PeerEnvelope | HumanEnvelope | SetupEnvelope) => Promise<Reply>;
 export type HumanAction = {id:string;dispatchId:string;ownerRunId:string;approvalId:string;requestId:string;expectedDigest:string;decision:string;state:"pending"|"acknowledged"|"rejected";createdAt:string;receipt?:unknown;error?:string;review?:{digest:string;decisions:string[];readAt:string};rejectedHistory?:{requestId:string;expectedDigest:string;decision:string;error?:string;recordedAt:string}[]};
 type Dispatch = { id: string; launchHash?: string; prompt: string; createdAt: string; projectId: string; peerId: string; ownerDeviceId: string; key: string; digest: string; request: PeerEnvelope; ownerRunId?: string; lastObservedAt?: string; lastKnownRun?: Run; connection: "unknown" | "observed"; error?: string };
 export type RemoteDispatch = Omit<Dispatch, "request" | "digest" | "key"> & {routing?:RoutingDecision};

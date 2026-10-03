@@ -4,6 +4,7 @@ struct WorkView: View {
     @ObservedObject var client: AgentKlarClient
     var active = true
     @State private var selectedID: String?
+    @State private var selectedActivityID: String?
     @State private var remoteSelectedID: String?
     @State private var showingRemote = false
     @State private var search = ""
@@ -20,6 +21,14 @@ struct WorkView: View {
         client.runs.filter { ($0["projectId"].string == client.projectID) && (search.isEmpty || ($0["prompt"].string ?? "").localizedCaseInsensitiveContains(search)) }
     }
     private var selected: JSON { client.runs.first { $0["id"].string == selectedID } ?? .null }
+    private var activities: [JSON] {
+        (client.snapshot["activities"].array ?? []).filter {
+            $0["projectId"].string == client.projectID && (search.isEmpty || ($0["title"].string ?? "").localizedCaseInsensitiveContains(search) || ($0["summary"].string ?? "").localizedCaseInsensitiveContains(search))
+        }
+    }
+    private var selectedActivity: JSON {
+        activities.first { $0["activityId"].string == selectedActivityID } ?? .null
+    }
     private var approvals: [JSON] {
         (client.snapshot["approvals"].array ?? []).filter { $0["runId"].string == selectedID }
     }
@@ -38,14 +47,33 @@ struct WorkView: View {
                 HStack(spacing: 20) { workFilters }
                 VStack(alignment: .leading, spacing: 12) { workFilters }
             }.frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, NativeStyle.pagePadding).padding(.bottom, 16)
-            if !runs.isEmpty || showingRemote { Divider() }
+            if !runs.isEmpty || !activities.isEmpty || showingRemote { Divider() }
             if showingRemote {
                 NativeRemoteWorkView(client: client, selected: $remoteSelectedID) { source in followUpSource = source; newTask = true }
-            } else if runs.isEmpty && search.isEmpty {
+            } else if runs.isEmpty && activities.isEmpty && search.isEmpty {
                 emptyWork
             } else { NativeWorkLayout {
                 VStack {
                     List(selection: $selectedID) {
+                        if !activities.isEmpty {
+                            Section("Reported by your harness") {
+                                ForEach(activities, id: \.selfID) { activity in
+                                    Button { selectedID = nil; selectedActivityID = activity["activityId"].string } label: {
+                                        HStack(alignment: .top, spacing: 10) {
+                                            Image(systemName: "text.bubble").frame(width: 24)
+                                            VStack(alignment: .leading, spacing: 5) {
+                                                Text(activity["title"].string ?? "Task").lineLimit(2)
+                                                Text("\(activity["source"]["clientName"].string ?? "Harness") · \(activity["state"].string ?? "Unknown")")
+                                                    .font(NativeStyle.caption).foregroundStyle(.secondary)
+                                            }
+                                            Spacer(minLength: 0)
+                                        }.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 6).contentShape(Rectangle())
+                                    }.buttonStyle(.plain)
+                                        .listRowBackground(selectedActivityID == activity["activityId"].string ? Color.accentColor.opacity(0.12) : .clear)
+                                }
+                            }
+                        }
+                        Section("AgentKlar workers") {
                         ForEach(runs, id: \.selfID) { run in
                             HStack(alignment: .top, spacing: 10) {
                                 NativeHarnessIcon(harness: run["harness"].string ?? "", size: 24)
@@ -56,11 +84,14 @@ struct WorkView: View {
                                 }
                             }.padding(.vertical, 6).tag(run["id"].string ?? "")
                         }
+                        }
                     }
-                    if runs.isEmpty { Text("No tasks in this project.").foregroundStyle(.secondary).padding() }
+                    if runs.isEmpty && activities.isEmpty { Text("No matching tasks.").foregroundStyle(.secondary).padding() }
                 }
             } detail: {
-                if selected["id"].string == nil {
+                if selectedActivity != .null {
+                    NativeReportedWorkDetail(activity: selectedActivity)
+                } else if selected["id"].string == nil {
                     NativeEmptyState("Select a task", systemImage: "list.bullet.rectangle", description: "Read its result, follow progress and review permission requests.") {}
                 } else {
                 ScrollView {
@@ -154,7 +185,8 @@ struct WorkView: View {
             }
             Button("Cancel", role: .cancel) { reviewedApproval = nil }
         } message: { Text("Only the concrete request shown in the task detail is approved. No future requests are approved.") }
-        .onChange(of: client.projectID) { _, _ in selectedID = nil; remoteSelectedID = nil; reviewedApproval = nil }
+        .onChange(of: client.projectID) { _, _ in selectedID = nil; selectedActivityID = nil; remoteSelectedID = nil; reviewedApproval = nil }
+        .onChange(of: selectedID) { _, id in if id != nil { selectedActivityID = nil } }
         .onChange(of: showingRemote) { _, _ in reviewedApproval = nil }
         .task(id: client.requestedRunID) {
             guard let id = client.requestedRunID else { return }
@@ -195,7 +227,7 @@ struct WorkView: View {
         }
     }
     @ViewBuilder private var emptyWork: some View {
-        NativeEmptyState("Start work with your agents", systemImage: "square.stack.3d.up", description: "Delegate a task, follow its progress and review the result here.") {
+        NativeEmptyState("Start work with your agents", systemImage: "square.stack.3d.up", description: "Start a task here, or ask a connected harness to track its work in AgentKlar.") {
                 Button("New task", systemImage: "plus") { followUpSource = .null; newTask = true }
                     .buttonStyle(.borderedProminent).controlSize(.regular).disabled(!client.connected)
         }
@@ -462,7 +494,7 @@ private struct NativeTaskSheet: View {
 }
 
 extension JSON {
-    var selfID: String { self["id"].string ?? self["harness"].string ?? "unknown" }
+    var selfID: String { self["id"].string ?? self["activityId"].string ?? self["harness"].string ?? "unknown" }
     var prettyText: String {
         guard JSONSerialization.isValidJSONObject(any), let data = try? JSONSerialization.data(withJSONObject: any, options: [.prettyPrinted, .sortedKeys]), let value = String(data: data, encoding: .utf8) else { return string ?? "No concrete details." }
         return value
