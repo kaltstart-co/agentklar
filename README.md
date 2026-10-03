@@ -14,7 +14,7 @@ The Mac client is written in SwiftUI. It uses native sidebar navigation, menus, 
 
 The current Apple Silicon build is a development preview. Public signing and automatic app updates need an Apple Developer ID certificate. See [build and installation steps](docs/MACOS_APP.md), including the native features still being added. The terminal installer below remains available.
 
-Source is beta.42. The MacBook app and its local service are beta.40 development
+Source is beta.43. The MacBook app and its local service are beta.40 development
 previews. Public downloads, the global CLI and the normal Mac mini service remain
 beta.33. Full GUI acceptance remains pending. Signed distribution and signed app updates remain unfinished.
 
@@ -23,6 +23,8 @@ stronger bundled-startup checks, and guarded signed-feed preparation.
 Beta.42 removes the separate Gemini CLI adapter; Antigravity (`agy`) remains the Google harness.
 Cursor CLI is installed on the development MacBook and discovered without a shell PATH.
 It needs native sign-in before real worker tests can run.
+Cursor proof and the separate ZCode worker are parked. GLM can be used through OpenCode.
+The current tracking workflow uses agent checkpoint reports.
 These harnesses are separate user installations, not bundled inside AgentKlar.
 
 ### Try the local preview
@@ -173,8 +175,8 @@ whole document available; AgentKlar does not convert old notes automatically.
 ## Track work in your current harness
 
 Ask **“Track this task in AgentKlar; keep working here.”** The connected harness
-uses `work_report` for short progress and result notes while continuing its
-normal work. `project_work_list` finds the saved task and revision after a
+uses `work_report` when starting, when a meaningful checkpoint is done, when
+blocked, and when finished, while continuing its normal work. `project_work_list` finds the saved task and revision after a
 reconnect. It lists the latest 100 reports for the selected project.
 
 The native Work page separates **Reported by your harness** from **AgentKlar

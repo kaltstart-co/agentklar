@@ -20,10 +20,10 @@ build and the Swift release build pass. Antigravity and Cursor executables remai
 installed; the AgentKlar-created Gemini executable link and package are gone.
 Cursor proof and the other release gates below remain unfinished.
 
-## Remaining gates — beta.42
+## Remaining gates — beta.43
 
-Source is beta.42; the installed local app and service remain beta.40. The ten
-remaining items are still unchecked. The changes below close specific gaps;
+Source is beta.43; the installed local app and service remain beta.40. Seven
+release and integration items remain unchecked. The changes below close specific gaps;
 they do not establish every native integration or public release gate.
 
 The beta.41 combined run passed all 356 service tests with zero failures or skips,
@@ -42,17 +42,36 @@ development packaging with full Xcode on ARM64.
 | Gate | Current evidence | Needed to finish |
 | --- | --- | --- |
 | Account quotas | Native Codex/Claude reads; Muse last-seen and Antigravity grouped adapters | Verified account reads for the other providers; session tokens cannot substitute |
-| Cursor proof | Official CLI installed on MacBook; real ACP initialization passes | Native sign-in, then bounded real worker completion and permission tests |
-| ZCode worker | Actual 0.16.9 session offers no model; refused before prompt | Configure an available model in native ZCode, then real worker proof |
 | Antigravity worker | Actual 1.2.16 rejects control_response before any turn | A supported native permission reply protocol |
-| Native observation | Claude hooks; browser and authorized remote signal views | Reviewed per-harness installers and owned-session filtering for more harnesses |
 | Clean Mac setup | Fresh profile first launch/reopen; bundled runtime versions match | Signed install and startup on a clean Mac |
 | GUI acceptance | Installed app connected; Work, Instructions and Updates inspected | Complete GUI matrix, including actual reviews, edits and small windows |
 | Native parity | More session visibility; remote reads preserve explicit grant | Remaining owner Team/Models/Usage/config routes and GUI checks |
 | Signed distribution | CSR verifies; release pipeline guards | Developer ID Application certificate, notary profile, notarization and Gatekeeper proof |
 | Signed updates | Existing Sparkle archive/feed crypto proof; failure-safe feed staging | Signed public release and actual installed update round trip |
 
-### Worker prerequisites checked again
+### Current scope
+
+Cursor proof and the separate ZCode worker are parked by the user. GLM through
+OpenCode covers the current provider need; no separate ZCode setup is requested.
+Broader passive observation is also parked. Connected agents instead report
+started work, completed checkpoints, blockers and final results using the
+existing `work_report` tool. Work displays those saved reports separately from
+workers. Agent reports do not establish independent execution or token usage.
+Tracking remains opt-in and does not enable delegation.
+
+A real SDK stdio-wire regression reports started work, a completed checkpoint,
+and finished work; exact retry returns the same receipt, and reconnect reads the
+saved revision. The native/browser Work snapshot contains the final report and
+caller label. No worker, approval or model-catalog request is created. This is
+MCP and Work-data verification, not proof that every native agent follows the
+instructions or that the updated GUI has been accepted. All 358 service tests,
+TypeScript checks and the production build pass for beta.43.
+
+The Developer ID certificate check on 2026-10-03 still returns zero valid signing
+identities. The prepared CSR remains present. Public signing still needs the
+issued certificate and the owner's interactive notarization credentials.
+
+### Historical worker prerequisites
 
 The beta.41 checks installed Gemini CLI 0.62.0 and Cursor CLI
 2026.10.01-e373342 on the development MacBook. Both ACP sessions refused startup

@@ -11,6 +11,73 @@ import { randomUUID } from "node:crypto";
 import { createService } from "../src/service.ts";
 import { NativeWorker } from "../src/native.ts";
 import { createMcp } from "../src/mcp.ts";
+
+test("stdio checkpoints appear in Work and survive reconnect without delegation", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "agentklar-checkpoints-"));
+  const home = join(dir, "home"), port = 24000 + Math.floor(Math.random() * 10000);
+  let starts = 0, catalogReads = 0;
+  const service = createService(home, port, () => {
+    starts++; throw new Error("Checkpoint reporting must not start a worker");
+  }, null, null, async project => {
+    catalogReads++; return { projectId: project.id, checkedAt: "fixture", harnesses: [] };
+  }, {}, undefined, {}, {}, null, {}, null, undefined, { "cursor-agent": null, zcode: null });
+  const http = serve({ fetch: service.app.fetch, hostname: "127.0.0.1", port });
+  const clients: Client[] = [];
+  const connect = async () => {
+    const client = new Client({ name: "checkpoint-harness", version: "1" });
+    clients.push(client);
+    await client.connect(new StdioClientTransport({
+      command: "npm", args: ["--prefix", resolve("."), "run", "--silent", "mcp"],
+      env: { ...(process.env as Record<string, string>), AGENTKLAR_HOME: home, AGENTKLAR_PORT: String(port) },
+      stderr: "pipe",
+    }));
+    return client;
+  };
+  const call = async (client: Client, name: string, args: Record<string, unknown>) => {
+    const reply = await client.callTool({ name, arguments: args });
+    assert.equal(reply.isError, false);
+    return JSON.parse((reply.content as { text: string }[])[0].text);
+  };
+  try {
+    const first = await connect();
+    assert.match(first.getInstructions()!, /work_report at start, checkpoints and finish/);
+    assert.match(first.getInstructions()!, /Tracking never authorizes delegation/);
+    const project = await call(first, "project_register", { name: "Checkpoint proof", path: dir });
+    const base = { projectId: project.id, activityId: randomUUID(), title: "Build feature" };
+    const started = await call(first, "work_report", { ...base, reportId: randomUUID(), expectedRevision: 0,
+      state: "working", summary: "Started" });
+    assert.equal(started.revision, 1);
+    const checkpoint = { ...base, reportId: randomUUID(), expectedRevision: 1,
+      state: "working", summary: "Parser checkpoint complete" };
+    const saved = await call(first, "work_report", checkpoint);
+    assert.equal(saved.revision, 2);
+    assert.deepEqual(await call(first, "work_report", checkpoint), saved);
+    await first.close();
+    const reconnected = await connect();
+    const work = await call(reconnected, "project_work_list", { projectId: project.id });
+    assert.equal(work.activities[0].revision, 2);
+    const finished = await call(reconnected, "work_report", { ...base, reportId: randomUUID(), expectedRevision: 2,
+      state: "finished", summary: "Finished", result: "Reported checks complete" });
+    assert.equal(finished.revision, 3);
+    const snapshot = await service.app.request(`http://127.0.0.1:${port}/api/snapshot`, {
+      headers: { Authorization: `Bearer ${service.bearer}` },
+    });
+    assert.equal(snapshot.status, 200);
+    const body = await snapshot.json();
+    assert.deepEqual(body.activities, [finished]);
+    assert.equal(body.activities[0].source.clientName, "checkpoint-harness");
+    assert.equal(service.store.runs().length, 0);
+    assert.equal(service.store.approvals().length, 0);
+    assert.equal(starts, 0);
+    assert.equal(catalogReads, 0);
+  } finally {
+    for (const client of clients) await client.close().catch(() => {});
+    await service.close();
+    await new Promise<void>(resolve => http.close(() => resolve()));
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("SDK stdio wire lists and calls tools; closing MCP leaves service worker alive", async () => {
   const dir = mkdtempSync(join(tmpdir(), "agentklar-mcp-"));
   const project = join(dir, "project");

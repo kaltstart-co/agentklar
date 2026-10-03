@@ -58,7 +58,7 @@ beta.33. Signed public release is pending. Evidence: [docs/VALIDATION.md](docs/V
 - [x] Native approvals
 - [x] Shared remote human approvals
 - [x] Run history
-- [x] Opt-in native work reports
+- [x] Agent checkpoint reports
 - [x] Project run discovery
 - [x] Launch source labels
 - [x] Active lead presence (advisory)
@@ -98,13 +98,19 @@ beta.33. Signed public release is pending. Evidence: [docs/VALIDATION.md](docs/V
 
 ## Required, unfinished
 
-Current blockers and acceptance steps: [validation](docs/VALIDATION.md#remaining-gates--beta42).
+Current blockers and acceptance steps: [validation](docs/VALIDATION.md#remaining-gates--beta43).
 
 - [ ] Complete account quotas
-- [ ] Cursor proof
-- [ ] ZCode worker
 - [ ] Antigravity worker
-- [ ] Automatic native activity observation
+
+## Parked
+
+- [ ] Cursor proof
+- [ ] Separate ZCode worker
+- [ ] Broader native observation
+
+GLM is available through OpenCode. Checkpoint reporting is the current tracking
+workflow; broader passive observation can follow later.
 
 ## Next setup experience
 
@@ -116,7 +122,7 @@ Plan: [docs/ONBOARDING_PLAN.md](docs/ONBOARDING_PLAN.md).
 
 ## Native Mac preview
 
-Plan: [docs/DESKTOP_PLAN.md](docs/DESKTOP_PLAN.md). Design: [docs/NATIVE_DESIGN.md](docs/NATIVE_DESIGN.md). Source beta.42 removes the separate Gemini CLI adapter and keeps Antigravity. Beta.40 is installed locally. Full GUI acceptance is pending. Evidence: [validation](docs/VALIDATION.md#remaining-gates--beta42).
+Plan: [docs/DESKTOP_PLAN.md](docs/DESKTOP_PLAN.md). Design: [docs/NATIVE_DESIGN.md](docs/NATIVE_DESIGN.md). Source beta.43 adds checkpoint guidance and parks Cursor and the separate ZCode worker. Beta.40 is installed locally. Full GUI acceptance is pending. Evidence: [validation](docs/VALIDATION.md#remaining-gates--beta43).
 
 - [x] SwiftUI build
 - [x] Local boundary checks
