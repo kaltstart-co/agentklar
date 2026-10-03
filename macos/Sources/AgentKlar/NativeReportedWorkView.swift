@@ -13,6 +13,16 @@ struct NativeReportedWorkDetail: View {
                 }.font(NativeStyle.caption).foregroundStyle(.secondary)
                 Text("Reported by the harness. AgentKlar does not monitor or control this native session.")
                     .font(NativeStyle.caption).foregroundStyle(.secondary)
+                if let revision = activity["revision"].number {
+                    Text("Report revision \(revision.formatted(.number.precision(.fractionLength(0))))")
+                        .font(NativeStyle.caption).foregroundStyle(.secondary)
+                }
+                NativeDetailButton("Report details") {
+                    LabeledContent("Task ID", value: activity["activityId"].string ?? "Unknown")
+                    LabeledContent("Report ID", value: activity["reportId"].string ?? "Unknown")
+                    if let created = activity["createdAt"].string { Text("First reported: " + created) }
+                    if let updated = activity["updatedAt"].string { Text("Last reported: " + updated) }
+                }.textSelection(.enabled)
                 Divider()
                 Text("Progress").font(NativeStyle.heading)
                 Text(activity["summary"].string ?? "").font(NativeStyle.document).lineSpacing(5).textSelection(.enabled)

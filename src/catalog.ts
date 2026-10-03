@@ -1,6 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { parseMuseQuota } from "./muse-quota.ts";
+import { accountQuotaCoverage, unavailableAccountQuota } from "./account-quota.ts";
 import { readOpenCodeCatalog } from "./opencode.ts";
 import { readAntigravityCatalog } from "./antigravity.ts";
 import { workerHarnesses, type WorkerHarness } from "./contracts.ts";
@@ -16,13 +17,8 @@ import type {
 
 const modelFailure =
   "Native model catalog could not be read. Check your native CLI settings and sign-in.";
-const quotaFailure =
-  "Native account limits could not be read. Check your native Codex CLI.";
-const claudeQuota =
-  "Claude Code account limits are unavailable through its experimental native usage read. Older CLIs or profiles without plan limits may not support it.";
-const museQuota =
-  "Native Muse usage/read has no valid last-seen observation. It does not fetch a live balance; account allowance remains unknown.";
-const opencodeQuota = "OpenCode account limits are not exposed by this native catalog read.";
+const quotaFailure = accountQuotaCoverage.codex.unavailableMessage;
+const claudeQuota = accountQuotaCoverage.claude.unavailableMessage;
 const record = (v: unknown): Record<string, unknown> | null =>
   v !== null && typeof v === "object" && !Array.isArray(v)
     ? (v as Record<string, unknown>)
@@ -84,8 +80,9 @@ export function parseQuota(value: unknown): AccountQuota {
       : [];
   });
   const allowed = bool(r.ordinaryUsageAllowed);
-  if (!buckets.length && allowed === null)
-    return unavailableQuota(quotaFailure);
+  const usable = buckets.some(bucket => bucket.primary || bucket.secondary || bucket.spendControlReached !== null);
+  if (!usable && allowed === null)
+    return { ...unavailableQuota(quotaFailure), buckets };
   return {
     status: "available",
     message:
@@ -133,6 +130,8 @@ export function parseClaudeQuota(value: unknown): AccountQuota {
     if (name) buckets.push({ id: `claude-model-${index}`, name, normalModel: null,
       primary: null, secondary: quotaWindow(entry, 10080), spendControlReached: null });
   }
+  if (!buckets.some(bucket => bucket.primary || bucket.secondary))
+    return { ...unavailableQuota(claudeQuota), buckets };
   return { status: "available", ordinaryUsageAllowed: null, buckets,
     message: "Claude plan limits from an experimental native SDK API; it may change or disappear." +
       (scoped.length > 16 ? " Model limit buckets were shortened to 16." : "") };
@@ -186,9 +185,7 @@ function empty(harness: HarnessCatalog["harness"]): HarnessCatalog {
     modelsStatus: "unavailable",
     modelsMessage: modelFailure,
     modelsTruncated: false,
-    quota: unavailableQuota(
-      harness === "claude" ? claudeQuota : harness === "muse" ? museQuota : harness === "opencode" ? opencodeQuota : harness === "codex" ? quotaFailure : `${harness} account limits are not available through its native metadata adapter. Check limits in the native harness.`,
-    ),
+    quota: unavailableAccountQuota(harness),
   };
 }
 
@@ -487,6 +484,7 @@ async function readJsonRpcCatalog(
           excludeResetCreditDetails: true,
         }),
       );
+      if (result.quota.status === "available") result.quota.observedAt = new Date().toISOString();
     };
     const reads = await Promise.allSettled([modelsRead(), quotaRead()]);
     if (reads[0].status === "rejected" && result.models.length)
@@ -607,6 +605,7 @@ export async function readClaudeCatalog(
       result.quota = parseClaudeQuota(await Promise.race([
         usage.call(current, { skipBehaviors: true }), stopped,
       ]));
+      if (result.quota.status === "available") result.quota.observedAt = new Date().toISOString();
     };
     await Promise.allSettled([modelsRead(), quotaRead()]);
   } catch {
@@ -641,11 +640,12 @@ export const readCatalog: CatalogReader = async (
     ([...workerHarnesses, "antigravity"] as const).map(async (harness) => {
       const command = commands[harness];
       if (harness === "gemini" || harness === "cursor-agent" || harness === "zcode") return {
-        ...empty(harness), modelsMessage: command ? "Choose this harness explicitly to use its native default. Model pins are checked against the native session before a task starts. Automatic ranking is unavailable." : `${harness} CLI was not found. Its desktop app sign-in does not establish CLI sign-in.`,
+        ...empty(harness), quota: unavailableAccountQuota(harness, !!command), modelsMessage: command ? "Choose this harness explicitly to use its native default. Model pins are checked against the native session before a task starts. Automatic ranking is unavailable." : `${harness} CLI was not found. Its desktop app sign-in does not establish CLI sign-in.`,
       };
       if (!command)
         return {
           ...empty(harness),
+          quota: unavailableAccountQuota(harness, false),
           modelsMessage: `${harness === "codex" ? "Codex" : harness === "claude" ? "Claude Code" : harness === "muse" ? "Muse" : "OpenCode"} executable was not found.`,
         };
       return harness === "codex"

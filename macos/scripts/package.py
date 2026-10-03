@@ -13,6 +13,7 @@ import subprocess
 import tempfile
 import tarfile
 import urllib.request
+from release import signing_preflight, prepare_feed
 
 root = Path(__file__).resolve().parents[2]
 package = root / "macos"
@@ -26,8 +27,11 @@ args = options.parse_args()
 identity = os.environ.get("AGENTKLAR_SIGN_IDENTITY")
 public_key = os.environ.get("AGENTKLAR_SPARKLE_PUBLIC_KEY", "")
 notary_profile = os.environ.get("AGENTKLAR_NOTARY_PROFILE")
-if args.signed and (not identity or not notary_profile or len(base64.b64decode(public_key, validate=True)) != 32):
-    raise SystemExit("Signed releases need Developer ID, notarization profile and Sparkle public key.")
+if args.signed:
+    try:
+        identity, notary_profile, public_key = signing_preflight(os.environ)
+    except ValueError as error:
+        raise SystemExit(str(error))
 
 if os.uname().machine != "arm64":
     raise SystemExit("This packaging target is Apple Silicon. Intel packaging needs its own verification.")
@@ -181,8 +185,12 @@ with (contents / "Info.plist").open("wb") as target:
 if args.signed:
     # Sign nested helpers before their enclosing framework and app.
     nested = [p for base in (frameworks / "Sparkle.framework", runtime) for p in base.rglob("*") if p.is_file() and not p.is_symlink() and p.read_bytes()[:4] in (b"\xcf\xfa\xed\xfe", b"\xca\xfe\xba\xbe", b"\xfe\xed\xfa\xcf")]
+    node_entitlements = out / "node-entitlements.plist"
+    with node_entitlements.open("wb") as target:
+        plistlib.dump({"com.apple.security.cs.allow-jit": True}, target)
     for path in sorted(nested, key=lambda p: len(p.parts), reverse=True):
-        run("codesign", "--force", "--options", "runtime", "--timestamp", "--sign", identity, str(path))
+        entitlements = ["--entitlements", str(node_entitlements)] if path == runtime / "bin/node" else []
+        run("codesign", "--force", "--options", "runtime", "--timestamp", "--sign", identity, *entitlements, str(path))
     for path in sorted((frameworks / "Sparkle.framework").rglob("*.xpc"), key=lambda p: len(p.parts), reverse=True):
         run("codesign", "--force", "--options", "runtime", "--timestamp", "--sign", identity, str(path))
     for path in sorted((frameworks / "Sparkle.framework").rglob("*.app"), key=lambda p: len(p.parts), reverse=True):
@@ -202,6 +210,8 @@ run("ditto", "-c", "-k", "--sequesterRsrc", "--keepParent", str(app), str(archiv
 if args.signed:
     run("xcrun", "notarytool", "submit", str(archive), "--keychain-profile", notary_profile, "--wait")
     run("xcrun", "stapler", "staple", str(app))
+    run("xcrun", "stapler", "validate", str(app))
+    run("spctl", "--assess", "--type", "execute", "--verbose", str(app))
     archive.unlink()
     run("ditto", "-c", "-k", "--sequesterRsrc", "--keepParent", str(app), str(archive))
 image_folder = out / "image"
@@ -218,4 +228,8 @@ if args.signed:
     run("codesign", "--timestamp", "--sign", identity, str(dmg))
     run("xcrun", "notarytool", "submit", str(dmg), "--keychain-profile", notary_profile, "--wait")
     run("xcrun", "stapler", "staple", str(dmg))
+    run("xcrun", "stapler", "validate", str(dmg))
+    run("codesign", "--verify", "--strict", str(dmg))
+    staging = prepare_feed(package, out, archive, dmg, build.group(1), os.environ)
+    print(f"Verified signed release staged for review: {staging}")
 print(f"Native SwiftUI app built: {app}. Signed public release: {args.signed}.")

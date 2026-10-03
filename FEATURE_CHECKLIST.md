@@ -1,12 +1,16 @@
 # Fresh implementation checklist
 
 Only the new implementation is listed. Checked items have source and bounded
-validation; full native GUI acceptance remains open. Beta.38 is a local preview,
-with signed public release pending. Evidence: [docs/VALIDATION.md](docs/VALIDATION.md).
+validation; full native GUI acceptance remains open. Source is beta.40. The
+installed MacBook app and service are beta.39; public and Mac mini releases are
+beta.33. Signed public release is pending. Evidence: [docs/VALIDATION.md](docs/VALIDATION.md).
 
 ## Working
 
 - [x] Claude plugin bundle
+- [x] Claude session signals
+- [x] OpenCode 2 adapter
+- [x] Remote native MCP session
 - [x] Native default preview and Undo
 - [x] OpenCode provider filter
 - [x] Tool requirement checks
@@ -94,12 +98,10 @@ with signed public release pending. Evidence: [docs/VALIDATION.md](docs/VALIDATI
 
 ## Required, unfinished
 
-- [ ] OpenCode 2 adapter
 - [ ] Complete account quotas
 - [ ] Gemini and Cursor proof
 - [ ] ZCode worker
 - [ ] Antigravity worker
-- [ ] Remote native MCP session
 - [ ] Automatic native activity observation
 
 ## Next setup experience
@@ -112,7 +114,7 @@ Plan: [docs/ONBOARDING_PLAN.md](docs/ONBOARDING_PLAN.md).
 
 ## Native Mac preview
 
-Plan: [docs/DESKTOP_PLAN.md](docs/DESKTOP_PLAN.md). Design: [docs/NATIVE_DESIGN.md](docs/NATIVE_DESIGN.md). Beta.38 is a local development preview; full GUI acceptance is pending. Evidence: [beta.38 validation](docs/VALIDATION.md#native-task-reporting-and-remote-setup--beta38).
+Plan: [docs/DESKTOP_PLAN.md](docs/DESKTOP_PLAN.md). Design: [docs/NATIVE_DESIGN.md](docs/NATIVE_DESIGN.md). Source beta.40 has bounded adapter and session checks. Beta.39 is installed locally; beta.40 is packaged locally. Full GUI acceptance is pending. Evidence: [beta.40 validation](docs/VALIDATION.md#adapters-and-claude-session-signals--beta40).
 
 - [x] SwiftUI build
 - [x] Local boundary checks

@@ -6,7 +6,7 @@ The TypeScript service still owns projects, saved work, workers and approvals. T
 
 ## Preview features
 
-- Workspace: compact project tabs with close buttons, a plus button and searchable project chooser; a muted sidebar, compact window chrome and a shared 24-point page inset. Open pages retain project-scoped drafts and selection.
+- Workspace: compact project tabs with close buttons, a plus button and searchable project chooser; a muted sidebar, compact window chrome and a shared 28-point page inset. Open pages retain project-scoped drafts and selection.
 - Work: use labelled actions and a responsive task list/detail layout, create a worker task with automatic model advice or explicit pins, set image/tool requirements, stop it, read results and events, and review supported concrete approvals once. Local and remote linked review/fix actions preserve their source workspace.
 - Context: edit Brief, Memory and Next steps in a large document editor with revision checks. Separate views review Git changes, prepare/apply a handoff, recover an interrupted apply and manage coordinated control. Task links open the matching native task view.
 - Instructions: read AGENTS.md or CLAUDE.md in a large source editor, preview a change, apply it and undo an unchanged owned change. Native tabs manage project/personal skills and the separate Claude workflow plugin through reviewed receipts.
@@ -15,7 +15,7 @@ The TypeScript service still owns projects, saved work, workers and approvals. T
 - Settings: use plain subsection tabs to connect a harness, choose a native installation, save the main harness, preview model/effort defaults, manage paired devices and check updates. Project photos are cached per Mac as normalized PNG files.
 - Remote work: choose a saved remote role or include connected computers in automatic selection; read compact owner status/results, request stop and review supported concrete remote approvals. Remote task selection never requests an unsupported local event tail.
 
-These controls are in the beta.35 development source and local preview bundle. This does not establish a published beta.35 release. Pages use shared sizing and padding, full-width headings and labelled actions. Supporting records and exact reviews open separately; no DisclosureGroup controls remain. Full native GUI acceptance and feature parity remain unfinished. Open-main-harness guidance uses the terminal. Unknown approval kinds cannot be accepted in the native app. Worker completion is not human review.
+These controls are in the beta.40 development source. The installed local app is beta.39; the public release remains beta.33. Pages use shared sizing and padding, full-width headings and labelled actions. Supporting records and exact reviews open separately. Remote task history uses flat selectable rows and one detail area. Full native GUI acceptance and feature parity remain unfinished. Open-main-harness guidance uses the terminal. Unknown approval kinds cannot be accepted in the native app. Worker completion is not human review.
 
 Muse model refresh now also makes an independent native [`usage/read`](https://dev.meta.ai/docs/muse-code/changelog). It returns last-seen subscription windows with their original observation time, not a live balance. An empty observation stays unknown, and quota failure does not hide the model list. Complete account quota coverage remains unfinished.
 
@@ -117,3 +117,38 @@ projects, history, saved context and native config hashes remained unchanged.
 The normal mini service and global CLI remain beta.33. Full GUI acceptance,
 remote native tool discovery and signed public updates remain open. See the
 [beta.38 evidence](VALIDATION.md#native-task-reporting-and-remote-setup--beta38).
+
+### Signed release preparation
+
+`python3 macos/scripts/package.py --signed` now fails before building if the Developer ID Application identity or Sparkle keychain account is unavailable. Set the three variables above. `AGENTKLAR_SPARKLE_ACCOUNT` selects an existing Sparkle keychain account (default `ed25519`). The script never creates credentials or exports private keys. The notarization profile must already exist and be usable by `notarytool`.
+
+The bundled Node executable receives the hardened runtime JIT entitlement so its JavaScript engine can run in a signed app. After notarization, the script validates the stapled app and DMG and asks Gatekeeper to assess the app. It repacks the stapled app before signing the final ZIP update. Sparkle's pinned tools generate and verify archive and feed signatures. The staged output is `macos/out/signed-release/`: `appcast.xml`, `downloads/` with the final ZIP and DMG, and `release.json` with checksums. Preparation does not publish anything.
+
+Before publishing, test the staged app on a clean Apple Silicon Mac with no Node, npm or developer checkout. Test opening the downloaded DMG with quarantine preserved, installing in Applications, first launch with the network disconnected, and adopting the bundled service. Test a signed update from the previous signed app while idle, refusal during active work, restart, service adoption and retained records. The offline release tests check configuration and metadata gates; they do not prove Apple notarization, device launch or Sparkle installation.
+
+Publish immutable `downloads/` files first, verify their downloaded bytes against `release.json`, and publish the signed `appcast.xml` last at the fixed feed URL. Keep the previous signed release and feed as recovery evidence. Never edit a signed XML feed after signing. If a release fails, withdraw its feed item and re-sign the feed; already upgraded Macs need a corrected app with a higher build number. Sparkle does not perform a downgrade simply because an older archive is republished. Preserve service data when recovering; app replacement and service recovery are separate steps.
+
+The release process follows [Apple's notarization workflow](https://developer.apple.com/documentation/security/customizing-the-notarization-workflow) and [Sparkle's publishing instructions](https://sparkle-project.org/documentation/publishing/). No signed public release is established until real credentials, notarization, published downloads and the clean Mac/update checks pass.
+
+### Connect an existing paid Apple Developer membership
+
+Membership is already paid. The remaining Apple step is issuing and importing a **Developer ID Application** certificate with its matching private key. This Mac currently has Command Line Tools and `notarytool`; a full Xcode app is not installed. The portal route below uses the existing tools.
+
+1. After reviewing the script, run `python3 macos/scripts/developer_id.py create-csr` on the release Mac. It creates an RSA 2048 private key and a public certificate request under `~/.agentklar/signing/developer-id/`. The directory is private (0700), the key is private (0600), and an existing directory is refused to protect earlier keys.
+2. Open [Apple Developer Certificates](https://developer.apple.com/account/resources/certificates/list), add **Developer ID Application**, and upload only `request.csr`. Use the current Developer ID intermediate option Apple offers. Download the issued `.cer` file. See [Apple's certificate instructions](https://developer.apple.com/help/account/certificates/create-developer-id-certificates).
+3. In your own interactive terminal, run `python3 macos/scripts/developer_id.py import-certificate /absolute/path/to/developerID_application.cer`. The script verifies the certificate type and compares public keys before importing. Enter a temporary export password when OpenSSL asks, then the same password in the secure Keychain dialog. The temporary encrypted `.p12` is removed afterward. Passwords are never command arguments. Keep the original private key on this Mac.
+4. Store notarization credentials yourself with `xcrun notarytool store-credentials AgentKlar-notary`. Follow its interactive prompts for your Apple ID, Team ID and app-specific password. Enter notarization secrets only in those terminal prompts. Set `AGENTKLAR_NOTARY_PROFILE=AgentKlar-notary` for packaging. See [Apple's notarization tool guide](https://developer.apple.com/documentation/technotes/tn3147-migrating-to-the-latest-notarization-tool).
+5. Create the Sparkle signing key only when explicitly authorized, using the pinned official tool `macos/.build/artifacts/sparkle/Sparkle/bin/generate_keys`. Its key stays in Keychain. Configure `AGENTKLAR_SPARKLE_PUBLIC_KEY` from the public key output and `AGENTKLAR_SIGN_IDENTITY` from `security find-identity -v -p codesigning`. Never put private Sparkle material in the repository or command arguments.
+
+These scripts have offline checks, but the live certificate import and notarization remain unverified until the owner supplies the issued Apple certificate and completes the interactive credential prompts. Do not revoke an existing certificate or replace an existing key to bypass a setup error.
+
+## Native integrations — beta.40
+
+The new source adds an OpenCode 2 adapter, explicit account-quota coverage and
+optional Claude session signals. The owner workspace uses flat task rows rather
+than nested disclosures. All 353 service tests, TypeScript checks, production
+build, native Foundation checks and seven release-pipeline tests passed before
+packaging. Native source builds with the macOS 26.5 SDK.
+
+Full GUI acceptance, clean physical-Mac installation, native parity and signed
+distribution remain open. See [validation evidence](VALIDATION.md).

@@ -50,6 +50,7 @@ test("managed startup preserves the installation npm prefix without registering 
     const env = JSON.parse(converted.stdout).EnvironmentVariables;
     assert.equal(env.NPM_CONFIG_PREFIX, prefix);
     assert.equal(env.PATH, process.env.PATH);
+    assert.equal(env.HOME, process.env.HOME);
     assert.equal(env.AGENTKLAR_HOME, home);
     captured = true;
     throw new Error("Captured startup; no real job launched");

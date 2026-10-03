@@ -52,7 +52,7 @@ if(args[0]==='app-server') {
  if(isCodex) servers=config.mcp_servers??={};
  else {config.projects??={};config.projects[cwd]??={};servers=config.projects[cwd].mcpServers??={};}
  if(args[1]==='add') {
- if(Object.hasOwn(servers,'agentklar')) secretFail();
+ if(!isCodex && Object.hasOwn(servers,'agentklar')) secretFail();
  const split=args.indexOf('--'), env={};for(let i=0;i<split;i++)if(args[i]==='--env'){const assignment=args[++i],eq=assignment.indexOf('=');env[assignment.slice(0,eq)]=assignment.slice(eq+1);}
  servers.agentklar={...(isCodex?{}:{type:'stdio'}),command:args[split+1],args:args.slice(split+2),env};
  } else if(args[1]==='remove') delete servers.agentklar;
@@ -421,5 +421,106 @@ test("service close waits for setup operation journal and status probes, and no 
     await f.service.close(); assert.equal((await pending).status,503);
     writeFileSync(f.mode,""); await f.restart(); const status=await (await f.call(f.base("claude"))).json(); assert.equal(status.change.state,"interrupted"); assert.equal(status.status,"missing");
     writeFileSync(f.mode,"readDelay"); const reading=f.call(f.base()); await new Promise(r=>setTimeout(r,100)); await f.service.close(); assert.equal((await reading).status,200);
+  } finally { await f.cleanup(); }
+});
+
+function olderBridge(f: Awaited<ReturnType<typeof fixture>>, harness: string) {
+  const packageRoot = join(f.dir, "older AgentKlar", harness);
+  mkdirSync(join(packageRoot, "dist", "server"), { recursive: true });
+  writeFileSync(join(packageRoot, "package.json"), JSON.stringify({ name: "agentklar", version: "0.1.0-beta.1" }));
+  const bridge = join(packageRoot, "dist", "server", "mcp.js");
+  writeFileSync(bridge, "// Older AgentKlar fixture bridge\n");
+  const env = { AGENTKLAR_HOME: f.home, AGENTKLAR_PORT: "4317" };
+  return harness === "opencode" ? { type: "local", command: [realpathSync(process.execPath), bridge], environment: env }
+    : { ...(harness === "codex" ? {} : { type: "stdio" }), command: realpathSync(process.execPath), args: [bridge], env };
+}
+function writeOlderConnection(f: Awaited<ReturnType<typeof fixture>>, harness: string, entry: unknown) {
+  const file = harness === "codex" ? join(f.codex, "config.toml") : join(f.xdg, harness, harness === "muse" ? "settings.json" : "opencode.json");
+  mkdirSync(dirname(file), { recursive: true });
+  const servers = { agentklar: entry, other: { url: "https://example.test", token: "UNRELATED_SECRET" } };
+  writeFileSync(file, JSON.stringify(harness === "codex" ? { native: true, mcp_servers: servers }
+    : harness === "muse" ? { schema_version: 1, theme: "dark", mcpServers: servers } : { theme: "dark", mcp: servers }));
+  return file;
+}
+function savedEntry(file: string, harness: string) {
+  const value = config(file);
+  return (harness === "codex" ? value.mcp_servers : harness === "muse" ? value.mcpServers : value.mcp).agentklar;
+}
+
+test("reviewed older AgentKlar connections update and restore only the previous entry after restart", async () => {
+  const f = await fixture();
+  try {
+    for (const harness of ["codex", "muse", "opencode"]) {
+      const old = olderBridge(f, harness), file = writeOlderConnection(f, harness, old);
+      const before = readFileSync(file, "utf8");
+      const status = await (await f.call(f.base(harness))).json();
+      assert.equal(status.status, "conflict"); assert.equal(status.canUpdate, true);
+      assert.equal(JSON.stringify(status).includes("UNRELATED_SECRET"), false);
+      const preview = await f.preview(harness);
+      assert.equal(preview.operation, "replace"); assert.deepEqual(preview.previousEntry, old);
+      assert.equal(JSON.stringify(preview).includes("UNRELATED_SECRET"), false);
+      assert.equal(readFileSync(file, "utf8"), before, "Review does not write native settings");
+      const response = await f.apply(preview.id, harness); assert.equal(response.status, 200);
+      const change = await response.json(); assert.equal(change.replacesExisting, true);
+      assert.notDeepEqual(savedEntry(file, harness), old);
+      assert.match(readFileSync(file, "utf8"), /UNRELATED_SECRET/);
+      await f.restart();
+      assert.equal((await (await f.call(f.base(harness))).json()).canUndo, true);
+      assert.equal((await f.call(`${f.base(harness)}/undo`, "POST", { changeId: change.id })).status, 200);
+      assert.deepEqual(savedEntry(file, harness), old);
+      assert.match(readFileSync(file, "utf8"), /UNRELATED_SECRET/);
+    }
+  } finally { await f.cleanup(); }
+});
+
+test("older connection review refuses foreign homes, ports, secrets, properties, bridges and scopes", async () => {
+  const f = await fixture();
+  try {
+    const old = olderBridge(f, "codex") as { command: string; args: string[]; env: Record<string, string> };
+    const entries = [
+      { ...old, env: { ...old.env, AGENTKLAR_HOME: f.dir } },
+      { ...old, env: { ...old.env, AGENTKLAR_PORT: "4318" } },
+      { ...old, env: { ...old.env, TOKEN: "NATIVE_PRIVATE_SECRET" } },
+      { ...old, enabled: true },
+      { ...old, args: [join(f.dir, "foreign.js")] },
+      { ...old, args: ["--inspect", ...old.args] },
+      { url: "https://example.test", headers: { Authorization: "NATIVE_PRIVATE_SECRET" } },
+    ];
+    for (const entry of entries) {
+      const file = writeOlderConnection(f, "codex", entry), before = readFileSync(file, "utf8");
+      const status = await (await f.call(f.base())).json();
+      assert.equal(status.canUpdate, false);
+      assert.equal(JSON.stringify(status).includes("NATIVE_PRIVATE_SECRET"), false);
+      assert.equal((await f.call(`${f.base()}/preview`, "POST", {})).status, 409);
+      assert.equal(readFileSync(file, "utf8"), before);
+    }
+    writeOlderConnection(f, "codex", old);
+    mkdirSync(join(f.project, ".codex"));
+    writeFileSync(join(f.project, ".codex", "config.toml"), JSON.stringify({ mcp_servers: { agentklar: old } }));
+    assert.equal((await (await f.call(f.base())).json()).canUpdate, false);
+    assert.equal((await f.call(`${f.base()}/preview`, "POST", {})).status, 409);
+    rmSync(join(f.project, ".codex"), { recursive: true });
+    writeFileSync(join(dirname(dirname(dirname(old.args[0]!))), "package.json"), JSON.stringify({ name: "foreign-package" }));
+    assert.equal((await (await f.call(f.base())).json()).canUpdate, false);
+  } finally { await f.cleanup(); }
+});
+
+test("reviewed replacement rejects changed native settings and interrupted replacement can restore the old bridge", async () => {
+  const f = await fixture();
+  try {
+    const old = olderBridge(f, "codex"), file = writeOlderConnection(f, "codex", old);
+    const stale = await f.preview();
+    writeFileSync(file, JSON.stringify({ ...config(file), otherNativeSetting: true }));
+    assert.equal((await f.apply(stale.id)).status, 409);
+    assert.deepEqual(savedEntry(file, "codex"), old);
+    const preview = await f.preview();
+    writeFileSync(f.mode, "addFailAfter");
+    assert.equal((await f.apply(preview.id)).status, 503);
+    await f.restart(); writeFileSync(f.mode, "");
+    const status = await (await f.call(f.base())).json();
+    assert.equal(status.change.state, "interrupted"); assert.equal(status.canUndo, true);
+    assert.equal((await f.call(`${f.base()}/undo`, "POST", { changeId: status.change.id })).status, 200);
+    assert.deepEqual(savedEntry(file, "codex"), old);
+    assert.equal(config(file).otherNativeSetting, true);
   } finally { await f.cleanup(); }
 });

@@ -1,6 +1,6 @@
 # AgentKlar
 
-Keep your native coding harness. AgentKlar gives registered projects a shared local work record, saved project context, team roles, and durable worker runs. Start from Codex, Claude Code, Muse, Gemini CLI, Cursor, or OpenCode and connect its MCP client to AgentKlar. Codex, Claude Code, Muse and OpenCode have worker adapters and managed MCP setup. Gemini CLI and Cursor CLI have ACP worker adapters; real account execution is not verified yet. ZCode has an experimental native protocol adapter using its existing bundled CLI. Antigravity has MCP setup, model discovery and grouped account limits; worker execution remains disabled. Each harness keeps its own sign-in, tools and permissions.
+Keep your native coding harness. AgentKlar gives registered projects a shared local work record, saved project context, team roles, and durable worker runs. Start from Codex, Claude Code, Muse, Gemini CLI, Cursor, or OpenCode and connect its MCP client to AgentKlar. Codex, Claude Code, Muse and OpenCode have worker adapters and managed MCP setup. The current source supports both legacy OpenCode and OpenCode 2. Gemini CLI and Cursor CLI have ACP worker adapters; real account execution is not verified yet. ZCode has an experimental native protocol adapter using its existing bundled CLI. Antigravity has MCP setup, model discovery and grouped account limits; worker execution remains disabled. Each harness keeps its own sign-in, tools and permissions.
 
 This is a fresh TypeScript rewrite. The old Go application is preserved in Git at `archive/pre-rewrite-2026-10-01`. Old databases and configuration are never imported. A run marked **completed** means the worker finished. Review the changes in your normal editor and harness.
 
@@ -14,21 +14,27 @@ The Mac client is written in SwiftUI. It uses native sidebar navigation, menus, 
 
 The current Apple Silicon build is a development preview. Public signing and automatic app updates need an Apple Developer ID certificate. See [build and installation steps](docs/MACOS_APP.md), including the native features still being added. The terminal installer below remains available.
 
-Beta.38 is installed locally as a development preview. Its signed public release
-is pending. The global CLI and normal Mac mini service remain beta.33.
+Source is beta.40. The MacBook app and its local service are beta.39 development
+previews. Public downloads, the global CLI and the normal Mac mini service remain
+beta.33. Beta.40 is packaged locally; installation and GUI acceptance are pending. Signed distribution and signed app updates remain unfinished.
 
-### Try the beta.38 preview
+### Try the local preview
 
 - In **Context → Memory**, search or edit one saved entry, then **Save context**.
 - In **Instructions → Skills and plugins**, view installed skills; **Add skill** opens a separate review sheet.
 - Tell a connected native harness: **“Track this task in AgentKlar; keep working here.”**
 - In **Settings → Devices → Remote project setup**, share a folder on its owner Mac, then connect from your other Mac.
 
-Reported native work is saved progress text. It does not start a worker or
-automatically monitor that harness. Remote setup has real SSH proof; loading
-AgentKlar tools inside a new remote native session still needs verification.
-Remote-only tabs currently offer **Connections** and **Manage Macs**. They do
-not yet show reported native notes in Work. See the [setup checklist](docs/ONBOARDING_PLAN.md#setup-on-connected-macs--beta38).
+Reported native work is saved progress text. The beta.40 source also adds optional
+Claude session signals through a reviewed plugin. It sends event metadata only;
+prompts and transcripts are discarded before the local request. Tracking is
+revocable and never approves a tool action or marks a task completed.
+
+A bounded native OpenCode 2 session explicitly connected to AgentKlar and loaded
+27 MCP tools, including work_report. Starting a task through those tools still
+needs real inference proof. An independent OpenCode 2 worker completed a bounded
+prompt and retained its session after restart. Automatic activity observation
+across every harness remains unfinished. See [current proof and limits](docs/VALIDATION.md#adapters-and-claude-session-signals--beta40).
 
 On macOS or Linux (ARM64 or x64), run:
 
@@ -115,7 +121,7 @@ Built-in presets are Economical, Balanced and Best. **Edit presets** lets you ma
 
 Open **Models**, choose a project, and select **Refresh models and allowance**. AgentKlar reads native Codex, Claude, Muse, OpenCode and Antigravity model lists. Search by name or ID, and filter OpenCode models by connected provider. Add providers in OpenCode itself, then refresh. Gemini and Cursor ACP validate an explicit model against the native session list when starting; preflight catalogs remain unavailable. It also asks the installed Claude Code CLI for its worker sign-in status with native [`auth status`](https://code.claude.com/docs/en/cli-reference). New task and Team offer models for supported workers. Muse's native model descriptions can include data-use terms; review them before choosing a model. Refresh never changes your model pin. A listed model alone does not prove sign-in or model access. The Claude check reports only signed in, sign-in required, or unknown; it does not test a model call or infer worker sign-in from the Desktop app. Prices in native vendor descriptions describe API usage, not your subscription bill.
 
-**Usage** shows native Codex account allowance when available: used and remaining percentages, window duration, and reset time in your local time zone. These limits are shared across the native account; project task tokens do not calculate them. A native included-usage block remains visible even when a percentage window has reset. Claude Code account allowance uses the installed CLI’s experimental native metadata read when supported. Antigravity reports its native Gemini and Claude/GPT groups. OpenCode provider quotas and Gemini/Cursor limits remain unavailable; AgentKlar does not turn token totals or API prices into subscription balances. Muse workers make one short account usage read on their owned connection after a turn ends. When Muse has observed usage, task detail and Usage show the last recorded window and weekly percentages with their observation and reset times. The snapshot may include work outside AgentKlar; it is not a live balance, model-specific limit, or dollar cost. Missing information stays unknown. Normal task polling makes no model or quota requests. Catalog snapshots are cached per project and refreshes within 30 seconds reuse that cache.
+**Usage** shows native Codex account allowance when available: used and remaining percentages, window duration, and reset time in your local time zone. These limits are shared across the native account; project task tokens do not calculate them. A native included-usage block remains visible even when a percentage window has reset. Claude Code account allowance uses the installed CLI’s experimental native metadata read when supported. Antigravity reports its native Gemini and Claude/GPT groups. OpenCode provider quotas and Gemini/Cursor/ZCode limits remain unavailable; AgentKlar does not turn token totals or API prices into subscription balances. Muse workers make one short account usage read on their owned connection after a turn ends. When Muse has observed usage, task detail and Usage show the last recorded window and weekly percentages with their observation and reset times. The snapshot may include work outside AgentKlar; it is not a live balance, model-specific limit, or dollar cost. Missing information stays unknown. Normal task polling makes no model or quota requests. Catalog snapshots are cached per project and refreshes within 30 seconds reuse that cache.
 
 ## Benchmark references
 
@@ -131,9 +137,9 @@ Your native harness can classify the task with its existing model and call `task
 
 Muse can be selected directly or through a saved Muse role. Automatic advice keeps Muse out of unpinned choices because no reviewed Muse cost or quality tier is available. A specific Muse model pin can receive advice with unknown tier and allowance. A manual Muse task with no model pin uses the native default.
 
-OpenCode can also run a task when you select it directly or through a saved role. Its catalog includes connected text-and-tool models; it does not prove model access, billing or account limits. Automatic advice keeps OpenCode out of unpinned choices because it has no reviewed cost or quality tier. Leave Model blank for OpenCode's native default, or choose an exact `provider/model` ID. OpenCode runs through its own local server with its native provider settings and permissions. Only the trusted local UI can approve one concrete native action. OpenCode read-only work is unavailable.
+OpenCode can also run a task when you select it directly or through a saved role. Its catalog includes connected text-and-tool models; it does not prove model access, billing or account limits. Automatic advice keeps OpenCode out of unpinned choices because it has no reviewed cost or quality tier. Leave Model blank for OpenCode's native default, or choose an exact `provider/model` ID. OpenCode runs through its own local server with its native provider settings and permissions. The source selects the adapter for its native major version; OpenCode 2 uses its inbox and event protocol. Only the trusted local UI can approve one concrete native action. OpenCode read-only work is unavailable.
 
-Gemini, Cursor and ZCode need an explicit harness selection. Leave Model blank for the native default. Exact model pins are checked against the native session; automatic ranking, full quota coverage, read-only work and ready-made resume commands are unavailable. Gemini and Cursor use ACP. ZCode uses its own protocol and normal build permission mode; concrete commands and edits require native permission decisions in the trusted local UI. A detected CLI alone does not verify account execution. See the checklist for current native proof status.
+Gemini, Cursor and ZCode need an explicit harness selection. Leave Model blank for the native default. Exact model pins are checked against the native session; automatic ranking, full quota coverage, read-only work and ready-made resume commands are unavailable. Gemini and Cursor use ACP. ZCode uses its own protocol and normal build permission mode; concrete commands and edits require native permission decisions in the trusted local UI. A detected CLI alone does not verify account execution. Gemini and Cursor CLIs are absent on both checked Macs. The installed ZCode 0.16.9 returns no available native models, so its worker is blocked before prompt admission. Antigravity cannot safely accept native permission replies through its headless input, so its worker remains disabled. See the checklist for current native proof status.
 
 Each routed run keeps a small record of the selected model, task needs and policy reasons. The task detail shows the requested model and the model reported by the native harness separately. A worker failure does not trigger another model automatically. The task detail also shows any selected benchmark reference and whether it broke a tie.
 

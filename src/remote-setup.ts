@@ -91,6 +91,7 @@ const launchSchema = z
   .strict()
   .refine((v) => !v.nodePath || v.command.startsWith("/"));
 export const setupCallSchema = z.discriminatedUnion("operation", [
+  z.object({ operation: z.literal("projectWorkspace"), payload: z.object({ projectId: uuid }).strict() }),
   z.object({ operation: z.literal("hello"), payload: z.object({}).strict() }),
   z.object({
     operation: z.literal("projects"),
@@ -141,6 +142,7 @@ export const setupEnvelopeSchema = z
     requestId: uuid,
     operation: z.enum([
       "hello",
+      "projectWorkspace",
       "projects",
       "createProject",
       "setupStatus",
@@ -166,6 +168,7 @@ type Grant = {
   rootPath: string;
   rootStamp: string;
   tokenHash: string;
+  workspaceRead?: boolean;
   revoked: boolean;
 };
 const codeSchema = z
@@ -176,6 +179,7 @@ const codeSchema = z
     launch: launchSchema,
     rootPath: path,
     sourceDeviceId: uuid,
+    workspaceRead: z.boolean().optional(),
   })
   .strict();
 type Connection = z.infer<typeof codeSchema> & {
@@ -216,6 +220,7 @@ export class RemoteSetup {
       action: () => Promise<T>,
       write?: boolean,
     ) => Promise<T> = (action) => action(),
+    private readWorkspace: (project: Project) => unknown = () => { throw new PeerError("Owner workspace reading is unavailable.", 503); },
   ) {
     store.db.exec(
       "CREATE TABLE IF NOT EXISTS setup_grants(id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE IF NOT EXISTS setup_connections(id TEXT PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE IF NOT EXISTS setup_creations(id TEXT PRIMARY KEY,data TEXT NOT NULL);",
@@ -248,7 +253,7 @@ export class RemoteSetup {
   }
   grant(input: unknown) {
     const v = z
-      .object({ sourceDeviceId: uuid, rootPath: path })
+      .object({ sourceDeviceId: uuid, rootPath: path, workspaceRead: z.boolean().default(false) })
       .strict()
       .parse(input);
     if (v.sourceDeviceId === this.device.id)
@@ -270,6 +275,7 @@ export class RemoteSetup {
       launch: this.launch,
       rootPath: g.rootPath,
       sourceDeviceId: g.sourceDeviceId,
+      workspaceRead: g.workspaceRead === true,
     };
   }
   revoke(input: unknown) {
@@ -400,7 +406,7 @@ export class RemoteSetup {
     });
     let result: unknown;
     if (v.operation === "hello")
-      result = { version: 1, harnesses: this.harnesses() };
+      result = { version: 1, harnesses: this.harnesses(), workspaceRead: g.workspaceRead === true };
     else if (v.operation === "projects")
       result = {
         projects: this.store
@@ -419,6 +425,12 @@ export class RemoteSetup {
       if (e.requestId !== v.payload.requestId)
         throw new PeerError("Creation request IDs must match.");
       result = this.create(g, v.payload);
+    } else if (v.operation === "projectWorkspace") {
+      if (g.workspaceRead !== true) throw new PeerError("This setup grant does not allow viewing tasks and project context.", 403);
+      const p = this.store.projects().find((p) => p.id === v.payload.projectId);
+      if (!p) throw new PeerError("Project not found.", 404);
+      this.within(g, p.path);
+      result = this.readWorkspace(p);
     } else {
       const p = this.store.projects().find((p) => p.id === v.payload.projectId);
       if (!p) throw new PeerError("Project not found.", 404);

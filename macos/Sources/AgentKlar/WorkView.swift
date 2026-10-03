@@ -5,6 +5,7 @@ struct WorkView: View {
     var active = true
     @State private var selectedID: String?
     @State private var selectedActivityID: String?
+    @State private var selectedSessionID: String?
     @State private var remoteSelectedID: String?
     @State private var showingRemote = false
     @State private var search = ""
@@ -29,6 +30,10 @@ struct WorkView: View {
     private var selectedActivity: JSON {
         activities.first { $0["activityId"].string == selectedActivityID } ?? .null
     }
+    private var observedSessions: [JSON] {
+        (client.snapshot["observedSessions"].array ?? []).filter { $0["projectId"].string == client.projectID && (search.isEmpty || "Claude Code session".localizedCaseInsensitiveContains(search)) }
+    }
+    private var selectedSession: JSON { observedSessions.first { $0["id"].string == selectedSessionID } ?? .null }
     private var approvals: [JSON] {
         (client.snapshot["approvals"].array ?? []).filter { $0["runId"].string == selectedID }
     }
@@ -47,18 +52,36 @@ struct WorkView: View {
                 HStack(spacing: 20) { workFilters }
                 VStack(alignment: .leading, spacing: 12) { workFilters }
             }.frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, NativeStyle.pagePadding).padding(.bottom, 16)
-            if !runs.isEmpty || !activities.isEmpty || showingRemote { Divider() }
+            if !runs.isEmpty || !activities.isEmpty || !observedSessions.isEmpty || showingRemote { Divider() }
             if showingRemote {
                 NativeRemoteWorkView(client: client, selected: $remoteSelectedID) { source in followUpSource = source; newTask = true }
-            } else if runs.isEmpty && activities.isEmpty && search.isEmpty {
+            } else if runs.isEmpty && activities.isEmpty && observedSessions.isEmpty && search.isEmpty {
                 emptyWork
             } else { NativeWorkLayout {
                 VStack {
                     List(selection: $selectedID) {
+                        if !observedSessions.isEmpty {
+                            Section("Native sessions") {
+                                ForEach(observedSessions, id: \.selfID) { session in
+                                    Button { selectedID = nil; selectedActivityID = nil; selectedSessionID = session["id"].string } label: {
+                                        HStack(spacing: 10) {
+                                            NativeHarnessIcon(harness: "claude", size: 24)
+                                            VStack(alignment: .leading, spacing: 5) {
+                                                Text("Claude Code session").lineLimit(1)
+                                                Text(NativeObservedSessionDetail.stateLabel(session))
+                                                    .font(NativeStyle.caption).foregroundStyle(.secondary)
+                                            }
+                                            Spacer(minLength: 0)
+                                        }.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 6).contentShape(Rectangle())
+                                    }.buttonStyle(.plain)
+                                        .listRowBackground(selectedSessionID == session["id"].string ? Color.accentColor.opacity(0.12) : .clear)
+                                }
+                            }
+                        }
                         if !activities.isEmpty {
                             Section("Reported by your harness") {
                                 ForEach(activities, id: \.selfID) { activity in
-                                    Button { selectedID = nil; selectedActivityID = activity["activityId"].string } label: {
+                                    Button { selectedID = nil; selectedSessionID = nil; selectedActivityID = activity["activityId"].string } label: {
                                         HStack(alignment: .top, spacing: 10) {
                                             Image(systemName: "text.bubble").frame(width: 24)
                                             VStack(alignment: .leading, spacing: 5) {
@@ -86,10 +109,12 @@ struct WorkView: View {
                         }
                         }
                     }
-                    if runs.isEmpty && activities.isEmpty { Text("No matching tasks.").foregroundStyle(.secondary).padding() }
+                    if runs.isEmpty && activities.isEmpty && observedSessions.isEmpty { Text("No matching tasks.").foregroundStyle(.secondary).padding() }
                 }
             } detail: {
-                if selectedActivity != .null {
+                if selectedSession != .null {
+                    NativeObservedSessionDetail(client: client, session: selectedSession)
+                } else if selectedActivity != .null {
                     NativeReportedWorkDetail(activity: selectedActivity)
                 } else if selected["id"].string == nil {
                     NativeEmptyState("Select a task", systemImage: "list.bullet.rectangle", description: "Read its result, follow progress and review permission requests.") {}
@@ -185,8 +210,8 @@ struct WorkView: View {
             }
             Button("Cancel", role: .cancel) { reviewedApproval = nil }
         } message: { Text("Only the concrete request shown in the task detail is approved. No future requests are approved.") }
-        .onChange(of: client.projectID) { _, _ in selectedID = nil; selectedActivityID = nil; remoteSelectedID = nil; reviewedApproval = nil }
-        .onChange(of: selectedID) { _, id in if id != nil { selectedActivityID = nil } }
+        .onChange(of: client.projectID) { _, _ in selectedID = nil; selectedActivityID = nil; selectedSessionID = nil; remoteSelectedID = nil; reviewedApproval = nil }
+        .onChange(of: selectedID) { _, id in if id != nil { selectedActivityID = nil; selectedSessionID = nil } }
         .onChange(of: showingRemote) { _, _ in reviewedApproval = nil }
         .task(id: client.requestedRunID) {
             guard let id = client.requestedRunID else { return }

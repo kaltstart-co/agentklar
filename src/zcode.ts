@@ -69,6 +69,7 @@ export class ZCodeWorker {
   private turnId?: string;
   private inputId = randomUUID();
   private sending = false;
+  private rootStartTimer?: NodeJS.Timeout;
   private pending = new Map<number, { resolve: (v: any) => void; reject: () => void; timer: NodeJS.Timeout }>();
   private approvals = new Map<string, { params: string; settle: (decision: string) => void }>();
   private seen = new Set<string>();
@@ -130,6 +131,10 @@ export class ZCodeWorker {
       snapshot.settings?.permission?.mode !== "build") throw new Error("Unsupported native session");
     this.sessionId = snapshot.session.sessionId;
     this.callbacks.update({ threadId: this.sessionId });
+    if (!Array.isArray(snapshot.settings?.model?.available) || !snapshot.settings.model.available.some((entry: any) => entry?.ref && !entry.disabledReason)) {
+      this.finish("needs_attention", "ZCode has no available native model. Check your account and model settings in ZCode, then try again.");
+      return;
+    }
     if (model && (!Array.isArray(snapshot.settings?.model?.available) ||
       !snapshot.settings.model.available.some((m: any) => m?.ref?.providerId === model.providerId && m?.ref?.modelId === model.modelId && !m.disabledReason &&
         (!model.options || m.ref.options?.reasoningLevel === model.options.reasoningLevel)))) throw new Error("Native model not offered");
@@ -140,7 +145,12 @@ export class ZCodeWorker {
       content: composeWorkerPrompt(this.run), ...(model ? { modelSelection: model } : {}) }, timeout);
     if (this.finished) return;
     if (accepted?.accepted !== true || accepted.sessionId !== this.sessionId) throw new Error("Task not admitted");
-    // Admission alone never completes the run. Completion arrives as a matching root session/event.
+    // Native admission can fail before turn.started and reports only state.updated.
+    // Keep that interval bounded; admission alone never means the task completed.
+    if (!this.turnId) {
+      this.rootStartTimer = setTimeout(() => this.finish("needs_attention", "ZCode accepted the task but did not start its root turn. Check native sign-in and model access."), timeout);
+      this.rootStartTimer.unref();
+    }
   }
   private receive(chunk: Buffer) {
     if (this.finished) return;
@@ -170,11 +180,19 @@ export class ZCodeWorker {
       if (m.method === "session/requestRuntimePreferences") return;
       this.finish("needs_attention", "ZCode needs an unsupported native client action. Continue in ZCode."); return;
     }
+    if (m.method === "state.updated") {
+      const state = record(m.params);
+      if (this.sending && state && state.sessionId === this.sessionId && state.scope === "session" && state.reason === "prompt_failed") {
+        this.finish("needs_attention", "ZCode could not run the accepted task. Check its native session, sign-in and model access.");
+      }
+      return;
+    }
     if (m.method !== "session/event") return;
     const e = record(m.params), p = record(e?.payload);
     if (!e || e.sessionId !== this.sessionId) return;
     if (e.type === "turn.started") {
       if (!this.sending || p?.inputId !== this.inputId || p.backgroundSource || p.originMeta || !text(e.turnId, 200) || this.turnId) return;
+      clearTimeout(this.rootStartTimer);
       this.turnId = e.turnId; this.callbacks.update({ turnId: this.turnId }); return;
     }
     if (!this.turnId || e.turnId !== this.turnId) return;
@@ -216,6 +234,7 @@ export class ZCodeWorker {
   private finish(state: Run["state"], error?: string) {
     if (this.finished) return;
     this.finished = true;
+    clearTimeout(this.rootStartTimer);
     for (const p of [...this.approvals.values()]) p.settle("cancel");
     if (state !== "completed" && this.sessionId) this.send({ id: ++this.sequence, method: "session/stop", params: { sessionId: this.sessionId } });
     for (const p of this.pending.values()) { clearTimeout(p.timer); p.reject(); } this.pending.clear();

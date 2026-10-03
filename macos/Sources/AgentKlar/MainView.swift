@@ -30,8 +30,11 @@ struct MainView: View {
                 Label("AgentKlar", systemImage: "square.stack.3d.up").font(.system(size: 14, weight: .semibold))
                     .padding(.horizontal, 20).padding(.top, 18).padding(.bottom, 20)
                 if remoteProjects[activeProject] != nil {
-                    Label("Connections", systemImage: "link")
-                        .font(NativeStyle.body).foregroundStyle(.tint).padding(.horizontal, 20).padding(.vertical, 12)
+                    VStack(spacing: 4) {
+                        sidebarLink(("Work", "checklist"))
+                        sidebarLink(("Context", "text.alignleft"))
+                        sidebarLink(("Connections", "link"))
+                    }.padding(.horizontal, 10)
                     Button { showingRemoteSetup = true } label: {
                         Label("Manage Macs", systemImage: "desktopcomputer")
                             .frame(maxWidth: .infinity, alignment: .leading).padding(10).contentShape(Rectangle())
@@ -68,7 +71,8 @@ struct MainView: View {
                         }
                         ForEach(remoteProjects.keys.sorted(), id: \.self) { id in
                             if let remote = remoteProjects[id] {
-                                NativeRemoteProjectView(client: client, connection: remote.connection, project: remote.project)
+                                NativeRemoteProjectView(client: client, connection: remote.connection, project: remote.project,
+                                    page: Binding(get: { pages[id] ?? "Work" }, set: { pages[id] = $0 }))
                                     .frame(width: space.size.width, height: space.size.height, alignment: .topLeading)
                                     .opacity(activeProject == id ? 1 : 0).disabled(activeProject != id)
                                     .allowsHitTesting(activeProject == id).accessibilityHidden(activeProject != id)

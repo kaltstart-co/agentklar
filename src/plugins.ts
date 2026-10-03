@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { mkdirSync, writeFileSync, lstatSync, readdirSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,21 +8,22 @@ import { z } from "zod";
 import type { Project } from "./contracts.ts";
 import { projectRootIdentity } from "./project-root.ts";
 import { NativeChangeError, nativeFile, nativeHash, nativeJson, nativeObject, runNativeCommand, guardNativeChange, type NativeChangeOptions } from "./native-settings.ts";
+import { NativeObservations, observationEvents, observationHookScript } from "./observations.ts";
 
-export const pluginPreviewInput = z.object({}).strict();
+export const pluginPreviewInput = z.object({ observeActivity: z.boolean().default(false) }).strict();
 const packageRoot = fileURLToPath(new URL(import.meta.url.endsWith(".ts") ? "../" : "../../", import.meta.url));
 const skillRelative = "skills/agentklar-workflow/SKILL.md";
 const bundleName = "agentklar-workflow";
 export type PluginPreview = { id: string; projectId: string; harness: "claude"; name: string; version: string; source: string; sourceHash: string; pluginId: string; scope: "Local project"; files: { path: string; bytes: number; hash: string }[]; manifest: Record<string, unknown>; capabilities: { skills: string[]; agents: number; hooks: number; mcpServers: number }; commands: string[][]; expiresAt: string; message: string };
 export type PluginChange = Omit<PluginPreview, "commands" | "expiresAt" | "manifest" | "files"> & { id: string; state: "prepared" | "applied" | "undoing" | "undone" | "interrupted"; createdAt: string; installed: boolean; recognized: boolean; canUndo: boolean };
-type Preview = PluginPreview & { root: string; stage: string; stageIdentity: string; fingerprints: string[]; marketplace: string };
+type Preview = PluginPreview & { root: string; stage: string; stageIdentity: string; fingerprints: string[]; marketplace: string; observeToken?: string };
 type Change = PluginChange & { root: string; stage: string; stageIdentity: string; fingerprints: string[] | null; marketplace: string; installPath: string | null; fileHashes: PluginPreview["files"]; sourceSkillHash: string; phase: "prepared" | "marketplace" | "installed" | "uninstalled" };
 
 /** One native plugin package; existing individual skill installs remain separate. */
 export class NativePlugins {
   private previews = new Map<string, Preview>();
   private nativeHome: string;
-  constructor(private db: DatabaseSync, private home: string, private command: string | null, private options: NativeChangeOptions & { sourceRoot?: string } = {}) {
+  constructor(private db: DatabaseSync, private home: string, private command: string | null, private options: NativeChangeOptions & { sourceRoot?: string; observations?: NativeObservations; port?: number } = {}) {
     const env = options.env ?? process.env;
     this.nativeHome = env.CLAUDE_CONFIG_DIR ?? join(env.HOME ?? homedir(), ".claude");
     if (!isAbsolute(this.nativeHome)) throw new NativeChangeError("CLAUDE_CONFIG_DIR must be absolute.");
@@ -116,9 +117,10 @@ export class NativePlugins {
       catch { saved.canUndo = false; }
       changes.push(this.publicChange(saved));
     }
-    return { projectId: project.id, harness: "claude" as const, available, changes, message, bundle: { name: bundleName, scope: "Local project", description: "A native Claude plugin containing the existing AgentKlar workflow skill. No hooks, agents or MCP servers are added." } };
+    return { projectId: project.id, harness: "claude" as const, available, changes, message, observation: this.options.observations?.status(project.id), bundle: { name: bundleName, scope: "Local project", description: "The AgentKlar workflow skill, with optional Claude session tracking. Preview its exact components before installing." } };
   }
-  async preview(project: Project): Promise<PluginPreview> {
+  async preview(project: Project, observeActivity = false): Promise<PluginPreview> {
+    if (observeActivity && (!this.options.observations || !this.options.port)) throw new NativeChangeError("Native session tracking is unavailable in this runtime.", 503);
     const root = projectRootIdentity(project.path), rows = await this.listing(project);
     const help = await this.run(project, ["plugin", "install", "--help"]);
     if (!help.includes("--scope") || !help.includes("--json")) throw new NativeChangeError("This Claude CLI lacks the reviewed plugin commands.", 503);
@@ -140,12 +142,21 @@ export class NativePlugins {
     const manifest = { name: bundleName, version, description: "Coordinate existing AgentKlar projects through native MCP tools", author: { name: "AgentKlar" } };
     writeFileSync(join(plugin, ".claude-plugin", "plugin.json"), JSON.stringify(manifest, null, 2) + "\n", { flag: "wx", mode: 0o600 });
     writeFileSync(join(plugin, skillRelative), source.text, { flag: "wx", mode: 0o600 });
+    const observeToken = observeActivity ? randomBytes(32).toString("hex") : undefined;
+    if (observeToken) {
+      mkdirSync(join(plugin, "hooks"), { mode: 0o700 });
+      mkdirSync(join(plugin, "scripts"), { mode: 0o700 });
+      writeFileSync(join(plugin, "scripts", "observe.cjs"), observationHookScript, { flag: "wx", mode: 0o600 });
+      writeFileSync(join(plugin, "scripts", "observation.json"), JSON.stringify({ cwd: project.path, url: `http://127.0.0.1:${this.options.port}/api/native-observe/${project.id}`, token: observeToken }), { flag: "wx", mode: 0o600 });
+      const hooks = Object.fromEntries(observationEvents.map(event => [event, [{ ...(event === "Notification" ? { matcher: "permission_prompt" } : {}), hooks: [{ type: "command", command: process.execPath, args: ["${CLAUDE_PLUGIN_ROOT}/scripts/observe.cjs"], timeout: 2 }] }]]));
+      writeFileSync(join(plugin, "hooks", "hooks.json"), JSON.stringify({ hooks }, null, 2) + "\n", { flag: "wx", mode: 0o600 });
+    }
     writeFileSync(join(stage, ".claude-plugin", "marketplace.json"), JSON.stringify({ name: marketplace, owner: { name: "AgentKlar" }, description: "Reviewed local AgentKlar workflow bundle", plugins: [{ name: bundleName, source: `./plugins/${bundleName}`, version }] }, null, 2) + "\n", { flag: "wx", mode: 0o600 });
     await this.run(project, ["plugin", "validate", stage]);
     if (projectRootIdentity(project.path) !== root) throw new NativeChangeError("Project changed during plugin preview.", 409);
-    const files = this.hashFiles(stage), preview: Preview = { id: randomUUID(), projectId: project.id, harness: "claude", name: bundleName, version, source: `bundled:agentklar@${version}`, sourceHash: nativeHash(files), pluginId, scope: "Local project", files, manifest, capabilities: { skills: [bundleName], agents: 0, hooks: 0, mcpServers: 0 }, commands: [["plugin", "marketplace", "add", stage, "--scope", "local"], ["plugin", "install", pluginId, "--scope", "local", "--json"]], expiresAt: new Date(Date.now() + 600000).toISOString(), message: "Installs a real native plugin for this project. Native permissions still apply. Start a new native session or reload plugins; no model call is made here.", root, stage, stageIdentity: projectRootIdentity(stage), fingerprints: this.fingerprints(project), marketplace };
+    const files = this.hashFiles(stage), preview: Preview = { id: randomUUID(), projectId: project.id, harness: "claude", name: bundleName, version, source: `bundled:agentklar@${version}`, sourceHash: nativeHash(files), pluginId, scope: "Local project", files, manifest, capabilities: { skills: [bundleName], agents: 0, hooks: observeActivity ? observationEvents.length : 0, mcpServers: 0 }, commands: [["plugin", "marketplace", "add", stage, "--scope", "local"], ["plugin", "install", pluginId, "--scope", "local", "--json"]], expiresAt: new Date(Date.now() + 600000).toISOString(), message: observeActivity ? "Tracks Claude session start, responding, permission waiting, reply end and session end in Work. Prompts and transcripts are discarded before sending. No approvals or workers are created. Restart the native session to load the hooks." : "Installs a real native plugin for this project. Native permissions still apply. Start a new native session or reload plugins; no model call is made here.", root, stage, stageIdentity: projectRootIdentity(stage), fingerprints: this.fingerprints(project), marketplace, observeToken };
     this.previews.set(preview.id, preview);
-    const { root: identity, stage: path, stageIdentity, fingerprints, marketplace: name, ...safe } = preview; return safe;
+    const { root: identity, stage: path, stageIdentity, fingerprints, marketplace: name, observeToken: secret, ...safe } = preview; return safe;
   }
   private result(output: string, operation: string, pluginId: string) {
     let value: Record<string, unknown>; try { value = nativeObject(JSON.parse(output)); } catch { throw new NativeChangeError("Native plugin receipt is unsupported.", 503); }
@@ -157,7 +168,7 @@ export class NativePlugins {
       if (!preview || preview.projectId !== project.id || Date.parse(preview.expiresAt) <= Date.now()) throw new NativeChangeError("Plugin preview expired or was not found.", 404);
       const rows = await this.listing(project);
       if (rows.some(row => row.id === preview.pluginId) || projectRootIdentity(project.path) !== preview.root || projectRootIdentity(preview.stage) !== preview.stageIdentity || !this.packageMatches(preview.stage, preview.files) || nativeHash(this.fingerprints(project)) !== nativeHash(preview.fingerprints)) throw new NativeChangeError("Native plugin, staged bundle or settings changed. Preview again.", 409);
-      const { commands, expiresAt, manifest, files, ...rest } = preview;
+      const { commands, expiresAt, manifest, files, observeToken, ...rest } = preview;
       const change: Change = { ...rest, id: randomUUID(), state: "prepared", phase: "prepared", createdAt: new Date().toISOString(), installed: false, recognized: false, canUndo: false, installPath: null, fileHashes: files, sourceSkillHash: files.find(file => file.path.endsWith(skillRelative))!.hash };
       this.save(change); this.previews.delete(id);
       try {
@@ -172,11 +183,13 @@ export class NativePlugins {
         change.installPath = row.installPath;
         if (!this.packageMatches(change.installPath, this.hashFiles(join(change.stage, "plugins", bundleName)))) throw new NativeChangeError("Native installed plugin content differs from the preview.", 503);
         const details = await this.run(project, ["plugin", "details", bundleName]);
-        if (!details.includes(change.pluginId) || !/Skills \(1\)\s+agentklar-workflow/.test(details) || !/Hooks \(0\)/.test(details) || !/MCP servers \(0\)/.test(details) || !/Agents \(0\)/.test(details)) throw new NativeChangeError("Native component recognition was not confirmed.", 503);
+        if (!details.includes(change.pluginId) || !/Skills \(1\)\s+agentklar-workflow/.test(details) || !new RegExp(`Hooks \\(${change.capabilities.hooks}\\)`).test(details) || !/MCP servers \(0\)/.test(details) || !/Agents \(0\)/.test(details)) throw new NativeChangeError("Native component recognition was not confirmed.", 503);
         this.verifyOwnership(project, change, "installed");
         change.fingerprints = this.fingerprints(project); change.installed = true; change.recognized = true; change.canUndo = true; change.state = "applied";
         change.message = "Native listing and component inventory recognize the reviewed plugin. Start a new native session to use it; no model execution was tested.";
+        if (observeToken) this.options.observations!.enable(project, observeToken, change.id);
       } catch (error) {
+        this.options.observations?.disable(project.id, change.id);
         change.state = "interrupted"; change.message = "Native plugin change did not finish. Its private bundle and receipt remain for inspection; no automatic replacement or rollback ran.";
         try { const row = this.row(await this.listing(project), change.pluginId, project); if (row?.version === change.version && row.enabled === true && row.installPath === join(this.nativeHome, "plugins", "cache", change.marketplace, bundleName, change.version) && this.packageMatches(String(row.installPath), this.hashFiles(join(change.stage, "plugins", bundleName)))) { this.verifyOwnership(project, change, "installed"); change.phase = "installed"; change.installPath = String(row.installPath); change.installed = true; change.fingerprints = this.fingerprints(project); change.canUndo = true; } else if (!row) { this.verifyOwnership(project, change, "marketplace"); change.phase = "marketplace"; change.fingerprints = this.fingerprints(project); change.canUndo = true; } } catch {}
         this.save(change); throw error;
@@ -190,6 +203,7 @@ export class NativePlugins {
       if (!row) throw new NativeChangeError("Native plugin change not found.", 404);
       const change = JSON.parse(row.data as string) as Change;
       if (!["applied", "interrupted"].includes(change.state) || !await this.owned(project, change, await this.listing(project))) throw new NativeChangeError("Native plugin or settings changed. Undo will not overwrite them.", 409);
+      this.options.observations?.disable(project.id, change.id);
       change.state = "undoing"; change.canUndo = false; this.save(change);
       try {
         if (change.phase === "installed") {

@@ -79,7 +79,8 @@ if (args[0] === "app-server") {
   } else if (args[1] === "details") {
     const row = Object.values(read(registry)).find(row => row.id.startsWith(args[2] + "@"));
     replaceMarketplace("details", row.id.split("@")[1]);
-    console.log(`${row.id}\nSkills (1) agentklar-workflow\nAgents (0)\nHooks (${mode() === "details-bad" ? 1 : 0})\nMCP servers (0)`);
+    const hooks = read(join(row.installPath, "hooks/hooks.json")).hooks ?? {};
+    console.log(`${row.id}\nSkills (1) agentklar-workflow\nAgents (0)\nHooks (${mode() === "details-bad" ? 1 : Object.keys(hooks).length})\nMCP servers (0)`);
   } else if (args[1] === "uninstall") {
     const id = args[2], data = read(registry), settings = read(config);
     delete data[id]; delete settings.enabledPlugins?.[id]; save(registry, data); save(config, settings);

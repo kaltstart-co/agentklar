@@ -17,11 +17,14 @@ const event=(type,payload,turnId='root',sessionId='session')=>send({method:'sess
 const complete=()=>event('turn.completed',{inputId:input,resultType:'success',response:'Done',tokenCount:17});
 createInterface({input:process.stdin}).on('line',line=>{
  const m=JSON.parse(line);appendFileSync(log,line+'\n');
- if(m.method==='session/create')send({id:m.id,result:{protocol:{name:'ZCode Protocol',version:1},session:{sessionId:'session',mode:mode==='yolo'?'yolo':'build'},settings:{mode:{current:'build'},permission:mode==='unknownmode'?{}:{mode:'build'},model:{available:[{ref:{providerId:'native',modelId:'model',options:{reasoningLevel:'high'}}}]}}}});
+ if(m.method==='session/create')send({id:m.id,result:{protocol:{name:'ZCode Protocol',version:1},session:{sessionId:'session',mode:mode==='yolo'?'yolo':'build'},settings:{mode:{current:'build'},permission:mode==='unknownmode'?{}:{mode:'build'},model:{available:mode==='noModels'?[]:[{ref:{providerId:'native',modelId:'model',options:{reasoningLevel:'high'}}}]}}}});
  else if(m.method==='session/subscribe')send({id:m.id,result:{sessionId:'session',eventSeq:0,events:[]}});
  else if(m.method==='session/send'){
   input=m.params.inputId;
   send({id:m.id,result:{sessionId:'session',accepted:true,stateRevision:1}});
+  if(mode==='acceptedOnly')return;
+  if(mode==='preTurnFailure'){send({method:'state.updated',params:{scope:'session',sessionId:'session',reason:'prompt_failed',patch:{lastError:'PRIVATE AUTH'}}});return;}
+  if(mode==='foreignStateFailure')send({method:'state.updated',params:{scope:'session',sessionId:'other',reason:'prompt_failed'}});
   event('turn.started',{inputId:input});
   if(mode==='hang')return;
   if(mode==='malformed'){process.stdout.write('{bad\n');return;}
@@ -121,4 +124,19 @@ await worker.closed; process.exit(0);\n`);
     if (descendant) { try { process.kill(descendant, "SIGKILL"); } catch {} }
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+
+test("ZCode native pre-turn failure is reported without leaking its private state",async()=>{
+ const f=fixture('preTurnFailure');try{await f.worker.closed;assert.equal(f.run().state,'needs_attention');assert.match(f.run().error!,/could not run the accepted task/);assert.equal(f.run().turnId,undefined);assert.doesNotMatch(JSON.stringify(f.run())+JSON.stringify(f.events),/PRIVATE AUTH/);assert.ok(f.wire().some(m=>m.method==='session\/stop'));}finally{f.clean();}
+ const foreign=fixture('foreignStateFailure');try{await foreign.worker.closed;assert.equal(foreign.run().state,'completed');}finally{foreign.clean();}
+});
+
+test("ZCode accepted task without a root start times out and closes owned processes",async()=>{
+ const f=fixture('acceptedOnly');try{await f.worker.closed;assert.equal(f.run().state,'needs_attention');assert.match(f.run().error!,/did not start its root turn/);assert.equal(f.run().turnId,undefined);assert.equal(f.run().workerPid,undefined);assert.ok(f.wire().some(m=>m.method==='session\/stop'));}finally{f.clean();}
+});
+
+
+test("ZCode refuses a native catalog with no available model before prompt admission",async()=>{
+ const f=fixture('noModels');try{await f.worker.closed;assert.equal(f.run().state,'needs_attention');assert.match(f.run().error!,/no available native model/);assert.ok(!f.wire().some(m=>m.method==='session/send'));}finally{f.clean();}
 });

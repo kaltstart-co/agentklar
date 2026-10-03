@@ -14,6 +14,8 @@ jobs:
       - run: npm run build
       - run: npm test
       - run: npm run smoke:package
+      - name: Check offline signed release gates
+        run: python3 -m unittest discover -s macos/Tests -p test_release.py
   macos-native:
     name: Native Mac app (ARM64)
     runs-on: macos-15

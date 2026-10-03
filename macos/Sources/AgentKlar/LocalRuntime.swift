@@ -51,12 +51,14 @@ enum LocalBoundary {
     private let home: URL
     private var environment: [String: String]
     private let resources: URL?
+    private let manifestHash: String?
     private var bundledNode: URL?
     private(set) var isBundledRuntime = false
 
-    init(home: URL = FileManager.default.homeDirectoryForCurrentUser, environment: [String: String] = ProcessInfo.processInfo.environment, resources: URL? = Bundle.main.resourceURL) {
+    init(home: URL = FileManager.default.homeDirectoryForCurrentUser, environment: [String: String] = ProcessInfo.processInfo.environment, resources: URL? = Bundle.main.resourceURL, manifestHash: String? = Bundle.main.object(forInfoDictionaryKey: "AgentKlarRuntimeManifestSHA256") as? String) {
         self.home = home
         self.resources = resources
+        self.manifestHash = manifestHash
         var env = environment
         let runtimeRoot = home.appendingPathComponent(".local/share/agentklar")
         let privateBins = ((try? FileManager.default.contentsOfDirectory(atPath: runtimeRoot.path)) ?? [])
@@ -83,7 +85,7 @@ enum LocalBoundary {
     }
     func discover() async throws {
         guard let resources else { throw LocalError.message("Open the complete AgentKlar app to start its bundled runtime.") }
-        guard let expected = Bundle.main.object(forInfoDictionaryKey: "AgentKlarRuntimeManifestSHA256") as? String else { throw LocalError.message("The app's runtime identity is missing. Use a complete AgentKlar app.") }
+        guard let expected = manifestHash else { throw LocalError.message("The app's runtime identity is missing. Use a complete AgentKlar app.") }
         let cache = home.appendingPathComponent("Library/Application Support/AgentKlar/runtimes", isDirectory: true)
         let prepared = try await Task.detached {
             try BundledRuntime.prepare(resources: resources, cache: cache, expectedHash: expected)

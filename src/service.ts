@@ -49,6 +49,8 @@ import { ZCodeWorker } from "./zcode.ts";
 import { Instructions, InstructionError, instructionFileSchema, instructionPreviewSchema } from "./instructions.ts";
 import { RemoteSetup } from "./remote-setup.ts";
 import { Activities, ActivityError, workReportSchema } from "./activity.ts";
+import { NativeObservations, observationSchema } from "./observations.ts";
+import { bodyLimit } from "hono/body-limit";
 import { NativeSetup, SetupError, type NativeSetupOptions } from "./setup.ts";
 import { Onboarding, onboardingPreferencesInput, onboardingProjectInput, onboardingSetupInput, setupHarness } from "./onboarding.ts";
 import { ProjectSkills, SkillError, skillPreviewInput, skillIdInput, skillRemoveInput } from "./skills.ts";
@@ -213,6 +215,7 @@ export function createService(
   }
   store.db.exec("CREATE TABLE IF NOT EXISTS benchmark_cache (id INTEGER PRIMARY KEY CHECK(id=1), snapshot TEXT NOT NULL)");
   const activities = new Activities(store);
+  const observations = new NativeObservations(store);
   let cachedBenchmarks: unknown;
   try {
     const row = store.db.prepare("SELECT snapshot FROM benchmark_cache WHERE id=1").get() as { snapshot: string } | undefined;
@@ -302,7 +305,7 @@ export function createService(
   const instructions = new Instructions(store.db);
   const skills = new ProjectSkills(store.db, home, skillOptions);
   const nativeDefaults = new NativeSettings(store.db, { codex: nativeCommand, claude: claudeCommand }, { env: setupOptions.env });
-  const nativePlugins = new NativePlugins(store.db, home, claudeCommand, { env: setupOptions.env });
+  const nativePlugins = new NativePlugins(store.db, home, claudeCommand, { env: setupOptions.env, observations, port });
   const nativeOperations = new Set<Promise<unknown>>();
   let nativeWrites = 0;
   async function nativeOperation<T>(action: () => Promise<T>, write = false): Promise<T> {
@@ -318,7 +321,15 @@ export function createService(
   const personalSkills: Project = { id: "__personal_skills__", name: "Personal skills", path: personalHome, preference: "balanced", roles: [], createdAt: "" };
   const nativeSetup = new NativeSetup(store.db, home, port, { codex: nativeCommand, claude: claudeCommand, muse: museCommand, opencode: opencodeCommand, antigravity: executable("agy") }, setupOptions);
   const onboarding = new Onboarding(store.db);
-  const remoteSetup = new RemoteSetup(store, devices.device, nativeSetup, selectedHarnesses, peerTransport, nativeOperation);
+  const remoteSetup = new RemoteSetup(store, devices.device, nativeSetup, selectedHarnesses, peerTransport, nativeOperation, project => ({
+    runs: store.runs().filter(run => run.projectId === project.id).slice(0, 50).map(run => ({
+      id: run.id, harness: run.harness, state: run.state, prompt: run.prompt.slice(0, 4000),
+      promptTruncated: run.prompt.length > 4000, result: run.result.slice(0, 8000),
+      resultTruncated: !!run.resultTruncated || run.result.length > 8000,
+      effectiveModel: run.effectiveModel, tokens: run.tokens, createdAt: run.createdAt, updatedAt: run.updatedAt,
+    })),
+    activities: activities.list(project.id).slice(0, 50), context: store.context(project.id),
+  }));
   function registerProject(input: z.infer<typeof onboardingProjectInput>) {
     let path: string;
     try {
@@ -503,6 +514,13 @@ export function createService(
     const origin = c.req.header("origin");
     if (origin && !origins.has(origin))
       return c.json({ error: "Remote origins are not allowed" }, 403);
+    if (c.req.path.startsWith("/api/native-observe/")) {
+      if (c.req.method !== "POST" || origin || c.req.header("cookie")) return c.json({}, 403);
+      if (quiesced || stopping) return c.json({}, 503);
+      mutations++;
+      try { await next(); } finally { mutations--; }
+      return;
+    }
     if (c.req.path.startsWith("/api/operator/")) {
       if (!operator || c.req.header("authorization") !== undefined || c.req.header("origin") !== undefined || c.req.header("cookie") !== undefined ||
           !matches(c.req.header("x-agentklar-operator-key"), operator.key) ||
@@ -547,7 +565,7 @@ export function createService(
       return c.json({ error: "Only the trusted local UI may check AgentKlar updates" }, 403);
     if (c.req.path.includes("/setup/") && (!ui || mcp || (c.req.method !== "GET" && (!origin || !origins.has(origin)))))
       return c.json({ error: "Only the trusted local UI may read or change native MCP setup" }, 403);
-    if (/^\/api\/projects\/[^/]+\/(?:native-settings|plugins)(?:\/|$)/.test(c.req.path) && (!ui || mcp || (c.req.method !== "GET" && (!origin || !origins.has(origin)))))
+    if (/^\/api\/projects\/[^/]+\/(?:native-settings|plugins|observations)(?:\/|$)/.test(c.req.path) && (!ui || mcp || (c.req.method !== "GET" && (!origin || !origins.has(origin)))))
       return c.json({ error: "Only the trusted local UI may manage native defaults and plugins" }, 403);
     if (
       (c.req.path.startsWith("/api/approvals/") ||
@@ -700,7 +718,7 @@ export function createService(
       if (!input.success) return c.json({ error: "Invalid native change request" }, 400);
       const project = store.projects().find(p => p.id === c.req.param("id"))!;
       return c.json(await nativeOperation(async () => {
-        if (kind === "plugins") return operation === "preview" ? nativePlugins.preview(project) : operation === "apply" ? nativePlugins.apply(project, nativePreviewId.parse(input.data).previewId) : nativePlugins.undo(project, nativeChangeId.parse(input.data).changeId);
+        if (kind === "plugins") return operation === "preview" ? nativePlugins.preview(project, pluginPreviewInput.parse(input.data).observeActivity) : operation === "apply" ? nativePlugins.apply(project, nativePreviewId.parse(input.data).previewId) : nativePlugins.undo(project, nativeChangeId.parse(input.data).changeId);
         return operation === "preview" ? nativeDefaults.preview(project, nativeSettingInput.parse(input.data)) : operation === "apply" ? nativeDefaults.apply(project, nativePreviewId.parse(input.data).previewId) : nativeDefaults.undo(project, nativeChangeId.parse(input.data).changeId);
       }, operation !== "preview"));
     });
@@ -1252,6 +1270,7 @@ export function createService(
       projects: store.projects(),
       runs: store.runs().map(compactRun),
       activities: activities.list(),
+      observedSessions: observations.list(),
       approvals: store.approvals(),
       device: devices.device,
       peers: peers.settings().peers,
@@ -1268,7 +1287,23 @@ export function createService(
     const id = c.req.param("id");
     if (!store.projects().some(p => p.id === id)) return c.json({ error: "Project not found." }, 404);
     c.header("Cache-Control", "no-store");
-    return c.json({ activities: activities.list(id) });
+    return c.json({ activities: activities.list(id), observedSessions: observations.list(id) });
+  });
+  app.use("/api/native-observe/*", bodyLimit({ maxSize: 8192, onError: c => c.json({}, 413) }));
+  app.post("/api/native-observe/:id", async c => {
+    const id = c.req.param("id"), authorization = c.req.header("authorization") ?? "";
+    if (!z.uuid().safeParse(id).success || !/^Bearer [a-f0-9]{64}$/.test(authorization) || new URL(c.req.url).search) return c.json({}, 401);
+    const input = observationSchema.safeParse(await c.req.json().catch(() => null));
+    if (!input.success) return c.json({}, 400);
+    // Empty hook responses never approve, block, inject context or start a worker.
+    return c.json({}, observations.accept(id, authorization.slice(7), input.data) ? 200 : 403);
+  });
+  app.post("/api/projects/:id/observations/disable", async c => {
+    const id = c.req.param("id");
+    if (!store.projects().some(p => p.id === id)) return c.json({ error: "Project not found." }, 404);
+    if (!z.object({}).strict().safeParse(await c.req.json().catch(() => null)).success) return c.json({ error: "Provide an empty object." }, 400);
+    observations.disable(id);
+    return c.json(observations.status(id));
   });
   app.post("/api/work/report", async c => {
     if (c.req.header("authorization") !== `Bearer ${bearer}`)

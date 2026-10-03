@@ -336,6 +336,22 @@ struct NativeRemoteWorkView: View {
                         Text("Owner run: \(current["ownerRunId"].string ?? "Acceptance not confirmed")").font(NativeStyle.caption).textSelection(.enabled)
                         Text("Connection: \(current["connection"].string ?? "Unknown") · Last known state: \(current["lastKnownRun"]["state"].string ?? "Unknown")")
                         if let time = current["lastObservedAt"].string { Text("Observed: \(time). The owner worker may have changed since then.").font(NativeStyle.caption) }
+                        if current["lastKnownRun"] != .null {
+                            NativeDetailButton("Last reported model, usage and tools") {
+                                LabeledContent("Model", value: current["lastKnownRun"]["effectiveModel"].string ?? "Not reported")
+                                Text(current["lastKnownRun"]["tokens"].number.map { "\($0.formatted(.number.precision(.fractionLength(0)))) reported tokens" } ?? "Token usage not reported")
+                                if current["lastKnownRun"]["nativeTools"] != .null {
+                                    Text(current["lastKnownRun"]["nativeTools"]["message"].string ?? "Tools reported by the owner worker")
+                                    if let checked = current["lastKnownRun"]["nativeTools"]["checkedAt"].string { Text("Observed: " + checked).font(NativeStyle.caption) }
+                                    Text((current["lastKnownRun"]["nativeTools"]["tools"].array ?? []).compactMap(\.string).joined(separator: ", "))
+                                } else { Text("Tool names not reported").foregroundStyle(.secondary) }
+                            }.id("remote-native-evidence:" + id)
+                        }
+                        if current["routing"] != .null {
+                            NativeDetailButton("Model choice at launch") {
+                                NativeRemoteModelEvidence(routing: current["routing"], run: current["lastKnownRun"])
+                            }.id("remote-routing:" + id)
+                        }
                         if let error = current["error"].string { Text(error).foregroundStyle(.orange) }
                         HStack {
                             Button("Check owner status") { refreshOwner(id, stop: false) }
@@ -363,6 +379,35 @@ struct NativeRemoteWorkView: View {
     private func refreshOwner(_ id: String, stop: Bool) {
         guard !working, client.connected else { return }; working = true; message = ""
         Task { defer { working = false }; do { let value = try await client.request("/runs/\(id)" + (stop ? "/stop" : ""), body: stop ? [:] : nil); if selected == id { observed = value }; await client.refresh() } catch { if selected == id { message = error.localizedDescription } } }
+    }
+}
+
+// Saved launch evidence stays separate from the owner's last observed worker report.
+struct NativeRemoteModelEvidence: View {
+    let routing: JSON
+    let run: JSON
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            LabeledContent("Requested coding app", value: routing["selected"]["harness"].string ?? "Unknown")
+            LabeledContent("Requested model", value: routing["selected"]["model"].string ?? "Native default")
+            LabeledContent("Owner reported model", value: run["effectiveModel"].string ?? "Not reported")
+            if let device = routing["selected"]["device"]["label"].string { LabeledContent("Computer", value: device) }
+            if let checked = routing["catalogCheckedAt"].string { Text("Native model list checked: " + checked).font(NativeStyle.caption) }
+            LabeledContent("Routing preset", value: routing["routingPreset"]["name"].string ?? routing["preference"].string ?? "Not recorded")
+            ForEach(Array((routing["reasons"].array ?? []).enumerated()), id: \.offset) { _, reason in
+                if let text = reason.string { Text(text).textSelection(.enabled) }
+            }
+            ForEach(Array((routing["warnings"].array ?? []).enumerated()), id: \.offset) { _, warning in
+                if let text = warning.string { Text(text).foregroundStyle(.orange).textSelection(.enabled) }
+            }
+            if routing["selected"]["benchmark"] != .null {
+                NativeDetailButton("Benchmark evidence") {
+                    Text("Reference scores do not predict this task's result or subscription cost.").font(NativeStyle.caption)
+                    Text(routing["selected"]["benchmark"].prettyText).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+                }
+            }
+            Text("Launch choices are saved evidence. Owner reports may be older than the current worker.").font(NativeStyle.caption).foregroundStyle(.secondary)
+        }.frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

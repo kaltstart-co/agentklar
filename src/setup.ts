@@ -179,7 +179,7 @@ function openCodeLayers(projectPath: string, env: NodeJS.ProcessEnv, target: str
   }
   return [...new Set(paths)];
 }
-function openCodeWrite(path: string, expected: string, expectedParent: string, operation: "apply" | "undo", entry: OpenCodeSetupEntry) {
+function openCodeWrite(path: string, expected: string, expectedParent: string, operation: "apply" | "undo", entry: OpenCodeSetupEntry, previous: OpenCodeSetupEntry | null = null) {
   const parent = dirname(path);
   try {
     if (museParentIdentity(path, "OpenCode") !== expectedParent) throw new SetupError("OpenCode settings folder changed. Refresh status.", 409);
@@ -188,13 +188,13 @@ function openCodeWrite(path: string, expected: string, expectedParent: string, o
     const parentIdentity = museParentIdentity(path, "OpenCode"), before = configRead(path);
     if (before.fingerprint !== expected) throw new SetupError("OpenCode settings changed. Refresh status.", 409);
     const config = openCodeConfig(before.text), mcp = optionalObject(config.mcp);
-    if (operation === "apply" && Object.hasOwn(mcp, "agentklar")) throw new SetupError("OpenCode agentklar entry already exists.", 409);
+    if (operation === "apply" && (previous === null ? Object.hasOwn(mcp, "agentklar") : entryHash(mcp.agentklar) !== entryHash(previous))) throw new SetupError("OpenCode agentklar entry already exists.", 409);
     if (operation === "undo" && entryHash(mcp.agentklar) !== entryHash(entry)) throw new SetupError("OpenCode agentklar entry changed. It will not be removed.", 409);
     const source = before.text ?? '{\n  "$schema": "https://opencode.ai/config.json"\n}\n';
-    const serialized = applyEdits(source, modify(source, ["mcp", "agentklar"], operation === "apply" ? entry : undefined, { formattingOptions: { insertSpaces: true, tabSize: 2 } }));
+    const serialized = applyEdits(source, modify(source, ["mcp", "agentklar"], operation === "apply" ? entry : previous ?? undefined, { formattingOptions: { insertSpaces: true, tabSize: 2 } }));
     if (Buffer.byteLength(serialized) > maxConfigBytes) throw new SetupError("OpenCode settings would exceed the safe file size.");
     const updated = openCodeConfig(serialized), updatedEntry = optionalObject(updated.mcp).agentklar;
-    if (operation === "apply" ? entryHash(updatedEntry) !== entryHash(entry) : updatedEntry !== undefined) throw new SetupError("OpenCode settings edit could not be verified.");
+    if (operation === "apply" ? entryHash(updatedEntry) !== entryHash(entry) : previous === null ? updatedEntry !== undefined : entryHash(updatedEntry) !== entryHash(previous)) throw new SetupError("OpenCode settings edit could not be verified.");
     const mode = before.text === null ? 0o600 : lstatSync(path).mode & 0o777;
     const temporary = join(parent, `.agentklar-${randomUUID()}.tmp`);
     let fd: number | undefined;
@@ -211,7 +211,7 @@ function openCodeWrite(path: string, expected: string, expectedParent: string, o
     throw new SetupError("OpenCode settings cannot be changed safely. Inspect native settings.");
   }
 }
-function museWrite(path: string, expected: string, expectedParent: string, operation: "apply" | "undo", entry: SetupEntry) {
+function museWrite(path: string, expected: string, expectedParent: string, operation: "apply" | "undo", entry: SetupEntry, previous: SetupEntry | null = null) {
   const parent = dirname(path);
   try {
     if (museParentIdentity(path) !== expectedParent) throw new SetupError("Muse settings folder changed. Refresh status before trying again.", 409);
@@ -223,11 +223,11 @@ function museWrite(path: string, expected: string, expectedParent: string, opera
     const settings = museSettings(before.text);
     const servers = optionalObject(settings.mcpServers);
     if (operation === "apply") {
-      if (Object.hasOwn(servers, "agentklar")) throw new SetupError("Muse agentklar entry already exists.", 409);
+      if (previous === null ? Object.hasOwn(servers, "agentklar") : entryHash(servers.agentklar) !== entryHash(previous)) throw new SetupError("Muse agentklar entry changed. Refresh status.", 409);
       settings.mcpServers = { ...servers, agentklar: entry };
     } else {
       if (!Object.hasOwn(servers, "agentklar") || entryHash(servers.agentklar) !== entryHash(entry)) throw new SetupError("Muse agentklar entry changed. It will not be removed.", 409);
-      const remaining = { ...servers }; delete remaining.agentklar;
+      const remaining = { ...servers }; if (previous) remaining.agentklar = previous; else delete remaining.agentklar;
       settings.mcpServers = remaining;
     }
     const serialized = JSON.stringify(settings, null, 2) + "\n";
@@ -283,8 +283,8 @@ export function nativeSetupCommand(command: string, args: string[], cwd: string,
 }
 type ReadState = { target: string; targetFingerprint: string; parentIdentity: string | null; fingerprint: string; entry: unknown | null; entryHash: string | null; root: string; shadow: boolean };
 type SavedPreview = SetupPreview & Omit<ReadState, "entry"> & { expires: number };
-type SavedChange = SetupChange & { target: string; entry: SetupEntry | OpenCodeSetupEntry | AntigravitySetupEntry; entryHash: string; root: string; projectPath: string };
-const changeMetadata = ({ target, entry, entryHash, root, projectPath, ...change }: SavedChange): SetupChange => change;
+type SavedChange = SetupChange & { target: string; entry: SetupEntry | OpenCodeSetupEntry | AntigravitySetupEntry; entryHash: string; root: string; projectPath: string; previousEntry?: NonNullable<SetupPreview["previousEntry"]> };
+const changeMetadata = ({ target, entry, entryHash, root, projectPath, previousEntry, ...change }: SavedChange): SetupChange => change;
 export class NativeSetup {
   private env: NodeJS.ProcessEnv;
   private previews = new Map<string, SavedPreview>();
@@ -516,25 +516,51 @@ export class NativeSetup {
     if (harness === "claude" || harness === "muse") return entryHash(value) === entryHash(this.entry);
     return entryHash(value) === entryHash({ command: this.entry.command, args: this.entry.args, env: this.entry.env });
   }
+  // Only a local AgentKlar bridge with the same service home and port is eligible.
+  // Never return or save an unrecognized native entry: it may contain credentials.
+  private previousBridge(harness: SetupHarness, value: unknown): SetupPreview["previousEntry"] | null {
+    if (!["codex", "muse", "opencode"].includes(harness)) return null;
+    try {
+      const entry = nativeObject(value);
+      const allowed = harness === "opencode" ? ["type", "command", "environment"] : harness === "codex" ? ["command", "args", "env"] : ["type", "command", "args", "env"];
+      if (Object.keys(entry).length !== allowed.length || Object.keys(entry).some((key) => !allowed.includes(key))) return null;
+      if (harness === "opencode" ? entry.type !== "local" : harness === "muse" && entry.type !== "stdio") return null;
+      const env = nativeObject(harness === "opencode" ? entry.environment : entry.env);
+      if (Object.keys(env).length !== 2 || env.AGENTKLAR_HOME !== this.entry.env.AGENTKLAR_HOME || env.AGENTKLAR_PORT !== this.entry.env.AGENTKLAR_PORT) return null;
+      const argv = harness === "opencode" ? entry.command : [entry.command, ...(Array.isArray(entry.args) ? entry.args : [])];
+      if (!Array.isArray(argv) || argv.length !== 2 || argv.some((arg) => typeof arg !== "string" || !isAbsolute(arg))) return null;
+      const [node, bridge] = argv as string[];
+      if (basename(node!) !== "node" || realpathSync(node!) !== node! || !lstatSync(node!).isFile()) return null;
+      accessSync(node!, constants.X_OK);
+      if (!bridge!.endsWith("/dist/server/mcp.js") || realpathSync(bridge!) !== bridge!) return null;
+      if (configRead(bridge!).text === null) return null;
+      const packagePath = join(dirname(dirname(dirname(bridge!))), "package.json");
+      const manifest = configRead(packagePath);
+      if (manifest.text === null || nativeObject(JSON.parse(manifest.text)).name !== "agentklar") return null;
+      return JSON.parse(JSON.stringify(entry)) as NonNullable<SetupPreview["previousEntry"]>;
+    } catch { return null; }
+  }
   private latest(project: Project, harness: SetupHarness) {
     const rows = this.db.prepare("SELECT data FROM native_setup_changes WHERE projectId=? ORDER BY rowid DESC").all(project.id);
     return rows.map((row) => JSON.parse(row.data as string) as SavedChange).find((change) => change.harness === harness);
   }
   private async statusOperation(project: Project, harness: SetupHarness): Promise<SetupStatus> {
     const change = this.latest(project, harness);
-    const base = { harness, projectId: project.id, scope: harness === "claude" ? "Local project" as const : "User" as const, checkedAt: new Date().toISOString(), change: change ? changeMetadata(change) : null, canUndo: false };
+    const base = { harness, projectId: project.id, scope: harness === "claude" ? "Local project" as const : "User" as const, checkedAt: new Date().toISOString(), change: change ? changeMetadata(change) : null, canUndo: false, canUpdate: false };
     try {
       const current = await this.read(project, harness);
       const configured = current.entry !== null && this.exact(harness, current.entry);
       const canUndo = !!change && ["applied", "interrupted"].includes(change.state) && (change.operation === "apply" || change.state === "interrupted") && change.target === current.target && change.root === current.root && change.entryHash === current.entryHash && !current.shadow;
-      return { ...base, canUndo, status: current.shadow || (current.entry !== null && !configured) ? "conflict" : configured ? "configured" : "missing", message: current.shadow ? "Another native scope defines agentklar. Resolve it in native MCP settings before using setup here." : configured ? harness === "antigravity" ? "AgentKlar MCP entry is configured for native Antigravity CLI. Start or restart agy to load it. Worker execution is unavailable; native trust and permissions still apply." : harness === "opencode" ? "AgentKlar has a local OpenCode config entry. Start or restart OpenCode to load it. Runtime and remote settings are not verified; native trust and permissions still apply." : "AgentKlar entry is configured. Start or restart your native session to load it. Native trust and permissions still apply." : current.entry !== null ? "A different agentklar entry exists. Resolve it in native MCP settings; AgentKlar will not overwrite it." : "AgentKlar has no entry in this native scope." };
+      const canUpdate = !configured && !current.shadow && current.entry !== null && this.previousBridge(harness, current.entry) !== null;
+      return { ...base, canUndo, canUpdate, status: current.shadow || (current.entry !== null && !configured) ? "conflict" : configured ? "configured" : "missing", message: current.shadow ? "Another native scope defines agentklar. Resolve it in native MCP settings before using setup here." : configured ? harness === "antigravity" ? "AgentKlar MCP entry is configured for native Antigravity CLI. Start or restart agy to load it. Worker execution is unavailable; native trust and permissions still apply." : harness === "opencode" ? "AgentKlar has a local OpenCode config entry. Start or restart OpenCode to load it. Runtime and remote settings are not verified; native trust and permissions still apply." : "AgentKlar entry is configured. Start or restart your native session to load it. Native trust and permissions still apply." : canUpdate ? "An older AgentKlar connection uses this service. Review the old and new bridge paths before updating it." : current.entry !== null ? "A different agentklar entry exists. Resolve it in native MCP settings; AgentKlar will not overwrite it." : "AgentKlar has no entry in this native scope." };
     } catch (e) { return { ...base, status: "unavailable", message: e instanceof SetupError ? e.message : "Native MCP status is unavailable." }; }
   }
   private async previewOperation(project: Project, harness: SetupHarness): Promise<SetupPreview> {
     const current = await this.read(project, harness);
-    if (current.shadow || current.entry !== null) throw new SetupError(current.entry !== null && this.exact(harness, current.entry) ? "AgentKlar is already configured. Start or restart a native session." : "A native agentklar entry already exists or another scope defines it. Resolve it in native settings first.", 409);
+    const previousEntry = current.entry === null ? null : this.previousBridge(harness, current.entry);
+    if (current.shadow || (current.entry !== null && (this.exact(harness, current.entry) || !previousEntry))) throw new SetupError(current.entry !== null && this.exact(harness, current.entry) ? "AgentKlar is already configured. Start or restart a native session." : "A native agentklar entry already exists or another scope defines it. Resolve it in native settings first.", 409);
     const args = harness === "muse" || harness === "opencode" ? null : this.addArgs(harness);
-    const preview: SetupPreview = { id: randomUUID(), projectId: project.id, harness, scope: harness === "claude" ? "Local project" : "User", configPath: current.target, cwd: harness === "claude" ? project.path : null, command: args ? [this.commands[harness]!, ...args].map(quote).join(" ") : null, entry: this.desired(harness), createdAt: new Date().toISOString() };
+    const preview: SetupPreview = { id: randomUUID(), projectId: project.id, harness, scope: harness === "claude" ? "Local project" : "User", configPath: current.target, cwd: harness === "claude" ? project.path : null, command: args ? [this.commands[harness]!, ...args].map(quote).join(" ") : null, entry: this.desired(harness), operation: previousEntry ? "replace" : "add", ...(previousEntry ? { previousEntry } : {}), createdAt: new Date().toISOString() };
     for (const [id, saved] of this.previews) if (saved.expires <= Date.now()) this.previews.delete(id);
     // ponytail: one local service holds at most 100 previews; use session limits if multi-user support is added.
     if (this.previews.size >= 100) this.previews.delete(this.previews.keys().next().value!);
@@ -542,9 +568,9 @@ export class NativeSetup {
     this.previews.set(preview.id, { ...preview, ...snapshot, expires: Date.now() + 600000 });
     return preview;
   }
-  private addArgs(harness: SetupHarness) {
-    const env = Object.entries(this.entry.env).flatMap(([key, value]) => ["--env", `${key}=${value}`]);
-    return harness === "antigravity" ? ["mcp","add",...env,"agentklar","--",this.entry.command,...this.entry.args] : harness === "codex" ? ["mcp", "add", "agentklar", ...env, "--", this.entry.command, ...this.entry.args] : ["mcp", "add", "--scope", "local", "--transport", "stdio", "agentklar", ...env, "--", this.entry.command, ...this.entry.args];
+  private addArgs(harness: SetupHarness, entry: { command: string; args: string[]; env: Record<string, string> } = this.entry) {
+    const env = Object.entries(entry.env).flatMap(([key, value]) => ["--env", `${key}=${value}`]);
+    return harness === "antigravity" ? ["mcp","add",...env,"agentklar","--",entry.command,...entry.args] : harness === "codex" ? ["mcp", "add", "agentklar", ...env, "--", entry.command, ...entry.args] : ["mcp", "add", "--scope", "local", "--transport", "stdio", "agentklar", ...env, "--", entry.command, ...entry.args];
   }
   private async exclusive<T>(action: () => Promise<T>) {
     // ponytail: native writes share one lock across this local service; use per-config locks if throughput matters.
@@ -556,15 +582,15 @@ export class NativeSetup {
       const preview = this.previews.get(id);
       if (!preview || preview.projectId !== project.id || preview.harness !== harness || preview.expires <= Date.now()) throw new SetupError("Setup preview expired or was not found. Preview setup again.", 404);
       const current = await this.read(project, harness);
-      if (current.target !== preview.target || current.fingerprint !== preview.fingerprint || current.root !== preview.root || current.entry !== null || current.shadow) throw new SetupError("Native settings changed. Refresh status and preview setup again.", 409);
+      if (current.target !== preview.target || current.fingerprint !== preview.fingerprint || current.root !== preview.root || (preview.previousEntry ? current.entryHash !== entryHash(preview.previousEntry) || !this.previousBridge(harness, current.entry) : current.entry !== null) || current.shadow) throw new SetupError("Native settings changed. Refresh status and preview setup again.", 409);
       const now = new Date().toISOString();
-      const change: SavedChange = { id: randomUUID(), projectId: project.id, harness, operation: "apply", state: "prepared", message: null, createdAt: now, updatedAt: now, target: current.target, root: current.root, projectPath: project.path, entry: this.desired(harness), entryHash: "" };
+      const change: SavedChange = { id: randomUUID(), projectId: project.id, harness, operation: "apply", state: "prepared", message: null, createdAt: now, updatedAt: now, target: current.target, root: current.root, projectPath: project.path, entry: this.desired(harness), entryHash: "", ...(preview.previousEntry ? { previousEntry: preview.previousEntry, replacesExisting: true } : {}) };
       // Desired native metadata is durable before add, so interrupted changes remain explicitly recoverable.
       change.entryHash = entryHash(harness === "codex" ? { command: this.entry.command, args: this.entry.args, env: this.entry.env } : change.entry);
       this.save(change); this.previews.delete(id);
       return this.finish(change, project, async () => {
-        if (harness === "muse") museWrite(current.target, current.targetFingerprint, current.parentIdentity!, "apply", this.entry);
-        else if (harness === "opencode") openCodeWrite(current.target, current.targetFingerprint, current.parentIdentity!, "apply", this.openCodeEntry());
+        if (harness === "muse") museWrite(current.target, current.targetFingerprint, current.parentIdentity!, "apply", this.entry, (preview.previousEntry as SetupEntry | undefined) ?? null);
+        else if (harness === "opencode") openCodeWrite(current.target, current.targetFingerprint, current.parentIdentity!, "apply", this.openCodeEntry(), (preview.previousEntry as OpenCodeSetupEntry | undefined) ?? null);
         else {
           const result = await this.command(harness, this.addArgs(harness), project);
           if (result.code !== 0) throw new SetupError("Native add did not finish successfully. Refresh status before trying again.", 503);
@@ -585,14 +611,14 @@ export class NativeSetup {
       if (change.target !== current.target || change.projectPath !== project.path || change.root !== current.root || change.entryHash !== current.entryHash || current.shadow) throw new SetupError("Native entry has changed or is absent. AgentKlar will not remove it. Inspect native MCP settings.", 409);
       change.state = "prepared"; change.operation = "undo"; change.message = null; change.updatedAt = new Date().toISOString(); this.save(change);
       return this.finish(change, project, async () => {
-        if (harness === "muse") museWrite(current.target, current.targetFingerprint, current.parentIdentity!, "undo", change.entry as SetupEntry);
-        else if (harness === "opencode") openCodeWrite(current.target, current.targetFingerprint, current.parentIdentity!, "undo", change.entry as OpenCodeSetupEntry);
+        if (harness === "muse") museWrite(current.target, current.targetFingerprint, current.parentIdentity!, "undo", change.entry as SetupEntry, (change.previousEntry as SetupEntry | undefined) ?? null);
+        else if (harness === "opencode") openCodeWrite(current.target, current.targetFingerprint, current.parentIdentity!, "undo", change.entry as OpenCodeSetupEntry, (change.previousEntry as OpenCodeSetupEntry | undefined) ?? null);
         else {
-          const result = await this.command(harness, harness === "codex" || harness === "antigravity" ? ["mcp", "remove", "agentklar"] : ["mcp", "remove", "--scope", "local", "agentklar"], project);
+          const result = await this.command(harness, change.previousEntry ? this.addArgs(harness, change.previousEntry as SetupEntry) : harness === "codex" || harness === "antigravity" ? ["mcp", "remove", "agentklar"] : ["mcp", "remove", "--scope", "local", "agentklar"], project);
           if (result.code !== 0) throw new SetupError("Native removal did not finish successfully. Refresh status and inspect native MCP settings.", 503);
         }
         const after = await this.read(project, harness);
-        if (after.target !== change.target || after.root !== change.root || after.entry !== null) throw new SetupError("Native removal could not be verified. Inspect native MCP settings.", 503);
+        if (after.target !== change.target || after.root !== change.root || after.shadow || (change.previousEntry ? after.entryHash !== entryHash(change.previousEntry) : after.entry !== null)) throw new SetupError("Native removal could not be verified. Inspect native MCP settings.", 503);
       }, "undone");
     });
   }

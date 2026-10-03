@@ -20,6 +20,7 @@ struct NativeRemoteSetupView: View {
     @State private var selectingFolder = false
     @State private var importing = false
     @State private var sharing = false
+    @State private var workspaceRead = false
     @State private var creating = false
     @State private var abandoningCreation = false
     @AppStorage("AgentKlar.remoteCreation.name") private var projectName = ""
@@ -108,8 +109,10 @@ struct NativeRemoteSetupView: View {
             Text("Allow the named source Mac to create projects and manage harness connections inside this folder.").foregroundStyle(.secondary)
             TextField("Source Mac ID", text: $sourceID)
             HStack { Text(rootPath.isEmpty ? "Choose a folder on this Mac" : rootPath).textSelection(.enabled); Spacer(); Button("Choose folder…") { selectingFolder = true } }
+            Toggle("View tasks and project context", isOn: $workspaceRead)
+            Text("Allow this Mac to read task prompts, results and saved context. This does not allow starting workers, editing context or answering approvals.").font(NativeStyle.caption).foregroundStyle(.secondary)
             Button("Create private setup code") { perform(privateCode: true) {
-                exported = ""; let value = try await checkedRequest("/remote-settings/grant", body: ["sourceDeviceId": sourceID, "rootPath": rootPath]); exported = value.prettyText
+                exported = ""; let value = try await checkedRequest("/remote-settings/grant", body: ["sourceDeviceId": sourceID, "rootPath": rootPath, "workspaceRead": workspaceRead]); exported = value.prettyText
             } }.buttonStyle(.borderedProminent).disabled(UUID(uuidString: sourceID) == nil || rootPath.isEmpty)
             if !exported.isEmpty { Text(exported).font(.system(.caption, design: .monospaced)).textSelection(.enabled); Button("Hide code") { exported = "" } }
             ForEach(settings["grants"].array ?? [], id: \.selfID) { grant in
@@ -199,6 +202,14 @@ struct NativeRemoteProjectView: View {
     @ObservedObject var client: AgentKlarClient
     let connection: JSON
     let project: JSON
+    var page: Binding<String>? = nil
+    @State private var localPage = "Connections"
+    @State private var workspace: JSON = .null
+    @State private var workspaceFailure = ""
+    @State private var reading = false
+    @State private var contextDocument = "Brief"
+    @State private var contextSearch = ""
+    @State private var selectedRemoteRecord: String?
     @State private var harness = "codex"
     @State private var owner: JSON = .null
     @State private var status: JSON = .null
@@ -215,7 +226,16 @@ struct NativeRemoteProjectView: View {
         availableHarness && preview["id"].string != nil && preview["entry"].objectValue != nil
             && ["configured", "missing"].contains(status["status"].string ?? "")
     }
+    private var selectedPage: Binding<String> { page ?? $localPage }
     var body: some View {
+        VStack(spacing: 0) {
+            if page == nil { NativePageTabs(selection: selectedPage, items: ["Work", "Context", "Connections"]).padding(NativeStyle.pagePadding) }
+            if selectedPage.wrappedValue == "Connections" { connectionsView }
+            else { workspaceView }
+        }
+        .onDisappear { generation += 1; workspace = .null }
+    }
+    private var connectionsView: some View {
         ScrollView { VStack(alignment: .leading, spacing: 20) {
             NativeSectionTitle(title: project["name"].string ?? "Remote project", subtitle: "Owned by \(connection["label"].string ?? "another Mac")")
             Text(project["path"].string ?? "").foregroundStyle(.secondary).textSelection(.enabled)
@@ -257,6 +277,102 @@ struct NativeRemoteProjectView: View {
         .onChange(of: harness) { _, _ in generation += 1; status = .null; preview = .null; run("setupStatus") }
         .onDisappear { generation += 1; preview = .null }
         .onChange(of: client.connected) { _, connected in if !connected { generation += 1; owner = .null; status = .null; preview = .null } }
+    }
+    private var workspaceView: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                NativeSectionTitle(title: selectedPage.wrappedValue, subtitle: "Saved on \(connection["label"].string ?? "the owner Mac")")
+                Text("Read only. Tasks and context stay on the owner Mac.").font(NativeStyle.caption).foregroundStyle(.secondary)
+                Button("Refresh owner workspace") { Task { await loadWorkspace() } }.disabled(reading || !client.connected)
+                if reading { ProgressView("Reading owner workspace…") }
+                if !workspaceFailure.isEmpty { Text(workspaceFailure).foregroundStyle(.orange).textSelection(.enabled) }
+                if workspace != .null {
+                    if selectedPage.wrappedValue == "Context" { contextView }
+                    else { reportedWorkspace }
+                }
+            }.padding(NativeStyle.pagePadding).frame(maxWidth: .infinity, alignment: .leading)
+        }.task { await loadWorkspace() }
+        .onChange(of: client.connected) { _, connected in if !connected { generation += 1; workspace = .null; workspaceFailure = "Reconnect to read the owner workspace." } }
+    }
+    private var contextView: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            NativePageTabs(selection: $contextDocument, items: ["Brief", "Memory", "Next steps"])
+            NativeSearchField(placeholder: "Find in this document", text: $contextSearch)
+            let key = contextDocument == "Brief" ? "brief" : contextDocument == "Memory" ? "memory" : "handoff"
+            let document = workspace["context"][key].string ?? ""
+            if !contextSearch.isEmpty && !document.localizedCaseInsensitiveContains(contextSearch) { Text("No matching text.").foregroundStyle(.secondary) }
+            Text(document.isEmpty ? "No saved text." : document).font(NativeStyle.document).lineSpacing(5).textSelection(.enabled)
+            if let revision = workspace["context"]["revision"].number { Text("Saved revision \(revision.formatted(.number.precision(.fractionLength(0))))").font(NativeStyle.caption).foregroundStyle(.secondary) }
+        }.frame(maxWidth: .infinity, alignment: .leading)
+    }
+    private var reportedWorkspace: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            let runs = workspace["runs"].array ?? []
+            let activities = workspace["activities"].array ?? []
+            if runs.isEmpty && activities.isEmpty {
+                Text("No saved tasks on this owner project.").foregroundStyle(.secondary)
+            }
+            if !runs.isEmpty {
+                NativeSectionTitle(title: "Workers", subtitle: "Latest 50 saved tasks")
+                VStack(spacing: 4) {
+                    ForEach(runs, id: \.selfID) { run in
+                        remoteRecordRow(id: "worker:" + run.selfID, harness: run["harness"].string ?? "",
+                            title: NativeTaskTitle.text(run["prompt"].string), state: run["state"].string ?? "Unknown")
+                    }
+                }
+            }
+            if !activities.isEmpty {
+                NativeSectionTitle(title: "Harness reports", subtitle: "Latest 50 shared reports")
+                VStack(spacing: 4) {
+                    ForEach(activities, id: \.selfID) { activity in
+                        remoteRecordRow(id: "report:" + activity.selfID, harness: activity["source"]["harness"].string ?? "",
+                            title: activity["title"].string ?? "Reported task", state: activity["state"].string ?? "Unknown")
+                    }
+                }
+            }
+            if let run = runs.first(where: { "worker:" + $0.selfID == selectedRemoteRecord }) {
+                Divider()
+                NativeSectionTitle(title: NativeTaskTitle.text(run["prompt"].string), subtitle: "Saved worker details")
+                Text(run["prompt"].string ?? "").textSelection(.enabled)
+                if run["promptTruncated"].bool == true { Text("Prompt shortened by the owner.").font(NativeStyle.caption) }
+                Text(run["result"].string ?? "No saved result.").font(NativeStyle.document).textSelection(.enabled)
+                if run["resultTruncated"].bool == true { Text("Result shortened by the owner.").font(NativeStyle.caption) }
+                Text("Model: \(run["effectiveModel"].string ?? "Not reported")").font(NativeStyle.caption)
+                Text(run["tokens"].number.map { "\($0.formatted(.number.precision(.fractionLength(0)))) reported tokens" } ?? "Token usage not reported").font(NativeStyle.caption)
+            } else if let activity = activities.first(where: { "report:" + $0.selfID == selectedRemoteRecord }) {
+                Divider()
+                NativeSectionTitle(title: activity["title"].string ?? "Reported task", subtitle: activity["source"]["clientName"].string ?? "Harness")
+                Text(activity["summary"].string ?? "").textSelection(.enabled)
+                if let result = activity["result"].string, !result.isEmpty { Text(result).textSelection(.enabled) }
+                if let updated = activity["updatedAt"].string { Text("Last reported: " + updated).font(NativeStyle.caption) }
+                Text("A saved report does not show whether its native session is still running.").font(NativeStyle.caption).foregroundStyle(.secondary)
+            }
+            Text("Saved state may have changed. Worker completion still needs human review.").font(NativeStyle.caption).foregroundStyle(.secondary)
+        }.font(NativeStyle.body).frame(maxWidth: NativeStyle.contentWidth, alignment: .leading)
+    }
+    private func remoteRecordRow(id: String, harness: String, title: String, state: String) -> some View {
+        Button { selectedRemoteRecord = id } label: {
+            HStack(spacing: 12) {
+                NativeHarnessIcon(harness: harness, size: 22)
+                Text(title).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
+                Text(state.replacingOccurrences(of: "_", with: " ")).font(NativeStyle.caption).foregroundStyle(.secondary)
+            }.padding(12).frame(maxWidth: .infinity).contentShape(Rectangle())
+                .background(selectedRemoteRecord == id ? Color.accentColor.opacity(0.12) : Color.clear,
+                            in: RoundedRectangle(cornerRadius: NativeStyle.cornerRadius))
+        }.buttonStyle(.plain).accessibilityAddTraits(selectedRemoteRecord == id ? .isSelected : [])
+    }
+    private func loadWorkspace() async {
+        guard !reading, client.connected else { return }
+        reading = true; workspaceFailure = ""
+        let scope = generation
+        defer { reading = false }
+        do {
+            let value = try await call("projectWorkspace", payload: ["projectId": project["id"].any])
+            guard scope == generation, client.connected else { return }
+            workspace = value
+        } catch {
+            if scope == generation { workspace = .null; workspaceFailure = error.localizedDescription }
+        }
     }
     private func checkedRequest(_ path: String, body: [String: Any]? = nil) async throws -> JSON {
         let scope = generation

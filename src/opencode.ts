@@ -7,6 +7,8 @@ import type { NativeCallbacks } from "./native.ts";
 import { composeWorkerPrompt } from "./prompt.ts";
 import { verifiedOpenCodeScope } from "./opencode-scope.ts";
 import { normalizeToolEvidence } from "./capabilities.ts";
+import { createOpenCode2Client } from "./opencode2.ts";
+import { unavailableAccountQuota } from "./account-quota.ts";
 
 const object = (v: unknown): Record<string, any> | null => v && typeof v === "object" && !Array.isArray(v) ? v as Record<string, any> : null;
 const clean = (v: unknown, max: number) => typeof v === "string" && v.length <= max &&
@@ -17,15 +19,15 @@ const timeout = (ms: number, message: string) => new Promise<never>((_, reject) 
 const alive = (pid: number) => { try { process.kill(process.platform === "win32" ? pid : -pid, 0); return true; } catch { return false; } };
 const data = (reply: any) => { if (reply?.error || !reply || reply.data === undefined) throw new Error("OpenCode native request failed"); return reply.data; };
 
-export type OpenCodeHost = { client: ReturnType<typeof createOpencodeClient>; close: () => Promise<void>; pid?: number; exited: Promise<void> };
+export type OpenCodeHost = { client: ReturnType<typeof createOpencodeClient>; close: () => Promise<void>; pid?: number; protocol?: 1 | 2; exited: Promise<void> };
 export type OpenCodeConnect = (command: string, cwd: string, spawned: (pid: number | undefined, close: () => Promise<void>) => void,
   nativeEnv?: NodeJS.ProcessEnv) => Promise<OpenCodeHost>;
 
 /** Native metadata only. Output and errors are discarded unless they are one safe path. */
-export async function openCodeDbPath(command: string, cwd: string, nativeEnv: NodeJS.ProcessEnv, signal: AbortSignal): Promise<string | null> {
+export async function openCodeDbPath(command: string, cwd: string, nativeEnv: NodeJS.ProcessEnv, signal: AbortSignal, protocol: 1 | 2 = 1): Promise<string | null> {
   if (signal.aborted) return null;
   return new Promise(resolve => {
-    const child = spawn(command, ["db", "path"], { cwd, env: nativeEnv, stdio: ["ignore", "pipe", "pipe"],
+    const child = spawn(command, protocol === 2 ? ["debug", "paths", "db"] : ["db", "path"], { cwd, env: nativeEnv, stdio: ["ignore", "pipe", "pipe"],
       detached: process.platform !== "win32" });
     const chunks: Buffer[] = [];
     let outputBytes = 0;
@@ -64,7 +66,7 @@ export async function openCodeDbPath(command: string, cwd: string, nativeEnv: No
 
 /** The native CLI owns config, credentials, session state and permission rules. */
 export const connectOpenCode: OpenCodeConnect = async (command, cwd, spawned, nativeEnv = process.env) => {
-  const password = randomBytes(32).toString("hex");
+  let password = randomBytes(32).toString("hex");
   const child = spawn(command, ["serve", "--hostname", "127.0.0.1", "--port", "0"], {
     cwd, stdio: "pipe", detached: process.platform !== "win32",
     env: { ...nativeEnv, OPENCODE_SERVER_USERNAME: "opencode", OPENCODE_SERVER_PASSWORD: password },
@@ -82,6 +84,7 @@ export const connectOpenCode: OpenCodeConnect = async (command, cwd, spawned, na
   })();
   spawned(child.pid, close);
   let output = "";
+  let nativeV2 = false;
   let found!: (url: string) => void;
   let failed!: (error: Error) => void;
   const address = new Promise<string>((resolve, reject) => { found = resolve; failed = reject; });
@@ -90,15 +93,21 @@ export const connectOpenCode: OpenCodeConnect = async (command, cwd, spawned, na
     if (output.length > 8192) { failed(new Error("OpenCode startup output exceeded its limit")); return; }
     const match = output.match(/opencode server listening on (http:\/\/127\.0\.0\.1:\d+)/i);
     if (match) found(match[1]);
+    else {
+      const v2 = output.match(/(?:^|\n)server listening on (http:\/\/127\.0\.0\.1:\d+)/i);
+      const credential = output.match(/(?:^|\n)server password ([a-zA-Z0-9_-]{32,256})\r?\n/);
+      if (v2) { nativeV2 = true; if (credential) password = credential[1]; found(v2[1]); }
+    }
   });
   void exited.then(() => failed(new Error("OpenCode server exited during startup")));
   try {
     const baseUrl = await Promise.race([address, timeout(15000, "OpenCode startup timed out")]);
-    const client = createOpencodeClient({ baseUrl, directory: cwd,
-      headers: { Authorization: `Basic ${Buffer.from(`opencode:${password}`).toString("base64")}` } });
+    const authorization = `Basic ${Buffer.from(`opencode:${password}`).toString("base64")}`;
+    const client = nativeV2 ? createOpenCode2Client(baseUrl, cwd, authorization) as unknown as ReturnType<typeof createOpencodeClient>
+      : createOpencodeClient({ baseUrl, directory: cwd, headers: { Authorization: authorization } });
     const health = await Promise.race([client.global.health(), timeout(5000, "OpenCode health check timed out")]);
     if (!data(health)?.healthy) throw new Error("OpenCode server did not report healthy");
-    return { client, close, pid: child.pid, exited };
+    return { client, close, pid: child.pid, protocol: nativeV2 ? 2 : 1, exited };
   } catch { await close(); throw new Error("OpenCode local server could not start"); }
 };
 
@@ -143,7 +152,7 @@ export function openCodeModels(value: unknown): CatalogModel[] {
 
 export async function readOpenCodeCatalog(command: string, cwd: string, signal: AbortSignal, connect: OpenCodeConnect = connectOpenCode): Promise<HarnessCatalog> {
   const unavailable = (message: string): HarnessCatalog => ({ harness: "opencode", models: [], modelsStatus: "unavailable", modelsMessage: message,
-    modelsTruncated: false, quota: { status: "unavailable", message: "OpenCode account limits are not exposed by this catalog read.", ordinaryUsageAllowed: null, buckets: [] } });
+    modelsTruncated: false, quota: unavailableAccountQuota("opencode") });
   if (signal.aborted) return unavailable("OpenCode model refresh was cancelled.");
   let close: (() => Promise<void>) | undefined;
   const onAbort = () => { void close?.().catch(() => {}); };
@@ -275,7 +284,7 @@ export class OpenCodeWorker {
       this.callbacks.update({ threadId: session.id });
       if (this.run.openCodeScope && !this.run.openCodeScope.unsupported) {
         try {
-          const dbPath = await this.race(this.dbPath(this.command, this.path, this.nativeEnv, this.abort.signal));
+          const dbPath = await this.race(this.dbPath(this.command, this.path, this.nativeEnv, this.abort.signal, this.host.protocol));
           if (dbPath) this.callbacks.update({ openCodeScope: verifiedOpenCodeScope(this.run.openCodeScope, dbPath) });
         } catch { /* Native task can continue without a handoff command. */ }
       }

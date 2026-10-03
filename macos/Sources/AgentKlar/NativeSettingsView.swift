@@ -11,9 +11,12 @@ struct NativeSettingsView: View {
     @State private var installations: [JSON] = []
     @State private var choices: [String: String] = [:]
     @State private var working = false
+    @State private var connectionGeneration = 0
     @State private var message = ""
     @State private var failure = ""
     @State private var showingInstallations = false
+    @State private var showingConnectionDetails = false
+    @State private var connectionStatuses: [String: JSON] = [:]
     private let supported = ["codex", "claude", "muse", "opencode", "antigravity"]
     private var scope: String { client.projectID + ":" + harness }
     private var configured: Bool { status["status"].string == "configured" && status["change"]["state"].string != "interrupted" }
@@ -48,56 +51,122 @@ struct NativeSettingsView: View {
     }
     private var connections: some View {
         VStack(alignment: .leading, spacing: 20) {
-            VStack(alignment: .leading, spacing: 8) {
-                LabeledContent("Project", value: client.project["name"].string ?? "Choose a project")
+            HStack(spacing: 10) {
+                Image(systemName: "folder").foregroundStyle(.secondary)
+                Text(client.project["name"].string ?? "Choose a project").fontWeight(.medium)
                 if client.onboarding["projectId"].string == client.projectID, let main = client.onboarding["mainHarness"].string {
-                    Label("Main: \(name(main))", systemImage: "checkmark.circle").font(NativeStyle.caption).foregroundStyle(.secondary)
+                    Text("Main: \(name(main))").font(NativeStyle.caption).foregroundStyle(.secondary)
                 }
-            }
-            Divider()
-            Text("Use AgentKlar in a harness").font(NativeStyle.heading)
-            Picker("Harness", selection: $harness) {
-                ForEach(supported, id: \.self) { id in HStack { NativeHarnessIcon(harness: id); Text(name(id)) }.tag(id) }
-            }.pickerStyle(.menu).disabled(working)
-            Label(connectionState, systemImage: configured ? "checkmark.circle" : status["status"].string == "conflict" ? "exclamationmark.triangle" : "circle.dotted")
-                .foregroundStyle(configured ? .secondary : .primary)
-            if status["change"]["state"].string == "interrupted" { Label("Interrupted setup needs attention", systemImage: "exclamationmark.triangle").foregroundStyle(.orange) }
-            if status["status"].string == "conflict" || status["status"].string == "unavailable", let text = status["message"].string {
-                Text(text).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
-            }
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 12) { connectionActions }.fixedSize(horizontal: true, vertical: false)
-                VStack(alignment: .leading, spacing: 12) { connectionActions }
-            }.controlSize(.regular).disabled(working || !client.connected || client.projectID.isEmpty)
-            NativeDetailButton("Connection details") {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(harness == "claude" ? "Local project scope. Only this project's Claude Code sessions." : "User scope. Available to this harness's projects.")
-                    if let path = client.project["path"].string { Text("Project: \(path)").textSelection(.enabled) }
-                    Text("Accounts, trust and permissions stay in your harness. A configured entry does not prove sign-in, tools or quota.")
-                    if let text = status["message"].string { Text(text).fixedSize(horizontal: false, vertical: true).textSelection(.enabled) }
-                }.font(NativeStyle.caption).foregroundStyle(.secondary)
-            }.buttonStyle(.plain).foregroundStyle(.tint)
-            if preview["id"].string != nil { previewSection }
-            Divider()
-            HStack {
-                Text("Installed harnesses").font(NativeStyle.heading)
                 Spacer()
             }
-            Text("\(client.harnesses.filter { $0["available"].bool == true }.count) found on this Mac. AgentKlar uses your existing installations.")
-                .foregroundStyle(.secondary)
-            Button("Manage installations…") { showingInstallations = true }
-                .buttonStyle(.plain).foregroundStyle(.tint).disabled(working || !client.connected)
-            if !message.isEmpty { Label(message, systemImage: "checkmark.circle").fixedSize(horizontal: false, vertical: true).foregroundStyle(.secondary) }
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .top, spacing: 24) {
+                    harnessList.frame(width: 220)
+                    Divider()
+                    connectionDetail.frame(minWidth: 300, maxWidth: .infinity, alignment: .leading)
+                }
+                VStack(alignment: .leading, spacing: 20) {
+                    harnessList
+                    Divider()
+                    connectionDetail
+                }
+            }
+            if !message.isEmpty { Label(message, systemImage: "checkmark.circle").font(NativeStyle.caption).fixedSize(horizontal: false, vertical: true).foregroundStyle(.secondary) }
             if !failure.isEmpty { Label(failure, systemImage: "exclamationmark.triangle").fixedSize(horizontal: false, vertical: true).foregroundStyle(.red).textSelection(.enabled) }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .disabled(client.busy)
         .sheet(isPresented: $showingInstallations) { installationManager }
+        .sheet(isPresented: $showingConnectionDetails) {
+            NativeDetailPage(title: "Connection details") { connectionDetails }
+        }
         .task(id: scope + ":" + String(client.connected)) {
+            connectionGeneration += 1
             status = .null; preview = .null; message = ""; failure = ""
             while working { do { try await Task.sleep(for: .milliseconds(50)) } catch { return } }
             if client.connected && !Task.isCancelled { await loadStatus() }
         }
+    }
+
+    private var harnessList: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Harnesses").font(NativeStyle.heading)
+                Spacer()
+                Text("\(client.harnesses.filter { $0["available"].bool == true }.count) installed")
+                    .font(NativeStyle.caption).foregroundStyle(.secondary)
+            }.padding(.bottom, 4)
+            ForEach(supported, id: \.self) { id in
+                let installed = client.harnesses.first { $0["id"].string == id }?["available"].bool == true
+                let rowStatus = id == harness ? status : connectionStatuses[client.projectID + ":" + id] ?? .null
+                Button { harness = id } label: {
+                    HStack(spacing: 10) {
+                        NativeHarnessIcon(harness: id, size: 28)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(name(id)).fontWeight(id == harness ? .semibold : .regular)
+                            Text(rowStatus["status"].string == "configured" ? "Connected" : rowStatus["status"].string == "conflict" ? "Needs review" : installed ? "Installed" : "Not found")
+                                .font(NativeStyle.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 0)
+                        if id == harness { Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold)).foregroundStyle(.tint) }
+                    }.padding(10).contentShape(Rectangle())
+                        .background(id == harness ? Color.accentColor.opacity(0.09) : Color.clear, in: RoundedRectangle(cornerRadius: NativeStyle.cornerRadius))
+                }.buttonStyle(.plain).disabled(working)
+                    .accessibilityAddTraits(id == harness ? .isSelected : [])
+            }
+            Button("Manage installations…") { showingInstallations = true }
+                .buttonStyle(.plain).foregroundStyle(.tint).font(NativeStyle.caption)
+                .padding(.top, 8).disabled(working || !client.connected)
+        }
+    }
+
+    private var connectionDetail: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 12) {
+                NativeHarnessIcon(harness: harness, size: 36)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(name(harness)).font(NativeStyle.title)
+                    Text(harness == "claude" ? "Connection for this project" : "Connection for your projects")
+                        .font(NativeStyle.caption).foregroundStyle(.secondary)
+                }
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                Label(connectionState, systemImage: configured ? "checkmark.circle.fill" : status["status"].string == "conflict" ? "exclamationmark.triangle.fill" : "circle.dotted")
+                    .fontWeight(.medium).foregroundStyle(status["status"].string == "conflict" ? Color.orange : Color.primary)
+                Text(connectionSummary).font(NativeStyle.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if status["change"]["state"].string == "interrupted" {
+                    Label("Interrupted setup needs attention", systemImage: "exclamationmark.triangle").font(NativeStyle.caption).foregroundStyle(.orange)
+                }
+            }.padding(.vertical, 4)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) { connectionActions }.fixedSize(horizontal: true, vertical: false)
+                VStack(alignment: .leading, spacing: 12) { connectionActions }
+            }.controlSize(.regular).disabled(working || !client.connected || client.projectID.isEmpty)
+            if working { Text("Working on connection…").font(NativeStyle.caption).foregroundStyle(.secondary) }
+            Button("Connection details…") { showingConnectionDetails = true }
+                .buttonStyle(.plain).foregroundStyle(.tint).font(NativeStyle.caption)
+            if preview["id"].string != nil { previewSection }
+        }.frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var connectionSummary: String {
+        switch status["status"].string {
+        case "configured": return "Start or restart your harness session to load AgentKlar."
+        case "missing": return "Connect AgentKlar to share project context with this harness. Review the change before applying it."
+        case "conflict": return status["canUpdate"].bool == true ? "An older connection points to this service. Review the old and new bridge paths, then update it." : "An AgentKlar entry already exists. Review it before changing the connection."
+        case "unavailable": return status["message"].string ?? "Connection status could not be checked."
+        default: return client.connected ? "Checking this harness's native settings." : "Start the local service to check this connection."
+        }
+    }
+
+    private var connectionDetails: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(harness == "claude" ? "Local project scope. Only this project's Claude Code sessions." : "User scope. Available to this harness's projects.")
+            if let path = client.project["path"].string { Text("Project: \(path)") }
+            if let text = status["message"].string { Text(text) }
+            Text("Accounts, trust and permissions stay in your harness. A configured entry does not prove sign-in, tools or quota.")
+        }.font(NativeStyle.body).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
     }
 
     @ViewBuilder private var connectionActions: some View {
@@ -105,19 +174,20 @@ struct NativeSettingsView: View {
             if status["status"].string == "missing" {
                 Button("Connect \(name(harness))…") { Task { await setup("preview") } }
                     .buttonStyle(.borderedProminent)
+            } else if status["status"].string == "conflict" {
+                if status["canUpdate"].bool == true {
+                    Button("Review update…") { Task { await setup("preview") } }.buttonStyle(.borderedProminent)
+                } else {
+                    Button("Review conflict…") { showingConnectionDetails = true }.buttonStyle(.borderedProminent)
+                }
             } else if configured && (client.onboarding["projectId"].string != client.projectID || client.onboarding["mainHarness"].string != harness) {
                 Button("Use as main harness") { Task { await saveMain() } }.buttonStyle(.bordered)
             }
         }
-        Button { Task { await loadStatus() } } label: {
-            Image(systemName: "arrow.clockwise").frame(width: 28, height: 28).contentShape(Rectangle())
-        }.buttonStyle(.plain).foregroundStyle(.secondary)
-            .accessibilityLabel("Refresh connection status").help("Refresh connection status")
+        Button("Refresh") { Task { await loadStatus() } }.buttonStyle(.bordered)
         if status["canUndo"].bool == true {
-            Menu {
-                Button("Remove managed connection", role: .destructive) { Task { await setup("undo") } }
-            } label: { Image(systemName: "ellipsis") }
-                .menuStyle(.borderlessButton).fixedSize().help("Connection actions")
+            Button(status["change"]["replacesExisting"].bool == true ? "Undo connection update" : "Remove connection", role: .destructive) { Task { await setup("undo") } }
+                .buttonStyle(.bordered)
         }
     }
 
@@ -131,16 +201,21 @@ struct NativeSettingsView: View {
         }
     }
     private var previewSection: some View {
-        GroupBox("Review connection") {
+        GroupBox(preview["operation"].string == "replace" ? "Review connection update" : "Review connection") {
             VStack(alignment: .leading, spacing: 16) {
                 Label("\(name(harness)) · \(preview["scope"].string ?? "Unknown") scope", systemImage: "doc.text.magnifyingglass")
                 Text(preview["configPath"].string ?? "Config path unavailable").fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
                 if let cwd = preview["cwd"].string { Text("Project: \(cwd)").fixedSize(horizontal: false, vertical: true).textSelection(.enabled) }
                 if let command = preview["command"].string { Text(command).font(.system(size: 12, design: .monospaced)).fixedSize(horizontal: false, vertical: true).textSelection(.enabled) }
+                if preview["operation"].string == "replace" {
+                    Text("Current connection").font(NativeStyle.heading)
+                    Text(pretty(preview["previousEntry"])).font(.system(size: 12, design: .monospaced)).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+                    Text("Updated connection").font(NativeStyle.heading)
+                }
                 Text(pretty(preview["entry"])).font(.system(size: 12, design: .monospaced)).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
                 Text("No account token is added.").font(NativeStyle.caption).foregroundStyle(.secondary)
                 HStack(spacing: 12) {
-                    Button("Apply connection") { Task { await setup("apply") } }
+                    Button(preview["operation"].string == "replace" ? "Update connection" : "Apply connection") { Task { await setup("apply") } }
                         .buttonStyle(.borderedProminent).disabled(working || !client.connected)
                     Button("Cancel") { preview = .null }.buttonStyle(.plain).disabled(working)
                 }
@@ -201,38 +276,39 @@ struct NativeSettingsView: View {
     }
     private func perform(_ action: () async throws -> Void) async {
         guard !working, client.connected else { return }
-        let captured = scope
+        let captured = scope, generation = connectionGeneration
         working = true; failure = ""
         defer { working = false }
-        do { try await action() } catch { if captured == scope { failure = error.localizedDescription; preview = .null } }
+        do { try await action() } catch { if captured == scope && generation == connectionGeneration { failure = error.localizedDescription; preview = .null } }
     }
     private func loadStatus() async {
         guard !client.projectID.isEmpty else { return }
-        let captured = scope, path = "/projects/\(client.projectID)/setup/\(harness)"
-        await perform { let value = try await client.request(path); if captured == scope { status = value; preview = .null } }
+        let captured = scope, generation = connectionGeneration, path = "/projects/\(client.projectID)/setup/\(harness)"
+        await perform { let value = try await client.request(path); if captured == scope && generation == connectionGeneration { status = value; connectionStatuses[captured] = value; preview = .null } }
     }
     private func setup(_ operation: String) async {
-        let captured = scope, path = "/projects/\(client.projectID)/setup/\(harness)"
+        let captured = scope, generation = connectionGeneration, path = "/projects/\(client.projectID)/setup/\(harness)"
         var body: [String: Any] = [:]
         if operation == "apply" { guard let id = preview["id"].string else { return }; body["previewId"] = id }
         if operation == "undo" { guard status["canUndo"].bool == true, let id = status["change"]["id"].string else { return }; body["changeId"] = id }
         await perform {
             let value = try await client.request(path + "/" + operation, body: body)
-            guard captured == scope else { return }
+            guard captured == scope && generation == connectionGeneration else { return }
             if operation == "preview" { preview = value }
             else {
                 preview = .null
                 let next = try await client.request(path)
-                if captured == scope { status = next; message = "Entry changed. Restart your native session to load it." }
+                if captured == scope && generation == connectionGeneration { status = next; connectionStatuses[captured] = next; message = "Entry changed. Restart your native session to load it." }
             }
         }
     }
     private func saveMain() async {
         guard configured, let revision = client.onboarding["revision"].number else { return }
-        let projectID = client.projectID, selected = harness
+        let projectID = client.projectID, selected = harness, generation = connectionGeneration
         await perform {
             _ = try await client.request("/onboarding", body: ["projectId": projectID, "mainHarness": selected, "expectedRevision": Int(revision)], method: "PUT")
             await client.refresh()
+            guard client.projectID == projectID && harness == selected && generation == connectionGeneration else { return }
             message = "Main harness saved. Open it normally in this project."
         }
     }

@@ -58,7 +58,7 @@ test("Antigravity catalog uses only native metadata commands and never leaks fai
   assert.equal(cancelled.quota.status, "unavailable");
 });
 
-test("Antigravity unverified worker fails closed without launching native execution", async () => {
+test("Antigravity worker refuses execution because native headless input cannot accept permission replies", async () => {
   let done = 0;
   let patch: Partial<Run> = {};
   const worker = new AntigravityWorker("/does/not/exist", {} as Run, "/does/not/exist", {
@@ -68,7 +68,7 @@ test("Antigravity unverified worker fails closed without launching native execut
   await worker.closed;
   assert.equal(antigravityWorkerSupported, false);
   assert.equal(patch.state, "needs_attention");
-  assert.match(patch.error!, /no verified native approval/);
+  assert.match(patch.error!, /headless input rejects permission replies/);
   assert.equal(done, 1);
 });
 

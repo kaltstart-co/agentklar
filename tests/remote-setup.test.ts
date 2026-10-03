@@ -343,3 +343,49 @@ test("creation helper keeps its captured parent when its pathname becomes a syml
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("workspace reading needs an explicit grant and remains inside its owner folder", async () => {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "remote-workspace-")));
+  const root = join(dir, "shared"), projectPath = join(root, "project"), outside = join(dir, "outside");
+  mkdirSync(root); mkdirSync(projectPath); mkdirSync(outside);
+  const store = new Store(join(dir, "state.sqlite"));
+  const device = { id: randomUUID(), label: "Owner", platform: "darwin" }, sourceDeviceId = randomUUID();
+  let reads = 0;
+  const setup = new RemoteSetup(store, device, {} as NativeSetup, () => [], undefined, undefined, project => {
+    reads++;
+    return { context: { brief: project.name, memory: "Saved memory", handoff: "Next", revision: 1 }, runs: [], activities: [] };
+  });
+  const project = { id: randomUUID(), name: "Inside", path: projectPath, preference: "balanced" as const, roles: [], createdAt: "now" };
+  const other = { ...project, id: randomUUID(), name: "Outside", path: outside };
+  store.saveProject(project); store.saveProject(other);
+  const request = (grant: ReturnType<RemoteSetup["grant"]>, projectId: string, fields = {}) => ({
+    channel: "setup", version: 1, sourceDeviceId, targetDeviceId: device.id,
+    grantId: grant.grantId, token: grant.token, requestId: randomUUID(),
+    operation: "projectWorkspace", payload: { projectId }, ...fields,
+  });
+  try {
+    const defaultGrant = setup.grant({ sourceDeviceId, rootPath: root });
+    assert.equal(defaultGrant.workspaceRead, false);
+    await assert.rejects(setup.owner(request(defaultGrant, project.id)), /does not allow viewing/);
+    const oldData = JSON.parse(store.db.prepare("SELECT data FROM setup_grants WHERE id=?").get(defaultGrant.grantId)!.data as string);
+    delete oldData.workspaceRead;
+    store.db.prepare("UPDATE setup_grants SET data=? WHERE id=?").run(JSON.stringify(oldData), defaultGrant.grantId);
+    await assert.rejects(setup.owner(request(defaultGrant, project.id)), /does not allow viewing/);
+    const grant = setup.grant({ sourceDeviceId, rootPath: root, workspaceRead: true });
+    await assert.rejects(setup.owner(request(grant, other.id)), /outside/);
+    await assert.rejects(setup.owner(request(grant, project.id, { sourceDeviceId: randomUUID() })), /grant/);
+    await assert.rejects(setup.owner(request(grant, project.id, { targetDeviceId: randomUUID() })), /Wrong owner/);
+    assert.equal(reads, 0);
+    const response = await setup.owner(request(grant, project.id));
+    assert.equal((response.body as unknown as { context: { brief: string } }).context.brief, "Inside");
+    assert.equal(reads, 1);
+    await assert.rejects(setup.owner({ ...request(grant, project.id), operation: "start" }), /Invalid/);
+    setup.revoke({ grantId: grant.grantId });
+    await assert.rejects(setup.owner(request(grant, project.id)), /revoked/);
+    assert.equal(reads, 1);
+    const replacementGrant = setup.grant({ sourceDeviceId, rootPath: root, workspaceRead: true });
+    renameSync(root, join(dir, "original-shared")); mkdirSync(root); mkdirSync(projectPath);
+    await assert.rejects(setup.owner(request(replacementGrant, project.id)), /Authorized folder changed/);
+    assert.equal(reads, 1);
+  } finally { store.db.close(); rmSync(dir, { recursive: true, force: true }); }
+});

@@ -15,6 +15,7 @@ struct NativeExtensionsView: View {
     @State private var skillPreview: JSON = .null
     @State private var plugins: JSON = .null
     @State private var pluginPreview: JSON = .null
+    @State private var observeActivity = false
     @State private var inventory: JSON = .null
     @State private var pendingRemoval: JSON = .null
     @State private var confirmsRemoval = false
@@ -54,6 +55,7 @@ struct NativeExtensionsView: View {
         }
         .onChange(of: source) { _, _ in skillPreview = .null }
         .onChange(of: skillName) { _, _ in skillPreview = .null }
+        .onChange(of: observeActivity) { _, _ in pluginPreview = .null }
         .confirmationDialog("Remove this unchanged managed skill?", isPresented: $confirmsRemoval, titleVisibility: .visible) {
             Button("Remove managed skill", role: .destructive) {
                 if let id = pendingRemoval["id"].string { Task { await skillAction("remove", body: ["installId": id]) } }
@@ -65,7 +67,7 @@ struct NativeExtensionsView: View {
             let captured = scope, generation = scopeGeneration
             if draftOwner != owner {
                 draftOwner = owner
-                source = ""; skillName = ""
+                source = ""; skillName = ""; observeActivity = false
             }
             skills = []; plugins = .null; inventory = .null; skillPreview = .null; pluginPreview = .null
             pendingRemoval = .null; confirmsRemoval = false; showingSkill = false; showingPlugin = false; search = ""; failure = ""; notice = ""
@@ -245,6 +247,9 @@ struct NativeExtensionsView: View {
             Text("AgentKlar workflow").font(NativeStyle.heading)
             Text("Claude Code · This project").font(NativeStyle.caption).foregroundStyle(.secondary)
             Text("Adds the versioned AgentKlar workflow plugin. Preview its components before installing.")
+            Toggle("Show Claude sessions in Work", isOn: $observeActivity)
+            Text("Track responding, waiting for permission and session end. Prompt text and conversations stay in Claude. Delegation stays separate.")
+                .font(NativeStyle.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Button("Preview plugin") { Task { await pluginAction("preview") } }
                 .disabled(client.projectID.isEmpty || plugins["available"].bool != true)
             if pluginPreview["id"].string != nil {
@@ -254,6 +259,7 @@ struct NativeExtensionsView: View {
                     let counts = pluginPreview["capabilities"]
                     Text("\((counts["skills"].array ?? []).count) skills · \(Int(counts["agents"].number ?? 0)) agents · \(Int(counts["hooks"].number ?? 0)) hooks · \(Int(counts["mcpServers"].number ?? 0)) MCP servers")
                     Text("Native permissions still apply.").font(NativeStyle.caption).foregroundStyle(.secondary)
+                    if let message = pluginPreview["message"].string { Text(message).font(NativeStyle.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
                     NativeDetailButton("Review plugin") { code(pluginPreview) }.buttonStyle(.plain).foregroundStyle(.tint)
                     Button("Install reviewed native plugin") { Task { await pluginAction("apply") } }.buttonStyle(.borderedProminent)
                 }.padding(10).background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
@@ -326,6 +332,7 @@ struct NativeExtensionsView: View {
         let generation = scopeGeneration
         let captured = scope, path = projectBase + "/plugins"
         var body: [String: Any] = [:]
+        if operation == "preview" { body = ["observeActivity": observeActivity] }
         if operation == "apply" { guard let id = pluginPreview["id"].string else { return }; body = ["previewId": id] }
         if operation == "undo" { guard let changeID else { return }; body = ["changeId": changeID] }
         working = true; failure = ""; notice = ""

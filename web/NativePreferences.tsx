@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Alert, Badge, Button, Group, Select, Stack, TextInput } from "@mantine/core";
+import { Alert, Badge, Button, Checkbox, Group, Select, Stack, TextInput } from "@mantine/core";
 import type { NativeSettings, NativeSettingPreview } from "../src/native-settings.js";
 import type { NativePlugins, PluginPreview } from "../src/plugins.js";
 
@@ -25,6 +25,7 @@ export function NativePreferences({ projectId, connected, request = localRequest
   const [effort, setEffort] = useState<string | null>(null);
   const [settingPreview, setSettingPreview] = useState<NativeSettingPreview | null>(null);
   const [pluginPreview, setPluginPreview] = useState<PluginPreview | null>(null);
+  const [observeActivity, setObserveActivity] = useState(false);
   const [busy, setBusy] = useState("");
   const [settingError, setSettingError] = useState("");
   const [pluginError, setPluginError] = useState("");
@@ -53,7 +54,7 @@ export function NativePreferences({ projectId, connected, request = localRequest
   }
   useEffect(() => {
     generation.current++;
-    setSettings(null); setPlugins(null); setModel(""); setEffort(null); setSettingPreview(null); setPluginPreview(null);
+    setSettings(null); setPlugins(null); setModel(""); setEffort(null); setSettingPreview(null); setPluginPreview(null); setObserveActivity(false);
     setBusy(""); setSettingError(""); setPluginError(""); setNotice("");
     // Start after resetting this scope; an old response cannot refill its draft.
     if (connected) {
@@ -79,7 +80,7 @@ export function NativePreferences({ projectId, connected, request = localRequest
     setBusy(`${kind}/${operation}`); setNotice("");
     const showError = kind === "plugins" ? setPluginError : setSettingError;
     showError("");
-    const body = operation === "apply" ? { previewId: preview!.id } : operation === "undo" ? { changeId } : kind === "plugins" ? {} : { harness, field, value: field === "model" ? model.trim() || null : effort };
+    const body = operation === "apply" ? { previewId: preview!.id } : operation === "undo" ? { changeId } : kind === "plugins" ? { observeActivity } : { harness, field, value: field === "model" ? model.trim() || null : effort };
     try {
       const result = await requestRef.current<NativeSettingPreview | PluginPreview>(`${base}/${kind}/${operation}`, body);
       if (!valid(id, originalScope)) return;
@@ -145,6 +146,7 @@ export function NativePreferences({ projectId, connected, request = localRequest
       <p className="hint">A real native plugin with the AgentKlar workflow skill. Local project scope. Individual skill installs stay separate.</p>
       {plugins && <><Badge color={plugins.available ? "teal" : "orange"}>{plugins.available ? "Native plugin commands available" : "Native plugin commands unavailable"}</Badge><p className="hint">{plugins.message}</p></>}
       {pluginError && <Alert color="red">{pluginError}</Alert>}
+      <Checkbox mt="sm" label="Show Claude sessions in Work" description="Records session signals. Prompts, conversations and tool inputs stay in Claude." checked={observeActivity} disabled={disabled} onChange={event => { setObserveActivity(event.currentTarget.checked); setPluginPreview(null); }} />
       <Button size="sm" disabled={disabled || !plugins?.available} loading={busy === "plugins/preview"} onClick={() => void change("plugins", "preview")}>Preview workflow plugin</Button>
       {pluginPreview && <div className="instruction-preview">
         <h3>{pluginPreview.name} · {pluginPreview.version}</h3>

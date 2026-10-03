@@ -2,11 +2,73 @@
 
 Verified across 2026-10-01 to 2026-10-03 using Node 24.21.0. The old application was not used.
 
+## Adapters and Claude session signals — beta.40
+
+Source is beta.40. The installed MacBook app and its local service are beta.39 development previews. Public downloads, the global CLI and the normal Mac mini service remain beta.33. Beta.40 is packaged locally. No beta.40 installation, GUI acceptance or public release is claimed.
+
+The final local run passed all 353 service tests with zero failures, skips or cancellations. TypeScript checks, the production build, Foundation checks, the Swift release build and seven offline release checks passed. Logs are `/private/tmp/agentklar-beta40-final-tests.log`, `agentklar-beta40-final-build.log`, `agentklar-beta40-foundation.log`, `agentklar-beta40-swift.log` and `agentklar-beta40-release-tests.log`. The offline release checks use fixtures; they do not sign an app or contact Apple's notarization service.
+
+### OpenCode 2 worker
+
+The adapter uses OpenCode 2's native inbox and event protocol alongside the legacy adapter. An isolated Mac mini proof used native OpenCode 2.0.12 and `opencode/fledge-alpha-free`. The worker completed with `AGENTKLAR_OPENCODE2_OK`, reported 7,628 native tokens and retained its native session across restart. This verifies a bounded real task and session retention; it does not establish paid-provider access, every permission/tool path, quota coverage or broad model compatibility. An additional regression rejects a changed permission reannouncement before an older approval can send a reply; identical reannouncements keep the original review. Owned servers closed, the isolated remote profile was removed and normal settings/services were unchanged. Evidence: `/private/tmp/agentklar-opencode2-adapter-proof.json`.
+
+### Remote native MCP connection
+
+An actual isolated OpenCode 2.0.12 runtime explicitly added and connected the AgentKlar MCP entry. AgentKlar observed the native client discovering 27 tools, including `work_report`. The proof created no owner runs or approvals and used no inference. Owned processes and the temporary profile were removed. This establishes native connection and tool discovery. Automatic connection from saved configuration on a later startup remains unverified. Evidence: `/private/tmp/agentklar-beta39-remote-native-mcp-proof.json`; its isolated AgentKlar runtime was beta.39.
+
+A later isolated beta.40 test verified a model-driven `work_report` call from
+OpenCode 2.0.12 on the mini. Exactly one bounded request used
+`opencode/fledge-alpha-free`. AgentKlar persisted revision 1 with native MCP
+client `cli 2.0.12` and result `AGENTKLAR_NATIVE_MCP_TOOL_OK`. It created no owner
+workers or approvals and answered no permissions. The native session stopped
+immediately after report persistence, so final assistant completion was not
+checked. Owned processes and the private profile were removed. The probe reused
+installed Node and dependencies read-only; it does not prove the final app's
+bundle hash. Evidence:
+`/private/tmp/agentklar-beta40-native-mcp-invocation-proof.json`.
+Worker delegation through `task_start` and automatic saved-config loading remain
+unverified by this report test.
+
+### Claude session signals
+
+A reviewed local Claude plugin can send SessionStart, UserPromptSubmit, permission-prompt Notification, Stop, StopFailure and SessionEnd metadata to a dedicated local endpoint. The grant activates after verified plugin apply. Trusted UI disable and owned Undo revoke it. The hook drops prompt text, transcript paths, native output and credentials before its request. Stored records contain a scoped hashed session identifier, event, state and observation times. Stop means idle, and StopFailure means attention is needed; neither means a task succeeded. Session display and retention use the latest observation time. Old events, replay, wrong scope and disabled grants have regression checks.
+
+Real Claude Code 2.1.284 hooks ran in a temporary project and private native profile. A no-inference initialization emitted SessionStart and SessionEnd. One tools-disabled turn emitted SessionStart, UserPromptSubmit and SessionEnd, then stopped because the private profile had no authentication. In total, five events were accepted and none rejected. Only event names, counts and stored states were captured; no prompts, native responses, auth or tokens were printed or saved in the proof. Owned processes, service and fixtures were removed. Evidence: `/private/tmp/agentklar-claude-observation-proof.json`.
+
+The real run did not prove model completion, permission waiting, Stop or StopFailure hooks. The checked Claude session-signals item covers this bounded native integration and source checks. Automatic native activity observation remains unchecked for the wider all-harness scope.
+
+### Account quota and worker limits
+
+Account quota coverage declares its actual source or an explicit unavailable result for every catalog harness. Successful Codex and Claude reads carry their observation times. Missing CLIs and empty or malformed limit replies remain unavailable. Session token totals, API prices and model lists never establish account allowance.
+
+Bounded native reads on 2026-10-03 returned Codex weekly usage at 3% and ordinary usage allowed on both Macs. Claude returned five-hour/weekly usage of 32%/24% on the MacBook and 33%/24% on the mini; the MacBook also reported a Fable weekly window at 0%. These are historical account snapshots, not current balances. Muse had no last-seen subscription observation on either host. MacBook Antigravity reported 0% used in both five-hour and weekly windows for its Gemini and Claude/GPT groups at `2026-10-03T06:28:00.053Z`; the mini read returned no usable grouped-limit response.
+
+OpenCode, Gemini, Cursor and ZCode account allowance remains unavailable through these adapters. OpenCode stats and ZCode usage/stats report local activity, while Gemini's native interactive `/stats model` view does not establish a machine-readable read here. Gemini and Cursor CLIs are absent on both checked Macs, so their real worker proofs remain open. The installed ZCode 0.16.9 returned no available models and is refused before prompt admission. Antigravity headless input does not support safe control responses for concrete permissions; its worker stays disabled. Complete account quotas, Gemini/Cursor proof, ZCode worker and Antigravity worker remain unchecked.
+
+### Packaged beta.40 runtime
+
+The ARM64 development app, ZIP and DMG built successfully. Package smoke passed
+with 27 MCP tools. A fresh private profile launched the bundled beta.40 service
+without global Node or a global AgentKlar CLI, then reopened with the same
+service-install identity. Both native-client phases connected, no workers
+started, and owned test processes and files were removed. Evidence:
+`/private/tmp/agentklar-beta40-bundled-acceptance.json`. This tests bundled
+startup on this Mac; it does not prove clean physical hardware or GUI layout.
+
+Remote task history now uses flat selectable rows and one detail area. The final
+Swift build includes that change. GUI inspection is blocked because the native
+app-control tool returns no available window; AgentKlar remains running. The
+installed app has therefore not been replaced. Its version remains beta.39.
+
+### Mac release and GUI gates
+
+Clean Mac setup, native GUI acceptance, full native parity, signed distribution and signed app updates all remain unchecked. The source adds release gates for Developer ID, notarization, stapling, Gatekeeper and signed Sparkle metadata. The release Mac has no valid Developer ID signing identity. Paid Apple Developer membership still requires the matching Apple-issued Developer ID Application certificate, local import and interactive notarization credential setup. No real signing, notarization or signed update round trip is established by the seven offline checks. Packaging beta.40 does not establish installation or these acceptance gates.
+
 ## Native task reporting and remote setup — beta.38
 
-The local native app and its owned service are beta.38. The global CLI and
-normal Mac mini service remain beta.33. Signed public release is pending;
-local installation is not evidence of signing, notarization or full GUI acceptance.
+During these beta.38 checks, the local native app and its owned service were
+beta.38; the global CLI and normal Mac mini service remained beta.33. Local
+installation was not evidence of signing, notarization or full GUI acceptance.
 
 The native Memory view treats `## Title` sections as entries, with title/body
 search and an individual editor. Add, rename, delete and body edits stay in the

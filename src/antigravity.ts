@@ -3,7 +3,7 @@ import type { AccountQuota, CatalogModel, HarnessCatalog, Run } from "./contract
 import type { NativeCallbacks } from "./native.ts";
 
 export const antigravityWorkerSupported = false;
-export const antigravityWorkerReason = "Antigravity headless execution has no verified native approval roundtrip. Continue in agy; AgentKlar worker execution is unavailable.";
+export const antigravityWorkerReason = "Antigravity headless input rejects permission replies. Continue in agy to review native tool actions; AgentKlar cannot safely run an Antigravity worker.";
 export type AntigravityCatalog = Omit<HarnessCatalog, "harness"> & { harness: "antigravity" };
 type MetadataReader = (command: string, args: string[], cwd: string, signal: AbortSignal) => Promise<string>;
 const unavailableQuota = (): AccountQuota => ({ status: "unavailable", ordinaryUsageAllowed: null, buckets: [],
@@ -103,7 +103,8 @@ export async function readAntigravityCatalog(command: string, cwd: string, signa
     quota: !signal.aborted && quotaReply.status === "fulfilled" ? parseAntigravityQuota(quotaReply.value) : unavailableQuota() };
 }
 
-/** Explicit fail-closed gate until a native permission roundtrip is verified. Never starts a process. */
+/** agy stream-json rejects control_request/control_response (verified with 1.2.15).
+ * Official headless docs offer prompts only, so concrete approvals cannot be forwarded. */
 export class AntigravityWorker {
   closed: Promise<void>;
   constructor(_command: string, _run: Run, _cwd: string, callbacks: NativeCallbacks) {
