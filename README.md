@@ -14,9 +14,9 @@ The Mac client is written in SwiftUI. It uses native sidebar navigation, menus, 
 
 The current Apple Silicon build is a development preview. Public signing and automatic app updates need an Apple Developer ID certificate. See [build and installation steps](docs/MACOS_APP.md), including the native features still being added. The terminal installer below remains available.
 
-Source is beta.40. The MacBook app and its local service are beta.39 development
+Source is beta.40. The MacBook app and its local service are beta.40 development
 previews. Public downloads, the global CLI and the normal Mac mini service remain
-beta.33. Beta.40 is packaged locally; installation and GUI acceptance are pending. Signed distribution and signed app updates remain unfinished.
+beta.33. Beta.40 is installed locally; full GUI acceptance remains pending. Signed distribution and signed app updates remain unfinished.
 
 ### Try the local preview
 

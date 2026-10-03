@@ -2,7 +2,7 @@
 
 Only the new implementation is listed. Checked items have source and bounded
 validation; full native GUI acceptance remains open. Source is beta.40. The
-installed MacBook app and service are beta.39; public and Mac mini releases are
+installed MacBook app and service are beta.40; public and Mac mini releases are
 beta.33. Signed public release is pending. Evidence: [docs/VALIDATION.md](docs/VALIDATION.md).
 
 ## Working
@@ -114,7 +114,7 @@ Plan: [docs/ONBOARDING_PLAN.md](docs/ONBOARDING_PLAN.md).
 
 ## Native Mac preview
 
-Plan: [docs/DESKTOP_PLAN.md](docs/DESKTOP_PLAN.md). Design: [docs/NATIVE_DESIGN.md](docs/NATIVE_DESIGN.md). Source beta.40 has bounded adapter and session checks. Beta.39 is installed locally; beta.40 is packaged locally. Full GUI acceptance is pending. Evidence: [beta.40 validation](docs/VALIDATION.md#adapters-and-claude-session-signals--beta40).
+Plan: [docs/DESKTOP_PLAN.md](docs/DESKTOP_PLAN.md). Design: [docs/NATIVE_DESIGN.md](docs/NATIVE_DESIGN.md). Source beta.40 has bounded adapter and session checks. Beta.40 is installed locally. Full GUI acceptance is pending. Evidence: [beta.40 validation](docs/VALIDATION.md#adapters-and-claude-session-signals--beta40).
 
 - [x] SwiftUI build
 - [x] Local boundary checks

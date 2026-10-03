@@ -18,7 +18,7 @@ Muse catalog discovery independently calls the documented native [`usage/read`](
 
 Claude session signals are optional, reviewed plugin hooks. The source can show responding, permission waiting, idle and ended states without saving prompts or transcripts. Real hook proof covers SessionStart, UserPromptSubmit and SessionEnd in a private profile; permission waiting, Stop and StopFailure still lack real hook proof. Automatic observation across all harnesses remains unfinished. OpenCode 2 has a bounded real worker proof and a separate native MCP connection proof; those checks do not establish native GUI acceptance.
 
-The installed MacBook app and its service are beta.39. Public downloads and the normal Mac mini service remain beta.33. Beta.40 is packaged locally; it has not been installed or accepted in the GUI.
+The installed MacBook app and its service are beta.40. Public downloads and the normal Mac mini service remain beta.33. Beta.40 is installed locally; full GUI acceptance remains open.
 
 ## Release gates
 

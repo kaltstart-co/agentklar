@@ -4,7 +4,7 @@ Verified across 2026-10-01 to 2026-10-03 using Node 24.21.0. The old application
 
 ## Adapters and Claude session signals — beta.40
 
-Source is beta.40. The installed MacBook app and its local service are beta.39 development previews. Public downloads, the global CLI and the normal Mac mini service remain beta.33. Beta.40 is packaged locally. No beta.40 installation, GUI acceptance or public release is claimed.
+Source is beta.40. The installed MacBook app and its local service are beta.40 development previews. Public downloads, the global CLI and the normal Mac mini service remain beta.33. Beta.40 is packaged locally. Local installation is verified; full GUI acceptance and public release remain open.
 
 The final local run passed all 353 service tests with zero failures, skips or cancellations. TypeScript checks, the production build, Foundation checks, the Swift release build and seven offline release checks passed. Logs are `/private/tmp/agentklar-beta40-final-tests.log`, `agentklar-beta40-final-build.log`, `agentklar-beta40-foundation.log`, `agentklar-beta40-swift.log` and `agentklar-beta40-release-tests.log`. The offline release checks use fixtures; they do not sign an app or contact Apple's notarization service.
 
@@ -56,9 +56,26 @@ started, and owned test processes and files were removed. Evidence:
 startup on this Mac; it does not prove clean physical hardware or GUI layout.
 
 Remote task history now uses flat selectable rows and one detail area. The final
-Swift build includes that change. GUI inspection is blocked because the native
-app-control tool returns no available window; AgentKlar remains running. The
-installed app has therefore not been replaced. Its version remains beta.39.
+Swift build includes that change. Before the installation below, GUI inspection
+was blocked because the app-control tool returned no available window.
+AgentKlar was still running, so the installed app remained beta.39 at that point.
+
+### Local installation, 2026-10-03
+
+The MacBook app was replaced after the user quit it. Deep signature verification
+and executable comparison passed, and the previous app was preserved in
+`~/Library/Application Support/AgentKlar/app-backups/20261003-130642-908cba7c/`.
+The native window opened and connected. Settings showed app beta.40 and service
+beta.39; the built-in reviewed runtime adoption completed and then showed both
+at beta.40. A private SQLite backup passed integrity checks. Project, run and
+approval rows match exactly after adoption: three projects, zero runs and zero
+approvals. This is a local development installation, not a signed public release.
+
+Connections recognized the existing Codex entry as an older bridge to this same
+service and offered Review update. Native app control disconnected while opening
+that review, and reconnecting failed. No bridge apply was performed in this
+installation. That reviewed connection update remains pending. The Work and
+Updates screens were inspected; full GUI acceptance remains open.
 
 ### Mac release and GUI gates
 
