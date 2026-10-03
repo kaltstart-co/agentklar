@@ -2,6 +2,92 @@
 
 Verified across 2026-10-01 to 2026-10-03 using Node 24.21.0. The old application was not used.
 
+## Remaining gates — beta.41
+
+Source is beta.41; the installed local app and service remain beta.40. The ten
+remaining items are still unchecked. The changes below close specific gaps;
+they do not establish every native integration or public release gate.
+
+The combined run passes all 356 service tests with zero failures or skips,
+TypeScript checks, production build, Swift release build, Foundation checks,
+nine offline release tests and package smoke with 27 MCP tools. The beta.41
+development app, ZIP and DMG built successfully; deep signature verification
+passes for the ad-hoc app. Package logs are
+`/private/tmp/agentklar-beta41-package.log` and
+`/private/tmp/agentklar-beta41-package-smoke.log`.
+
+| Gate | Current evidence | Needed to finish |
+| --- | --- | --- |
+| Account quotas | Native Codex/Claude reads; Muse last-seen and Antigravity grouped adapters | Verified account reads for the other providers; session tokens cannot substitute |
+| Gemini / Cursor proof | Official CLIs installed on MacBook; real ACP initialization passes | Native sign-in, then bounded real worker completion and permission tests |
+| ZCode worker | Actual 0.16.9 session offers no model; refused before prompt | Configure an available model in native ZCode, then real worker proof |
+| Antigravity worker | Actual 1.2.16 rejects control_response before any turn | A supported native permission reply protocol |
+| Native observation | Claude hooks; browser and authorized remote signal views | Reviewed per-harness installers and owned-session filtering for more harnesses |
+| Clean Mac setup | Fresh profile first launch/reopen; bundled runtime versions match | Signed install and startup on a clean Mac |
+| GUI acceptance | Installed app connected; Work, Instructions and Updates inspected | Complete GUI matrix, including actual reviews, edits and small windows |
+| Native parity | More session visibility; remote reads preserve explicit grant | Remaining owner Team/Models/Usage/config routes and GUI checks |
+| Signed distribution | CSR verifies; release pipeline guards | Developer ID Application certificate, notary profile, notarization and Gatekeeper proof |
+| Signed updates | Existing Sparkle archive/feed crypto proof; failure-safe feed staging | Signed public release and actual installed update round trip |
+
+### Worker prerequisites checked again
+
+Official Gemini CLI 0.62.0 and Cursor CLI 2026.10.01-e373342 are installed on the
+development MacBook. Existing discovery finds both with PATH `/usr/bin:/bin`.
+Their real ACP sessions reject startup because native authentication is missing.
+No model prompt, authenticate request or permission reply was sent. Sign in with
+`gemini` and `agent login`, respectively. The mini was not changed.
+
+ZCode 0.16.9 created an owned disposable session but returned no available model;
+the adapter refused before sending a prompt. Antigravity 1.2.16 returned an
+unsupported control-response error with zero turns. All owned test processes
+stopped. These are specific native blockers, not evidence that the desktop apps
+are logged out. CLI bootstrap may create ordinary default/cache metadata.
+Sanitized proof: `/private/tmp/agentklar-harness-proof-20261003/summary.json`.
+
+### Session visibility
+
+Browser Work now shows scoped Claude session signals, last-seen time and tracking
+status, with a trusted local disable action. The existing explicit remote
+workspaceRead grant returns at most 50 scoped metadata records. It returns no
+observation token, native session identifier, prompt, approval payload or worker
+configuration. The regression verifies denial without that grant, project
+isolation and zero created workers/approvals. Rendering tests cover stale signals
+and stopped tracking; they do not establish GUI acceptance.
+
+Remote native Work renders the returned signals in a separate selectable
+section. Its detail is read-only, shows last-seen/tracking state, and has no
+disable or approval action. Stale saved signals do not establish the current
+session state. Swift compilation passed; this view still needs GUI acceptance.
+
+### Release preparation and bundled startup
+
+Signed-feed preparation now verifies a private staged output before replacing
+the previous release, and restores the previous output if promotion fails.
+Appcasts must require ARM64 for the ARM64 archive. Nine offline release tests
+pass; these tests do not sign or notarize an app.
+
+A packaged beta.40 private-profile startup/reopen check additionally verified
+app, copied CLI and service versions match. External Node/npm/npx/AgentKlar
+sentinels were never invoked, zero workers started, and owned service cleanup
+passed. Evidence:
+`/private/tmp/agentklar-beta40-bundled-dependency-acceptance.json`.
+
+The same strengthened acceptance passed against the final beta.41 packaged app:
+first launch and reopen connected, retained one service-install identity, used
+only the copied bundled runtime, and started zero workers. Owned cleanup passed.
+Evidence: `/private/tmp/agentklar-beta41-bundled-acceptance.json`. This is still
+a private profile on this Mac, not clean physical hardware or GUI acceptance.
+
+The existing CSR is ready at
+`~/.agentklar/signing/developer-id/request.csr`. This Mac still has zero valid
+Developer ID identities and no stored AgentKlar-notary profile. Follow the
+[prepared Apple steps](MACOS_APP.md#connect-an-existing-paid-apple-developer-membership). The paid
+membership and existing Sparkle key do not replace these two prerequisites.
+
+Native app control disconnected again while opening Review update for the
+recognized older Codex bridge. No apply was performed. The connection review and
+full GUI matrix remain pending; no app crash report was found.
+
 ## Adapters and Claude session signals — beta.40
 
 Source is beta.40. The installed MacBook app and its local service are beta.40 development previews. Public downloads, the global CLI and the normal Mac mini service remain beta.33. Beta.40 is packaged locally. Local installation is verified; full GUI acceptance and public release remain open.

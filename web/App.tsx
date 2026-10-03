@@ -1,3 +1,4 @@
+import { NativeSessions } from "./NativeSessions.js";
 import { ArrowUpLeft, BookOpen, Boxes, ChartNoAxesCombined, FileText, FolderOpen, ListTodo, Plus, Search, Settings2, Users, ChevronRight } from "lucide-react";
 import { HarnessIcon } from "./HarnessIcon.js";
 import { workerHarnesses } from "../src/contracts.js";
@@ -668,6 +669,8 @@ export function App() {
                       })}>Clear lead</Button>}
                   </p>
                   <ProjectHandoff key={`handoff-${project.id}`} projectId={project.id} connected={connected} request={api} onSelectRun={setRunId} ownerLabel={id => snapshot.peers?.find(peer => peer.deviceId === id)?.label || (snapshot.device?.id === id ? snapshot.device.label : "Other computer")} />
+                  <NativeSessions projectId={project.id} sessions={snapshot.observedSessions || []} connected={connected} busy={busy}
+                    onDisable={() => void act(async () => { await api(`/projects/${project.id}/observations/disable`, {}); })} />
                   <div className="work-toolbar">
                     <TextInput
                       id="task-search"

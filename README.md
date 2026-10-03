@@ -14,9 +14,15 @@ The Mac client is written in SwiftUI. It uses native sidebar navigation, menus, 
 
 The current Apple Silicon build is a development preview. Public signing and automatic app updates need an Apple Developer ID certificate. See [build and installation steps](docs/MACOS_APP.md), including the native features still being added. The terminal installer below remains available.
 
-Source is beta.40. The MacBook app and its local service are beta.40 development
+Source is beta.41. The MacBook app and its local service are beta.40 development
 previews. Public downloads, the global CLI and the normal Mac mini service remain
-beta.33. Beta.40 is installed locally; full GUI acceptance remains pending. Signed distribution and signed app updates remain unfinished.
+beta.33. Full GUI acceptance remains pending. Signed distribution and signed app updates remain unfinished.
+
+Beta.41 adds browser and authorized remote views of Claude session signals,
+stronger bundled-startup checks, and guarded signed-feed preparation.
+Gemini and Cursor CLIs are installed on the development MacBook and discovered
+without a shell PATH. Both need native sign-in before real worker tests can run.
+These harnesses are separate user installations, not bundled inside AgentKlar.
 
 ### Try the local preview
 

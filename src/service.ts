@@ -328,7 +328,7 @@ export function createService(
       resultTruncated: !!run.resultTruncated || run.result.length > 8000,
       effectiveModel: run.effectiveModel, tokens: run.tokens, createdAt: run.createdAt, updatedAt: run.updatedAt,
     })),
-    activities: activities.list(project.id).slice(0, 50), context: store.context(project.id),
+    activities: activities.list(project.id).slice(0, 50), observedSessions: observations.list(project.id).slice(0, 50), context: store.context(project.id),
   }));
   function registerProject(input: z.infer<typeof onboardingProjectInput>) {
     let path: string;

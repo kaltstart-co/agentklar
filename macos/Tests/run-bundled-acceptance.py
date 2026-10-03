@@ -23,6 +23,13 @@ home = work / "home"
 service_home = home / "service"
 home.mkdir(mode=0o700)
 (home / "fixture-project").mkdir(mode=0o700)
+# Detect accidental dependence on a user-installed Node, npm, or AgentKlar launcher.
+poison_bin = home / ".local/bin"
+poison_bin.mkdir(parents=True, mode=0o700)
+for tool in ("node", "npm", "npx", "agentklar"):
+    sentinel = poison_bin / tool
+    sentinel.write_text('#!/bin/sh\nprintf "%s\\n" "$0" >> "$HOME/forbidden-global-tool-used"\nexit 91\n')
+    sentinel.chmod(0o700)
 for folder in ("codex", "claude"):
     (home / folder).mkdir(mode=0o700)
 with socket.socket() as listener:
@@ -47,6 +54,8 @@ try:
             raise RuntimeError(f"{phase} acceptance failed (exit {result.returncode}); output retained only inside private profile")
         phase_report = json.loads(result.stdout.strip().splitlines()[-1])
         report["phases"].append(phase_report)
+        if (home / "forbidden-global-tool-used").exists():
+            raise RuntimeError("Acceptance invoked an external Node/npm/AgentKlar launcher")
         journal = json.loads((service_home / "launchd-install.json").read_text())
         if journal["home"] != str(service_home):
             raise RuntimeError("Install escaped private service home")
@@ -62,6 +71,7 @@ try:
             raise RuntimeError("Launched service did not retain private HOME")
         if startup["ProgramArguments"][0] != str(Path(phase_report["launcher"]).parents[2] / "bin/node"):
             raise RuntimeError("Service did not use the copied bundled Node")
+    report["externalRuntimeToolsInvoked"] = False
     report["passed"] = True
 finally:
     journal_file = service_home / "launchd-install.json"

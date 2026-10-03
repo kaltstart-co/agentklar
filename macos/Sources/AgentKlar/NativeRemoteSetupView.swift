@@ -309,8 +309,19 @@ struct NativeRemoteProjectView: View {
         VStack(alignment: .leading, spacing: 20) {
             let runs = workspace["runs"].array ?? []
             let activities = workspace["activities"].array ?? []
-            if runs.isEmpty && activities.isEmpty {
+            let sessions = (workspace["observedSessions"].array ?? []).filter { $0["projectId"].string == project["id"].string }
+            if runs.isEmpty && activities.isEmpty && sessions.isEmpty {
                 Text("No saved tasks on this owner project.").foregroundStyle(.secondary)
+            }
+            if !sessions.isEmpty {
+                NativeSectionTitle(title: "Native sessions", subtitle: "Latest 50 saved session signals")
+                Text("Session signals do not confirm task completion or passing checks.").font(NativeStyle.caption).foregroundStyle(.secondary)
+                VStack(spacing: 4) {
+                    ForEach(sessions, id: \.selfID) { session in
+                        remoteRecordRow(id: "session:" + session.selfID, harness: session["harness"].string ?? "claude",
+                            title: "Claude Code session", state: NativeObservedSessionDetail.stateLabel(session) + " · " + NativeObservedSessionSignals.trackingStatus(session))
+                    }
+                }
             }
             if !runs.isEmpty {
                 NativeSectionTitle(title: "Workers", subtitle: "Latest 50 saved tasks")
@@ -330,7 +341,10 @@ struct NativeRemoteProjectView: View {
                     }
                 }
             }
-            if let run = runs.first(where: { "worker:" + $0.selfID == selectedRemoteRecord }) {
+            if let session = sessions.first(where: { "session:" + $0.selfID == selectedRemoteRecord }) {
+                Divider()
+                NativeObservedSessionSignals(session: session, remote: true)
+            } else if let run = runs.first(where: { "worker:" + $0.selfID == selectedRemoteRecord }) {
                 Divider()
                 NativeSectionTitle(title: NativeTaskTitle.text(run["prompt"].string), subtitle: "Saved worker details")
                 Text(run["prompt"].string ?? "").textSelection(.enabled)

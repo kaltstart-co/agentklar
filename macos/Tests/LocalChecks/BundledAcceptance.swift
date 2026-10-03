@@ -19,6 +19,8 @@ import Foundation
         let launcher = runtime.launcher!
         try expect(launcher.path.hasPrefix(home.path + "/Library/Application Support/AgentKlar/runtimes/"), "Runtime escaped private cache")
         let version = try await runtime.runCLI(["--version"])
+        guard let appVersion = info["AgentKlarReleaseVersion"] as? String else { throw LocalError.message("App release version is missing") }
+        try expect(version.trimmingCharacters(in: .whitespacesAndNewlines) == appVersion, "Copied CLI version differs from app version")
         let before = try await runtime.runCLI(["service", "status"])
         if args[3] == "first" { try expect(before.trimmingCharacters(in: .whitespacesAndNewlines) == "AgentKlar background startup is not installed.", "First launch reused an install") }
         else { try expect(LocalBoundary.idleService(before), "Reopen did not preserve idle managed service") }
@@ -26,6 +28,8 @@ import Foundation
         await client.connect()
         try expect(client.connected && client.hasLoadedWorkspace, "Native connection failed: " + client.error)
         try expect(client.runs.isEmpty, "Acceptance unexpectedly started workers")
+        let updateStatus = try await client.request("/update")
+        try expect(updateStatus["current"].string == appVersion, "Connected service version differs from app version")
         let fixture = home.appendingPathComponent("fixture-project")
         if args[3] == "first" {
             _ = try await client.request("/projects", body: ["name": "Standalone acceptance", "path": fixture.path])
@@ -34,7 +38,7 @@ import Foundation
         try expect((snapshot["projects"].array ?? []).contains { $0["path"].string == fixture.path }, "Saved fixture did not survive reopen")
         let after = try await runtime.runCLI(["service", "status"])
         try expect(LocalBoundary.idleService(after), "Service is not idle")
-        let report: [String: Any] = ["phase": args[3], "runtimeVersion": version.trimmingCharacters(in: .whitespacesAndNewlines), "connected": client.connected, "launcher": launcher.path, "workersStarted": 0]
+        let report: [String: Any] = ["phase": args[3], "runtimeVersion": version.trimmingCharacters(in: .whitespacesAndNewlines), "connected": client.connected, "launcher": launcher.path, "workersStarted": 0, "serviceVersion": updateStatus["current"].string ?? "unknown"]
         let data = try JSONSerialization.data(withJSONObject: report, options: [.sortedKeys])
         print(String(decoding: data, as: UTF8.self))
     }

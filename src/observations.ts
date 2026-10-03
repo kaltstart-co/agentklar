@@ -16,6 +16,7 @@ export type ObservedSession = {
   state: "idle" | "working" | "needs_attention" | "ended";
   event: typeof observationEvents[number]; createdAt: string; observedAt: string;
 };
+export type ObservedSessionView = ObservedSession & { recent: boolean; trackingEnabled: boolean };
 type Grant = { projectId: string; ownerId: string; root: string; tokenHash: string; enabled: boolean };
 
 /** Native lifecycle evidence only. Silence and Stop never mean a task succeeded. */

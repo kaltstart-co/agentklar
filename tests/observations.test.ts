@@ -122,3 +122,32 @@ test("observation endpoint cannot authorize any other API or alter permissions",
     assert.equal((await send(event(path))).status, 403); assert.equal(service.store.runs().length, 0); assert.equal(service.store.approvals().length, 0);
   } finally { await service.close(); rmSync(root, { recursive: true, force: true }); }
 });
+
+
+test("remote workspace observation metadata needs its viewing grant and reveals no capability", async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "observation-remote-"))), path = join(root, "project"); mkdirSync(path);
+  const port = 4317, service = createService(join(root, "service"), port, () => { throw Error("No worker may start"); }, null, null);
+  try {
+    const otherPath = join(root, "other"); mkdirSync(otherPath);
+    const p = project(path), other = project(otherPath), token = randomBytes(32).toString("hex"), observations = new NativeObservations(service.store);
+    service.store.saveProject(p); service.store.saveProject(other); observations.enable(p, token, "fixture"); observations.accept(p.id, token, event(path));
+    const sourceDeviceId = randomUUID(), base = `http://127.0.0.1:${port}`;
+    const opened = await service.app.request(service.setupUrl), cookie = opened.headers.get("set-cookie")!.split(";")[0];
+    const headers = { cookie, Origin: base, "Content-Type": "application/json" };
+    const snapshot = await (await service.app.request(base + "/api/snapshot", { headers })).json();
+    const grant = async (workspaceRead: boolean) => (await service.app.request(base + "/api/remote-settings/grant", {
+      method: "POST", headers, body: JSON.stringify({ sourceDeviceId, rootPath: root, workspaceRead }),
+    })).json();
+    const read = (grant: { grantId: string; token: string }, projectId: string) => service.app.request(base + "/api/peer-setup", {
+      method: "POST", headers: { Authorization: `Bearer ${service.bearer}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ channel: "setup", version: 1, sourceDeviceId, targetDeviceId: snapshot.device.id,
+        grantId: grant.grantId, token: grant.token, requestId: randomUUID(), operation: "projectWorkspace", payload: { projectId } }),
+    });
+    assert.equal((await read(await grant(false), p.id)).status, 403);
+    const allowed = await grant(true), response = await read(allowed, p.id); assert.equal(response.status, 200);
+    const body = await response.json(); assert.equal(body.observedSessions.length, 1); assert.equal(body.observedSessions[0].harness, "claude");
+    assert.doesNotMatch(JSON.stringify(body), new RegExp(token + "|tokenHash|ownerId|PRIVATE_PROMPT"));
+    assert.equal((await (await read(allowed, other.id)).json()).observedSessions.length, 0);
+    assert.equal(service.store.runs().length, 0); assert.equal(service.store.approvals().length, 0);
+  } finally { await service.close(); rmSync(root, { recursive: true, force: true }); }
+});

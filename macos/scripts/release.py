@@ -5,6 +5,8 @@ import hashlib
 import json
 from pathlib import Path
 import subprocess
+import tempfile
+from uuid import uuid4
 import xml.etree.ElementTree as ET
 
 FEED_URL = "https://agentklar-seven.vercel.app/appcast.xml"
@@ -69,32 +71,39 @@ def validate_feed(feed, archive, build):
         raise ValueError("Appcast needs a valid EdDSA archive signature.")
     if item.findtext(SPARKLE + "minimumSystemVersion") not in ("14.0", "14.0.0"):
         raise ValueError("Appcast minimum macOS version differs from this app.")
+    if item.findtext(SPARKLE + "hardwareRequirements") != "arm64":
+        raise ValueError("Appcast must require Apple Silicon for this archive.")
     return enclosure.get(SPARKLE + "edSignature")
 
 
 def prepare_feed(package, out, archive, dmg, build, environment):
     import shutil
-    staging = out / "signed-release"
-    staging.mkdir(exist_ok=True)
-    updates = staging / "downloads"
-    updates.mkdir(exist_ok=True)
-    # A fresh feed avoids accidentally shipping preview or stale archives.
-    for old in updates.iterdir():
-        if old.is_file():
-            old.unlink()
-    copied = updates / archive.name
-    shutil.copy2(archive, copied)
-    tools = package / ".build/artifacts/sparkle/Sparkle/bin"
-    account = environment.get("AGENTKLAR_SPARKLE_ACCOUNT", "ed25519")
-    feed = staging / "appcast.xml"
-    if feed.exists():
-        feed.unlink()
-    subprocess.run([str(tools / "generate_appcast"), "--account", account, "--download-url-prefix", DOWNLOAD_URL, "--maximum-deltas", "0", "-o", str(feed), str(updates)], check=True)
-    signature = validate_feed(feed, copied, build)
-    subprocess.run([str(tools / "sign_update"), "--account", account, "--verify", str(copied), signature], check=True)
-    subprocess.run([str(tools / "sign_update"), "--account", account, str(feed)], check=True)
-    subprocess.run([str(tools / "sign_update"), "--account", account, "--verify", str(feed)], check=True)
-    shutil.copy2(dmg, updates / dmg.name)
-    checksums = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in (copied, updates / dmg.name, feed)}
-    (staging / "release.json").write_text(json.dumps({"build": str(build), "feedURL": FEED_URL, "sha256": checksums}, indent=2) + "\n")
-    return staging
+    # Build and verify privately first. A failure leaves the previous release intact.
+    with tempfile.TemporaryDirectory(prefix="signed-release-", dir=out) as temporary:
+        staging = Path(temporary) / "release"
+        updates = staging / "downloads"
+        updates.mkdir(parents=True)
+        copied = updates / archive.name
+        shutil.copy2(archive, copied)
+        tools = package / ".build/artifacts/sparkle/Sparkle/bin"
+        account = environment.get("AGENTKLAR_SPARKLE_ACCOUNT", "ed25519")
+        feed = staging / "appcast.xml"
+        subprocess.run([str(tools / "generate_appcast"), "--account", account, "--download-url-prefix", DOWNLOAD_URL, "--maximum-deltas", "0", "-o", str(feed), str(updates)], check=True)
+        signature = validate_feed(feed, copied, build)
+        subprocess.run([str(tools / "sign_update"), "--account", account, "--verify", str(copied), signature], check=True)
+        subprocess.run([str(tools / "sign_update"), "--account", account, str(feed)], check=True)
+        subprocess.run([str(tools / "sign_update"), "--account", account, "--verify", str(feed)], check=True)
+        shutil.copy2(dmg, updates / dmg.name)
+        checksums = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in (copied, updates / dmg.name, feed)}
+        (staging / "release.json").write_text(json.dumps({"build": str(build), "feedURL": FEED_URL, "sha256": checksums}, indent=2) + "\n")
+        destination = out / "signed-release"
+        previous = out / ("signed-release-previous-" + uuid4().hex)
+        if destination.exists():
+            destination.rename(previous)
+        try:
+            staging.rename(destination)
+        except BaseException:
+            if previous.exists():
+                previous.rename(destination)
+            raise
+        return destination

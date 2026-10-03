@@ -1,3 +1,4 @@
+import type { ObservedSessionView } from "./observations.ts";
 import type { BenchmarkEvidence, TaskType } from "./benchmarks.ts";
 import type { ToolEvidence, ToolCapability } from "./capabilities.ts";
 export const workerHarnesses = ["codex", "claude", "muse", "opencode", "gemini", "cursor-agent", "zcode"] as const;
@@ -184,6 +185,7 @@ export type Harness = {
   reason: string;
 };
 export type Snapshot = {
+  observedSessions?: ObservedSessionView[];
   device?: { id: string; label: string; platform: string };
   peers?: { id: string; label: string; deviceId: string; projectId: string; remoteProjectId: string }[];
   remoteDispatches?: RemoteDispatch[];
